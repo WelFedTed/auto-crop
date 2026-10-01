@@ -58,19 +58,40 @@ jobs:
         run: cargo xtask build-native
       - name: Check the built libraries (no GPL encoders, allowed dependencies, libjpeg-turbo floor)
         run: cargo xtask check-native
-      - name: Negative test - a planted x265 symbol must make check-native fail
+      - name: Negative tests - a planted x265 symbol and an old libjpeg-turbo must make check-native fail
         shell: bash
         run: |
-          rm -rf target/native-neg && mkdir -p target/native-neg/lib
-          cp -r target/native/prefix/include target/native-neg/include
           lib=$(find target/native/prefix \( -name 'turbojpeg.dll' -o -name 'libturbojpeg*.so*' -o -name 'libturbojpeg*.dylib' \) | head -1)
           test -n "$lib"
-          cp "$lib" "target/native-neg/lib/$(basename "$lib")"
-          printf 'x265_encoder_open' >> "target/native-neg/lib/$(basename "$lib")"
-          if cargo xtask check-native --prefix target/native-neg; then
+          # 1) planted x265 symbol
+          rm -rf target/native-neg1 && mkdir -p target/native-neg1/lib
+          cp -r target/native/prefix/include target/native-neg1/include
+          cp "$lib" "target/native-neg1/lib/$(basename "$lib")"
+          printf 'x265_encoder_open' >> "target/native-neg1/lib/$(basename "$lib")"
+          if out=$(cargo xtask check-native --prefix target/native-neg1 2>&1); then
             echo "planted x265 symbol was NOT detected"; exit 1
           fi
+          echo "$out" | grep -q "x265_" || { echo "failed for the wrong reason: $out"; exit 1; }
           echo "planted x265 symbol was rejected, as required"
+          # 2) libjpeg-turbo 3.1.0 (below the 3.1.4 floor)
+          rm -rf target/native-neg2 && cp -r target/native/prefix target/native-neg2
+          sed -i.bak 's/LIBJPEG_TURBO_VERSION_NUMBER *[0-9][0-9]*/LIBJPEG_TURBO_VERSION_NUMBER 3001000/' target/native-neg2/include/jconfig.h
+          grep -q "3001000" target/native-neg2/include/jconfig.h
+          if out=$(cargo xtask check-native --prefix target/native-neg2 2>&1); then
+            echo "an old libjpeg-turbo was NOT rejected"; exit 1
+          fi
+          echo "$out" | grep -q "below the floor" || { echo "failed for the wrong reason: $out"; exit 1; }
+          echo "libjpeg-turbo 3.1.0 was rejected, as required"
+      - name: libjpeg-turbo spike (scaled decode, lossless rotate, MCU-aligned crop)
+        shell: bash
+        run: |
+          export AUTOCROP_NATIVE_PREFIX="${GITHUB_WORKSPACE}/target/native/prefix"
+          export LD_LIBRARY_PATH="${GITHUB_WORKSPACE}/target/native/prefix/lib:${LD_LIBRARY_PATH:-}"
+          export DYLD_LIBRARY_PATH="${GITHUB_WORKSPACE}/target/native/prefix/lib:${DYLD_LIBRARY_PATH:-}"
+          if command -v cygpath >/dev/null 2>&1; then
+            export PATH="$(cygpath -u "${GITHUB_WORKSPACE}")/target/native/prefix/bin:$PATH"
+          fi
+          cargo test --manifest-path spikes/turbojpeg/Cargo.toml -- --nocapture
       - name: List installed libraries
         shell: bash
         run: |

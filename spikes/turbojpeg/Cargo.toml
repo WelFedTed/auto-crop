@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+# Throwaway spike (ROADMAP M0.44): our own libjpeg-turbo >= 3.1.4 through a hand-written
+# TurboJPEG 3 binding. Never part of the shipping workspace or default CI.
+[workspace]
+
+[package]
+name = "spike-turbojpeg"
+version = "0.0.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+build = "build.rs"
+
+[profile.release]
+panic = "unwind"
