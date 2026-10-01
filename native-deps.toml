@@ -69,7 +69,7 @@ sha256 = "6f30092cef9fb839779646608f4ee14ae3cbac989c47fa05e841b0841f09878e"
 license = "IJG AND BSD-3-Clause AND Zlib"
 kind = "source"
 build = "cmake"
-flags = ["-DENABLE_SHARED=ON", "-DENABLE_STATIC=OFF", "-DWITH_JAVA=OFF", "-DWITH_TURBOJPEG=ON", "-DREQUIRE_SIMD=ON"]
+flags = ["-DENABLE_SHARED=ON", "-DENABLE_STATIC=OFF", "-DWITH_JAVA=OFF", "-DWITH_TURBOJPEG=ON", "-DREQUIRE_SIMD=ON", "-DCMAKE_POSITION_INDEPENDENT_CODE=ON"]
 notes = "needs NASM on x86; the turbojpeg crate vendors an older version, so we link our own"
 
 [[lib]]
