@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+# Builds the pinned native libraries (decode-only libheif, libde265, libjpeg-turbo) on three OSes
+# (ROADMAP M0.40, M0.41, M0.44). Nothing from this build is distributed.
+name: Native libraries
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "37 6 * * 3"
+  push:
+    branches: [main]
+    paths:
+      - "native-deps.toml"
+      - "xtask/src/native.rs"
+      - ".github/workflows/native.yml"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, macos-latest, ubuntu-22.04]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain report
+        shell: bash
+        run: cargo xtask doctor || true
+      - name: Install NASM (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command nasm -ErrorAction SilentlyContinue)) { choco install nasm -y --no-progress }
+          $dir = "C:\Program Files\NASM"
+          if (Test-Path $dir) { $dir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8 }
+      - name: Install NASM (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y nasm
+      - name: Build pinned native libraries
+        run: cargo xtask build-native
+      - name: List installed libraries
+        shell: bash
+        run: |
+          find target/native/prefix -maxdepth 3 \( -name "*.dll" -o -name "*.so*" -o -name "*.dylib" -o -name "*.lib" -o -name "*.a" \) | sort

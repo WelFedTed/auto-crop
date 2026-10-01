@@ -9,6 +9,7 @@ mod deps;
 mod doctor;
 mod identity;
 mod licenses;
+mod native;
 mod profiles;
 mod provenance;
 mod roadmap;
@@ -34,6 +35,9 @@ Commands:
   provenance [--render]
         Validate the provenance log; --render regenerates the CSV/MD views (otherwise they
         must be up to date).
+  build-native [--only a,b]
+        Fetch the pinned native libraries (SHA-256 verified, wrong hash refused) and build
+        libde265, libjpeg-turbo and libheif with CMake into target/native/prefix.
   licenses --check
         Require about.toml accepted licences to equal the deny.toml allow-list.
   check-dco [<rev-range>]
@@ -57,6 +61,7 @@ fn main() -> ExitCode {
         "doctor" => doctor::run(&rest),
         "provenance" => provenance::run(&rest),
         "licenses" => licenses::run(&rest),
+        "build-native" => native::run(&rest),
         "check-dco" => dco::run(&rest),
         "deny-selftest" => deny_selftest::run(&rest),
         "check-profiles" => profiles::run(&rest),
