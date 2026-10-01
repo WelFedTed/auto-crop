@@ -24,12 +24,19 @@ env:
 
 jobs:
   build:
-    name: ${{ matrix.os }}
+    name: ${{ matrix.os }}${{ matrix.best-effort && ' (best-effort)' || '' }}
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.best-effort }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-2025, macos-latest, ubuntu-22.04]
+        include:
+          - { os: windows-2025, best-effort: false }
+          - { os: macos-latest, best-effort: false }
+          - { os: ubuntu-22.04, best-effort: false }
+          - { os: ubuntu-24.04, best-effort: true }
+          - { os: ubuntu-22.04-arm, best-effort: true }
+          - { os: windows-11-arm, best-effort: true }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
