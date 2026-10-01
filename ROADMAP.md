@@ -22,10 +22,10 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | Milestone | Title | Release | Platforms | Size | Progress |
 |---|---|---|---|---|---|
 | P | Planning | none | documents | - | 4 / 5 (80%) |
-| M0 | Foundations and week-1 spikes | none | CI only (Windows, macOS, Linux) | XL | 45 / 93 (48%) |
+| M0 | Foundations and week-1 spikes | none | CI only (Windows, macOS, Linux) | XL | 45 / 94 (47%) |
 | M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 0 / 94 (0%) |
 | M2 | Classical pipeline, safe writes and CLI | v0.1.0 | Windows 10/11 x64 | L | 0 / 91 (0%) |
-| M3 | GUI alpha: single-image editor | v0.2.0 | Windows 10/11 x64 | XL | 0 / 92 (0%) |
+| M3 | GUI alpha: single-image editor | v0.2.0 | Windows 10/11 x64 | XL | 0 / 93 (0%) |
 | M4 | ML detection, orientation and calibrated confidence | v0.3.0 | Windows 10/11 x64 | XL | 0 / 90 (0%) |
 | M5 | Batch review workflow, backups panel and trust features | v0.4.0 | Windows 10/11 x64 | L | 0 / 94 (0%) |
 | M6 | HEIC/HEIF, sandboxed decoding and format read breadth | v0.5.0 | Windows 10/11 x64 | XL | 0 / 96 (0%) |
@@ -39,7 +39,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | X | Continuous and cross-cutting | - | - | - | 0 / 42 (0%) |
 | X | Post-1.0 backlog (1.x) | - | - | - | 0 / 43 (0%) |
 | X | Spikes and open decisions | - | - | - | 0 / 28 (0%) |
-| **Total** | | | | | **49 / 1402 (3%)** |
+| **Total** | | | | | **49 / 1404 (3%)** |
 <!-- progress:end -->
 
 ## Why this order
@@ -158,6 +158,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [ ] **M0.69 Slint smoke (unconditional)** - About 1 day: Slint 1.18.1 (winit) on Windows plus one Linux setup: folder drop via the winit 0.30 `DroppedFile` workaround, 24 MP pan/zoom frame times, notes: no RTL mirroring (B20), non-OSI licence (B2); a switch needs owner waivers (A-10).
 - [ ] **M0.70 B8 verdict and GUI ADRs** - Once, before any UI: Slint only if Linux touch misses ~60 fps on the 24 MP proxy (median > 22 ms after shims, A-10) AND Slint passes the folder-drop test; else Tauri stays (touch best-effort). Tauri failing on Windows or macOS: no UI code, ask the owner.
 - [ ] **M0.71 ADR: transport and folder drop** - Tile payload, IPC p95 (with and without isolation), URL form per OS, CSP and capability outcome, webview-cache scan, Rust-side drop with opaque ids, enumerator rules for M3/M5 (no symlink following, depth cap). Accept: numbers and a go/no-go line.
+- [ ] **M0.80 Owner review of the GUI design canvas** - The clickable design canvas of PLAN 6.16 (home, batch review, adjust, convert, backups, settings, scan split, dark theme, tablet) is reviewed by the owner. Accept: each deviation listed in PLAN 6.16 is accepted, vetoed or turned into a PLAN 6 edit, and the outcome is noted there.
 ### Docs
 - [x] **M0.72 README** - Name paired with the tagline "Auto Crop - the offline batch fixer for scans, receipts and photos", pre-alpha status, privacy line, licence, PLAN/ROADMAP links and the B17 AI disclosure (PLAN 8.2.4; text identical in CONTRIBUTING). Accept: renders on GitHub, links resolve.
 - [ ] **M0.73 CONTRIBUTING, CODE_OF_CONDUCT** - CONTRIBUTING (doctor/devcontainer, "no C toolchain" is false, DCO, Conventional Commits, clean-room, AI-use, licences) plus the README AI disclosure and a "Ticking the ROADMAP" paragraph; Contributor Covenant. A clean Ubuntu 22.04 container builds.
@@ -508,6 +509,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [ ] **M3.44 Themes, motion and scale** - Light, Dark, System, High contrast themes; `forced-colors` (overlay in system colours) and `prefers-contrast`; `prefers-reduced-motion` plus an override removes fades, inertia, animated zoom; status never colour-only; UI scale 90-200%.
 - [ ] **M3.45 Save feedback and Issues tray** - Save bar with Restore original and a non-modal Issues tray of `ErrKind` errors (read, permission, size, cloud, in-use, disk, verify, backup failures) with Retry, Show in folder, Copy details. Pass: e2e per code: tray entry, no modal, original intact.
 - [ ] **M3.46 Report issue button** - `Report issue` (Settings, crash prompt): preview, redacted diagnostics (<= 4 KB) to the clipboard, then a pre-filled issue URL carrying only version, OS, webview, channel, error code via an allow-listed Rust command (B18). Pass: no path or file name in the URL.
+- [ ] **M3.84 Match the design canvas** - Screens follow the tokens, type, spacing, copy and states of PLAN 6.16 (light and dark), with fonts bundled locally; deviations are recorded in PLAN 6.16, not left in code. Pass: Playwright screenshots of Home, Batch review, Adjust, Convert, Backups and Settings reviewed against the canvas by the owner.
 - [ ] **M3.81 Opt-in tap undo and redo** - `Tap undo` switch (Settings > Input, default off): two-finger tap = undo, three-finger tap = redo in the recogniser; spike three-finger tap delivery in WebView2. Pass: a pinch never triggers undo in replays; buttons and Ctrl+Z stay primary; it persists.
 
 ### Accessibility and i18n

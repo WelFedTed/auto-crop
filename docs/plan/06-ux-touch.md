@@ -485,3 +485,32 @@ The owner-decision assumptions A-1 to A-12 are listed in 01 §1.7. This section 
 5. Confident results are saved crop-only; enhancement is applied afterwards on request.
 6. Backups default to the shared per-user store (02 §2.7) with a warning at 10 GB used or below 5 GB free and no size cap.
 7. Fluent as the message format, pending the spike.
+
+## 6.16 Visual design reference (design canvas)
+
+A clickable visual design of the screens in 6.3 was built on 2026-10-01 as a design canvas (a private artifact, owner access only): <https://claude.ai/artifact/3qmimSAb6smSL5LtfQTCKg>. It is a **reference for look, layout and copy, not a specification**: the decision log and sections 6.1 to 6.15 win wherever they differ. It uses synthetic data, a placeholder 24-image batch, and no engine. Because the link is private, the tokens below are the durable part.
+
+**Boards.** A Home (and A2 dark), B Batch review (clickable: filters, sort, size, strictness, selection, Accept with the unreviewed-items confirmation, Skip, Undo, Save all with its confirmation and summary; B2 dark), C Adjust (clickable: draggable corner and edge handles with a loupe, keyboard nudging, scrolling angle ruler, outline cycling, corner number fields, enhancement modes, Compare, zoom, undo and redo; C4 dark), C2 Review of a Failed item, C3 Adjust on a portrait tablet, D Convert / Save as, E Backups and Restore (restore, restore as copy, replace anyway, undo restore), F Settings, G first-write sheet and saved summary, H and H2 a multi-item scan (touching items, suggested split, merge and cut, first-split sheet, restoring a split scan).
+
+**Tokens (starting values, to be verified against the M3.48 contrast checklist).**
+
+| Role | Light | Dark |
+|---|---|---|
+| Window and surface | `#F2F3F5`, `#FFFFFF` | `#14171C`, `#1D2128` |
+| Line | `#DDE0E6` | `#2F3541` |
+| Text, secondary, tertiary | `#15181E`, `#4A5160`, `#5F6675` | `#ECEEF2`, `#B4BAC6`, `#9199A8` |
+| Accent (fill, tint) | `#2B4FD8`, `#E8EDFC` | `#3E63E6`, `#1B2438` (link and focus `#9DB4FF`) |
+| Good (text on tint) | `#0B5B33` on `#E3F4EA` | `#7FE0A8` on `#12301F` |
+| Check (text on tint) | `#7A4200` on `#FDF0D5` | `#F5C56B` on `#3A2A0A` |
+| Failed (text on tint) | `#A3201A` on `#FCE7E5` | `#FF9C94` on `#3F1613` |
+
+Type is IBM Plex Sans (400, 500, 600) with IBM Plex Mono for file names and numeric readouts (both OFL-1.1, allowed by the M3.67 font rule); the canvas loads them from Google Fonts, **the app must bundle them** (B18: no network). Radii are 8 px for controls, 10 to 12 px for cards and 16 px for dialogs; touch controls are 48 px and mouse controls 32 to 36 px (6.5); the three tiers always pair an icon with a word (6.7).
+
+**Deviations and additions to resolve before M3 builds on it.**
+
+1. The Adjust canvas is a dark neutral grey (`#2A2D34`) in both themes. 6.10 asks for a *mid*-grey so white paper edges stay visible; tune it on real receipts.
+2. New copy that needs `hold.*` or UI keys and an owner read: "Select shown", "Use this outline", "Try the other outline", "Treat as several items", "Accept split", "Cut between them", "Treat as one item", "Purge expired now" (6.2.7 says "Purge now"), and the Settings section name "System integration" (6.3 wireframe F says "Shell").
+3. The enhance bar shows only "Apply to all N" and "Undo"; the "Preview 3 samples" button of 6.8 is not drawn.
+4. Counts, scores and the Strict, Balanced and Aggressive cut-offs in the clickable grid are placeholders (0.95, 0.90, 0.80, the interim values of 6.2.4), not measurements.
+5. A split scan shows a number badge and colour per item; colour must never be the only cue, so the number stays.
+6. Not drawn: the Issues tray, the History drawer, the "Already processed" state, the Updates settings row, RTL and high-contrast themes, and the Windows 11 context-menu entry.
