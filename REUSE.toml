@@ -23,6 +23,8 @@ path = [
     "rust-toolchain.toml",
     "xtask/fixtures/**/Cargo.lock",
     "spikes/**/Cargo.lock",
+    "spikes/gui-tauri/**/*.json",
+    "spikes/gui-tauri/icons/**",
     ".devcontainer/devcontainer.json",
 ]
 precedence = "aggregate"

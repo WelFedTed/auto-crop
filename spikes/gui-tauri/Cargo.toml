@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+# Throwaway spike (ROADMAP M0.56-M0.64, ADR for M0.70): Tauri 2 + Svelte 5 prototype of the GUI
+# stack risks (24 MP-class view transform, quad handles, Pointer Events, frame stats).
+# Never part of the shipping workspace or default CI; the real shell is crates/shell (M3.02).
+[workspace]
+
+[package]
+name = "spike-gui-tauri"
+version = "0.0.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+tauri = { version = "=2.12.1", default-features = false, features = ["wry", "common-controls-v6", "compression"] }
+serde = { version = "1", features = ["derive"] }
+png = "0.17"
+getrandom = "0.3"
+
+[features]
+# Enabled for release-style runs so the embedded UI is served instead of the dev URL.
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }

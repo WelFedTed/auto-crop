@@ -14,3 +14,6 @@ __pycache__/
 spikes/inference/models/
 spikes/inference/out_*.f32
 spikes/inference/results.jsonl
+spikes/**/node_modules/
+spikes/gui-tauri/ui/dist/
+spikes/gui-tauri/gen/
