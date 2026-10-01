@@ -20,3 +20,4 @@ spikes/gui-tauri/gen/
 crates/shell/gen/
 ui/dist/
 ui/node_modules/
+spikes/**/target-dyn/
