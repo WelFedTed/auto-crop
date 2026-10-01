@@ -1,0 +1,2 @@
+# IDs retired from ROADMAP.md (one per line: ID, then an optional reason).
+# An ID that disappears from ROADMAP.md must be listed here or `cargo xtask roadmap-check --baseline` fails.

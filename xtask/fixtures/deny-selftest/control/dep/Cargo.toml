@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+[package]
+name = "fixture-clean-dep"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+publish = false

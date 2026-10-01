@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+[package]
+name = "auto-crop-engine"
+description = "Job queue, edit pipeline, safe writes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+auto-crop-core = { path = "../core" }
+auto-crop-codecs = { path = "../codecs" }
+auto-crop-imgproc = { path = "../imgproc" }
+
+[lints.rust]
+unsafe_code = "forbid"

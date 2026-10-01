@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+version = 1
+SPDX-PackageName = "auto-crop"
+SPDX-PackageSupplier = "WelFedTed"
+SPDX-PackageDownloadLocation = "https://github.com/WelFedTed/auto-crop"
+
+# Documentation, configuration and generated lock files that carry no inline header.
+[[annotations]]
+path = [
+    "**/*.md",
+    "docs/**",
+    ".github/**",
+    ".gitattributes",
+    ".gitignore",
+    "Cargo.lock",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "deny.toml",
+    "about.toml",
+    "about.hbs",
+    "rust-toolchain.toml",
+    "xtask/fixtures/**/Cargo.lock",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Auto Crop contributors"
+SPDX-License-Identifier = "MIT OR Apache-2.0"

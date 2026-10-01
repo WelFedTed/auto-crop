@@ -1,0 +1,5 @@
+# Default owner for everything while the project has a single maintainer.
+*                       @WelFedTed
+/docs/plan/             @WelFedTed
+/.github/               @WelFedTed
+/packaging/flathub/     @WelFedTed

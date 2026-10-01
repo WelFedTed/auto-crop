@@ -1,0 +1,97 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, macos-latest, ubuntu-22.04]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Install cargo tools
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        with:
+          tool: cargo-deny,cargo-nextest,cargo-about
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: rustc --version && cargo --version
+        shell: bash
+      - name: Toolchain equals the pin
+        shell: bash
+        run: |
+          pin=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)
+          test "$(rustc --version | cut -d' ' -f2)" = "$pin"
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo nextest run --workspace
+      - name: Release-profile panic test (panic = "unwind" must hold in release)
+        run: cargo nextest run -p auto-crop-engine --release
+      - run: cargo xtask check-deps
+      - run: cargo xtask check-profiles
+      - name: ROADMAP.md lint
+        shell: bash
+        run: |
+          if git rev-parse --verify -q HEAD^ >/dev/null; then
+            cargo xtask roadmap-check --baseline HEAD^
+          else
+            cargo xtask roadmap-check
+          fi
+      - run: cargo deny check
+      - run: cargo xtask deny-selftest
+
+  reuse:
+    name: reuse lint
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: pipx run "reuse[charset-normalizer]" lint
+
+  dco:
+    name: DCO sign-off
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Check Signed-off-by trailers
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            range="$BASE_SHA..HEAD^2"
+            git rev-parse -q --verify HEAD^2 >/dev/null || range="$BASE_SHA..HEAD"
+          elif [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
+            range="$BEFORE..$HEAD_SHA"
+          else
+            range="HEAD^..HEAD"
+          fi
+          echo "range: $range"
+          cargo xtask check-dco "$range"

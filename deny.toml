@@ -1,0 +1,56 @@
+# Dependency policy (decision B2; ROADMAP M0.18). Enforced in CI by `cargo deny check`.
+# MIT OR Apache-2.0 project: no AGPL, GPL or non-commercial dependencies.
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+ignore = []
+
+[licenses]
+version = 2
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "0BSD",
+    "CC0-1.0",
+    "Unicode-3.0",
+    "BSL-1.0",
+    "MPL-2.0",
+    "IJG",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+deny = [
+    # AGPL / GPL / otherwise unusable (decision log B2, D2)
+    { crate = "heic", reason = "AGPL" },
+    { crate = "heic-decoder", reason = "AGPL" },
+    { crate = "dssim-core", reason = "AGPL" },
+    { crate = "jpegxl-rs", reason = "GPL-3.0" },
+    { crate = "jpegxl-sys", reason = "GPL-3.0 wrapper" },
+    { crate = "birdcage", reason = "GPL-3.0" },
+    # x264 / x265 wrappers: GPL encoders must never be linked (B12)
+    { crate = "x264", reason = "GPL" },
+    { crate = "x265", reason = "GPL" },
+    { crate = "x264-sys", reason = "GPL" },
+    { crate = "x265-sys", reason = "GPL" },
+    # OpenCV is a dev-only test oracle outside the shipping workspace, never shipped
+    { crate = "opencv", reason = "dev-only oracle, never shipped" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

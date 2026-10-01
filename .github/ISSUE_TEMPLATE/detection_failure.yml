@@ -1,0 +1,49 @@
+name: Detection failure
+description: A crop, rotation, deskew or enhancement result was wrong
+labels: ["detection"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Sensitive images:** receipts and documents can contain personal data. Redact names, account numbers and addresses, or describe the image instead of attaching it. Never redact the paper edges, because they are what detection needs. Strip location data (GPS) before sharing photos.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of input was it?
+      options:
+        - Phone photo of a document or receipt
+        - Flatbed scan of a document
+        - Multi-photo flatbed scan
+        - General photo
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: confidence
+    attributes:
+      label: What did the app say?
+      options:
+        - Good (auto-accepted, but wrong)
+        - Check (held for review)
+        - Failed
+        - I do not know
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What went wrong?
+      description: For example crop cut off content, rotated the wrong way, text became unreadable.
+    validations:
+      required: true
+  - type: textarea
+    id: sample
+    attributes:
+      label: Sample
+      description: Attach a redacted or non-sensitive sample, or describe it (size, lighting, background).
