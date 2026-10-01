@@ -33,6 +33,15 @@ pub struct Lib {
     pub build: String,
     #[serde(default)]
     pub flags: Vec<String>,
+    /// Upstream GitHub repository (`owner/name`) checked by `native-watch`.
+    #[serde(default)]
+    pub watch: String,
+    /// Restrict `native-watch` to one release line such as `1.28`.
+    #[serde(default)]
+    pub watch_line: String,
+    /// `releases` (default) or `tags` for upstreams whose GitHub mirror has no real releases.
+    #[serde(default)]
+    pub watch_source: String,
 }
 
 #[derive(Deserialize)]
@@ -289,6 +298,9 @@ mod tests {
             kind: "source".into(),
             build: "cmake".into(),
             flags: vec![],
+            watch: String::new(),
+            watch_line: String::new(),
+            watch_source: String::new(),
         }
     }
 

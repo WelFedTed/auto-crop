@@ -11,6 +11,7 @@ mod doctor;
 mod identity;
 mod licenses;
 mod native;
+mod native_watch;
 mod profiles;
 mod provenance;
 mod roadmap;
@@ -42,6 +43,8 @@ Commands:
   build-native [--only a,b]
         Fetch the pinned native libraries (SHA-256 verified, wrong hash refused) and build
         libde265, libjpeg-turbo and libheif with CMake into target/native/prefix.
+  native-watch [--fail-on-stale] [--fake name=version]
+        Compare each pinned native library with the newest upstream release and print STALE lines.
   licenses --check
         Require about.toml accepted licences to equal the deny.toml allow-list.
   check-dco [<rev-range>]
@@ -67,6 +70,7 @@ fn main() -> ExitCode {
         "provenance" => provenance::run(&rest),
         "licenses" => licenses::run(&rest),
         "build-native" => native::run(&rest),
+        "native-watch" => native_watch::run(&rest),
         "check-dco" => dco::run(&rest),
         "deny-selftest" => deny_selftest::run(&rest),
         "check-profiles" => profiles::run(&rest),

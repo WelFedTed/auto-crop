@@ -25,3 +25,34 @@ jobs:
           tool: cargo-deny,cargo-audit
       - run: cargo deny check advisories
       - run: cargo audit
+
+  native-watch:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Self-test - a fake old pin must be flagged
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          cargo xtask native-watch --fake libheif=1.0.0 | tee fake.txt
+          grep -q "^STALE libheif " fake.txt
+      - name: Open an issue for every stale pin
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cargo xtask native-watch | tee watch.txt
+          gh label create security-native --color B60205 --description "Native library pin is behind upstream" 2>/dev/null || true
+          grep '^STALE' watch.txt | while read -r _ name pinned latest url; do
+            title="Native pin behind upstream: ${name} (latest ${latest#latest=})"
+            if gh issue list --label security-native --state open --json title --jq '.[].title' | grep -Fxq "$title"; then
+              echo "issue already open: $title"
+            else
+              gh issue create --label security-native --title "$title" --body "native-deps.toml pins ${name} at ${pinned#pinned=}; upstream has ${latest#latest=} (${url#url=}). Review the release notes for security fixes and bump the pin and its SHA-256. SLA (PROVISIONAL): critical/high 7 days, moderate/low 30 days (PLAN 8.2.3)."
+            fi
+          done
