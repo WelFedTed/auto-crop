@@ -135,6 +135,16 @@ pub fn verify(path: &Path, expected: &str) -> Result<(), String> {
     }
 }
 
+/// `canonicalize` returns verbatim `\\?\` paths on Windows, which CMake and MSVC mishandle
+/// (include directories silently go missing); strip the prefix.
+pub fn plain_path(p: PathBuf) -> PathBuf {
+    let s = p.to_string_lossy().into_owned();
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) => PathBuf::from(rest),
+        None => p,
+    }
+}
+
 fn run_cmd(cmd: &mut Command, what: &str) -> Result<(), String> {
     let status = cmd
         .status()
@@ -227,11 +237,13 @@ pub fn run(args: &[String]) -> Result<(), String> {
         return Err(problems.join("\n"));
     }
     let root = PathBuf::from("target/native");
-    let prefix = fs::canonicalize({
-        fs::create_dir_all(root.join("prefix")).map_err(|e| e.to_string())?;
-        root.join("prefix")
-    })
-    .map_err(|e| e.to_string())?;
+    let prefix = plain_path(
+        fs::canonicalize({
+            fs::create_dir_all(root.join("prefix")).map_err(|e| e.to_string())?;
+            root.join("prefix")
+        })
+        .map_err(|e| e.to_string())?,
+    );
     for name in ORDER {
         if only.as_ref().is_some_and(|o| !o.iter().any(|n| n == name)) {
             continue;
@@ -298,6 +310,18 @@ mod tests {
         assert_eq!(
             validate(&[lib("a", "1.0.0", "", GOOD), lib("a", "1.0.0", "", GOOD)]).len(),
             1
+        );
+    }
+
+    #[test]
+    fn verbatim_windows_prefix_is_stripped() {
+        assert_eq!(
+            plain_path(PathBuf::from(r"\\?\D:\a\b")),
+            PathBuf::from(r"D:\a\b")
+        );
+        assert_eq!(
+            plain_path(PathBuf::from("/home/x")),
+            PathBuf::from("/home/x")
         );
     }
 

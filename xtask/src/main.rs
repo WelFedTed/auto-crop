@@ -3,6 +3,7 @@
 
 //! Repository automation. Run as `cargo xtask <command>`.
 
+mod check_native;
 mod dco;
 mod deny_selftest;
 mod deps;
@@ -29,6 +30,9 @@ Commands:
         Enforce crate dependency direction rules (core, imgproc, cli, shell).
   check-identity
         Fail if any io.github.* identifier other than the one in identity.toml appears.
+  check-native [--prefix <dir>]
+        Inspect the built native libraries: no x265/x264 symbols, dependencies on the
+        allow-list, libjpeg-turbo >= 3.1.4, no embedded-libheif.
   doctor
         Check the native build toolchain (git, CMake, Ninja, NASM, Node, C/C++) and print
         install commands for what is missing.
@@ -58,6 +62,7 @@ fn main() -> ExitCode {
         "roadmap-check" => roadmap::run(&rest),
         "check-deps" => deps::run(&rest),
         "check-identity" => identity::run(&rest),
+        "check-native" => check_native::run(&rest),
         "doctor" => doctor::run(&rest),
         "provenance" => provenance::run(&rest),
         "licenses" => licenses::run(&rest),

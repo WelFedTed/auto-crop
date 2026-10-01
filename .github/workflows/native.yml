@@ -49,6 +49,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y nasm
       - name: Build pinned native libraries
         run: cargo xtask build-native
+      - name: Check the built libraries (no GPL encoders, allowed dependencies, libjpeg-turbo floor)
+        run: cargo xtask check-native
       - name: List installed libraries
         shell: bash
         run: |
