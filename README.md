@@ -45,7 +45,7 @@ Known limits of this slice: JPEG and PNG only (no HEIC yet), EXIF other than ori
 
 ## Install
 
-Nothing to install yet. Planned: a Windows installer and portable zip first (the first public previews are Windows-only), then macOS (Apple silicon) and Linux (AppImage, deb, rpm, Flatpak). Releases will appear on the [Releases page](https://github.com/WelFedTed/auto-crop/releases).
+A first **pre-release** (0.0.1, Windows 10/11 x64 only) is on the [Releases page](https://github.com/WelFedTed/auto-crop/releases): download `AutoCrop-0.0.1-windows-x64.zip`, check it against `SHA256SUMS`, unzip, run `AutoCrop.exe`. It needs the Microsoft Edge WebView2 runtime (part of Windows 11 and current Windows 10). It is an early test build, see [CHANGELOG.md](CHANGELOG.md) for what it does and does not do. Planned: a Windows installer first, then macOS (Apple silicon) and Linux (AppImage, deb, rpm, Flatpak).
 
 Early builds will not be code-signed (the project has a $0 budget), so Windows SmartScreen and macOS Gatekeeper will show warnings. Step-by-step instructions and checksums will accompany every release.
 
