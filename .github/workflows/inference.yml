@@ -40,6 +40,8 @@ jobs:
         with:
           persist-credentials: false
       - name: Python tools (stand-in generator and orchestrator)
+        env:
+          PIP_BREAK_SYSTEM_PACKAGES: "1" # throwaway runner; Homebrew Python enforces PEP 668
         run: |
           PY=$(command -v python3 || command -v python)
           "$PY" -m pip install --quiet numpy onnx onnxruntime

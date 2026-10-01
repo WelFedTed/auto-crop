@@ -18,12 +18,14 @@ path = "src/main.rs"
 
 [features]
 default = ["ort-b", "rten-b", "tract-b"]
-ort-b = ["dep:ort"]
+# ort-b: pyke-downloaded ONNX Runtime (quick comparison); ort-dyn: our own SHA-pinned runtime loaded at run time (the product plan)
+ort-b = ["dep:ort", "ort/download-binaries", "ort/tls-native"]
+ort-dyn = ["dep:ort", "ort/load-dynamic"]
 rten-b = ["dep:rten", "dep:rten-tensor"]
 tract-b = ["dep:tract-onnx", "dep:tract-linalg"]
 
 [dependencies]
-ort = { version = "=2.0.0-rc.13", optional = true }
+ort = { version = "=2.0.0-rc.13", optional = true, default-features = false, features = ["std", "ndarray"] }
 rten = { version = "=0.26.0", optional = true }
 rten-tensor = { version = "=0.26.0", optional = true }
 tract-onnx = { version = "=0.23.8", optional = true }

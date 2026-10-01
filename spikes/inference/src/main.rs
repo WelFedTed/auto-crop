@@ -36,7 +36,7 @@ fn time_runs(runs: usize, mut f: impl FnMut() -> Vec<f32>) -> (Vec<f32>, Vec<f64
     (out, times)
 }
 
-#[cfg(feature = "ort-b")]
+#[cfg(any(feature = "ort-b", feature = "ort-dyn"))]
 fn run_ort(model: &str, input: &[f32], threads: usize, runs: usize) -> Result<(f64, Vec<f32>, Vec<f64>), String> {
     use ort::{session::Session, value::Tensor};
     let t = Instant::now();
@@ -143,7 +143,7 @@ fn main() {
     let (threads, runs): (usize, usize) = (a[5].parse().unwrap(), a[6].parse().unwrap());
     let input = read_f32(inp);
     let res = match backend {
-        #[cfg(feature = "ort-b")]
+        #[cfg(any(feature = "ort-b", feature = "ort-dyn"))]
         "ort" => run_ort(model, &input, threads, runs),
         #[cfg(feature = "rten-b")]
         "rten" => run_rten(model, &input, threads, runs),
