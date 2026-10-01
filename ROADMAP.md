@@ -22,7 +22,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | Milestone | Title | Release | Platforms | Size | Progress |
 |---|---|---|---|---|---|
 | P | Planning | none | documents | - | 4 / 5 (80%) |
-| M0 | Foundations and week-1 spikes | none | CI only (Windows, macOS, Linux) | XL | 48 / 94 (51%) |
+| M0 | Foundations and week-1 spikes | none | CI only (Windows, macOS, Linux) | XL | 49 / 94 (52%) |
 | M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 0 / 94 (0%) |
 | M2 | Classical pipeline, safe writes and CLI | v0.1.0 | Windows 10/11 x64 | L | 0 / 91 (0%) |
 | M3 | GUI alpha: single-image editor | v0.2.0 | Windows 10/11 x64 | XL | 0 / 93 (0%) |
@@ -39,7 +39,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | X | Continuous and cross-cutting | - | - | - | 0 / 42 (0%) |
 | X | Post-1.0 backlog (1.x) | - | - | - | 0 / 43 (0%) |
 | X | Spikes and open decisions | - | - | - | 0 / 28 (0%) |
-| **Total** | | | | | **52 / 1404 (3%)** |
+| **Total** | | | | | **53 / 1404 (3%)** |
 <!-- progress:end -->
 
 ## Why this order
@@ -91,7 +91,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [x] **M0.07 Main-branch ruleset** - `main` forbids force-push and deletion (active ruleset). No PR, review or required-status-check rule, because the owner pushes directly to `main` (owner instruction 2026-10-01); CI failures are fixed forward. Accept: `gh api repos/WelFedTed/auto-crop/rules/branches/main` lists both rules.
 - [ ] **M0.08 Dependabot** - `dependabot.yml` for `cargo` and `github-actions` (weekly, grouped, no auto-merge, `cooldown` if supported) keeping SHA pins; `npm` joins with the first npm package; native libraries are outside it (M0.10). Accept: a stale pin yields a grouped PR.
 - [x] **M0.09 cargo-about notices** - `about.toml` and `about.hbs` generate `THIRD_PARTY_NOTICES.md` for the shipping workspace; accepted licences equal the cargo-deny allow-list (`xtask licenses --check` fails on drift). Accept: passes on three OSes; a planted unlisted licence fails.
-- [ ] **M0.10 Security workflow** - `security.yml` (daily): `cargo deny` advisories, `cargo audit` and a watch on each `native-deps.toml` library that opens a `security-native` issue on a stale pin (fake-pin test). SLA (PROVISIONAL): critical/high 7 days (72 h for critical), moderate/low <= 30 days.
+- [x] **M0.10 Security workflow** - `security.yml` (daily): `cargo deny` advisories, `cargo audit` and a watch on each `native-deps.toml` library that opens a `security-native` issue on a stale pin (fake-pin test). SLA (PROVISIONAL): critical/high 7 days (72 h for critical), moderate/low <= 30 days.
 - [x] **M0.11 xtask bootstrap** - `xtask/` (alias in `.cargo/config.toml`); `doctor` checks the C/C++ toolchain, CMake, NASM (x86 only), Ninja, Node LTS and git and prints the winget, brew or apt command per missing tool. Accept: clean Windows 11 and Ubuntu 22.04 list exactly the missing tools.
 - [x] **M0.12 Devcontainer** - `.devcontainer/` on Ubuntu 22.04 with the pinned toolchain, CMake, NASM, Ninja, `libwebkit2gtk-4.1-dev`, Node LTS; a weekly CI job runs `cargo xtask doctor && cargo build --workspace` inside it. Accept: a fresh `devcontainer up` builds with no manual steps.
 - [ ] **M0.13 release-plz and tag credentials** - `release-plz.toml` (release PR and `CHANGELOG.md`, `publish = false`, tags only) and a GitHub App token in an approval-gated `release` environment. Accept: in the scratch repo an App-token tag triggers `release.yml`; a `GITHUB_TOKEN` tag does not.
