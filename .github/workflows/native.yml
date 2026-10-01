@@ -51,6 +51,19 @@ jobs:
         run: cargo xtask build-native
       - name: Check the built libraries (no GPL encoders, allowed dependencies, libjpeg-turbo floor)
         run: cargo xtask check-native
+      - name: Negative test - a planted x265 symbol must make check-native fail
+        shell: bash
+        run: |
+          rm -rf target/native-neg && mkdir -p target/native-neg/lib
+          cp -r target/native/prefix/include target/native-neg/include
+          lib=$(find target/native/prefix \( -name 'turbojpeg.dll' -o -name 'libturbojpeg*.so*' -o -name 'libturbojpeg*.dylib' \) | head -1)
+          test -n "$lib"
+          cp "$lib" "target/native-neg/lib/$(basename "$lib")"
+          printf 'x265_encoder_open' >> "target/native-neg/lib/$(basename "$lib")"
+          if cargo xtask check-native --prefix target/native-neg; then
+            echo "planted x265 symbol was NOT detected"; exit 1
+          fi
+          echo "planted x265 symbol was rejected, as required"
       - name: List installed libraries
         shell: bash
         run: |
