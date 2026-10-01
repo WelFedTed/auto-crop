@@ -38,7 +38,7 @@ jobs:
           - { os: macos-latest, best-effort: false }
           - { os: ubuntu-22.04, best-effort: false }
           - { os: ubuntu-24.04, best-effort: true }
-          - { os: ubuntu-22.04-arm, best-effort: true }
+          - { os: ubuntu-22.04-arm, best-effort: true, jobs: '2' }
           - { os: windows-11-arm, best-effort: true }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -58,6 +58,8 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y nasm
       - name: Build pinned native libraries
+        env:
+          AUTOCROP_BUILD_JOBS: ${{ matrix.jobs }}
         run: cargo xtask build-native
       - name: Check the built libraries (no GPL encoders, allowed dependencies, libjpeg-turbo floor)
         run: cargo xtask check-native
@@ -99,3 +101,21 @@ jobs:
         shell: bash
         run: |
           find target/native/prefix -maxdepth 3 \( -name "*.dll" -o -name "*.so*" -o -name "*.dylib" -o -name "*.lib" -o -name "*.a" \) | sort
+
+  fedora:
+    name: fedora (best-effort spot check)
+    runs-on: ubuntu-22.04
+    continue-on-error: true
+    container: fedora@sha256:43b29f65a41eb9c35e1cd5323e3bdf3b655c2357a9f4f1ff2f9c2798e5045d80 # fedora:latest on 2026-10-01
+    steps:
+      - name: Install toolchain
+        run: dnf install -y git cmake gcc gcc-c++ make nasm curl tar xz findutils rustup && rustup-init -y --profile minimal --default-toolchain none
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build pinned native libraries and check them
+        shell: bash
+        run: |
+          . "$HOME/.cargo/env"
+          cargo xtask build-native
+          cargo xtask check-native

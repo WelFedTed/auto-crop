@@ -199,13 +199,17 @@ fn build_cmake(lib: &Lib, src: &Path, build: &Path, prefix: &Path) -> Result<(),
     cfg.arg(format!("-DCMAKE_PREFIX_PATH={}", prefix.display()));
     cfg.args(&lib.flags);
     run_cmd(&mut cfg, &format!("cmake configure {}", lib.name))?;
-    run_cmd(
-        Command::new("cmake")
-            .arg("--build")
-            .arg(build)
-            .args(["--config", "Release", "--parallel"]),
-        &format!("cmake build {}", lib.name),
-    )?;
+    let mut b = Command::new("cmake");
+    b.arg("--build")
+        .arg(build)
+        .args(["--config", "Release", "--parallel"]);
+    // Memory-limited runners (for example the Linux ARM64 CI runner) cap the job count.
+    if let Ok(jobs) = std::env::var("AUTOCROP_BUILD_JOBS")
+        && !jobs.is_empty()
+    {
+        b.arg(jobs);
+    }
+    run_cmd(&mut b, &format!("cmake build {}", lib.name))?;
     run_cmd(
         Command::new("cmake")
             .arg("--install")
