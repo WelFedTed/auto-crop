@@ -22,7 +22,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | Milestone | Title | Release | Platforms | Size | Progress |
 |---|---|---|---|---|---|
 | P | Planning | none | documents | - | 4 / 5 (80%) |
-| M0 | Foundations and week-1 spikes | none | CI only (Windows, macOS, Linux) | XL | 42 / 93 (45%) |
+| M0 | Foundations and week-1 spikes | none | CI only (Windows, macOS, Linux) | XL | 45 / 93 (48%) |
 | M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 0 / 94 (0%) |
 | M2 | Classical pipeline, safe writes and CLI | v0.1.0 | Windows 10/11 x64 | L | 0 / 91 (0%) |
 | M3 | GUI alpha: single-image editor | v0.2.0 | Windows 10/11 x64 | XL | 0 / 92 (0%) |
@@ -39,7 +39,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | X | Continuous and cross-cutting | - | - | - | 0 / 42 (0%) |
 | X | Post-1.0 backlog (1.x) | - | - | - | 0 / 43 (0%) |
 | X | Spikes and open decisions | - | - | - | 0 / 28 (0%) |
-| **Total** | | | | | **46 / 1402 (3%)** |
+| **Total** | | | | | **49 / 1402 (3%)** |
 <!-- progress:end -->
 
 ## Why this order
@@ -104,9 +104,9 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [x] **M0.18 deny.toml policy** - Allow-list (MIT, Apache-2.0, BSD, ISC, Zlib, 0BSD, CC0, Unicode, BSL, MPL-2.0, IJG); bans `heic`, `heic-decoder`, `dssim-core`, `jpegxl-rs`, `jpegxl-sys`, `birdcage`, x264/x265 wrappers, `opencv`; crates.io only; no wildcards. Accept: green on three OSes.
 - [x] **M0.19 cargo-deny self-test** - `xtask/fixtures/deny-selftest/` path crates outside the shipping workspace (AGPL, GPL, CC-BY-NC, a crate named `heic`, a clean control) run through `cargo deny` with the real `deny.toml`. Accept: planted crates fail, the control passes.
 - [x] **M0.20 SECURITY.md** - GitHub private reporting, latest release supported, PROVISIONAL targets (acknowledge in 7 days, plan in 30), scope (decoder crashes and limit bypasses in; same-user malware and a compromised OS out), HEVC note slot (M0.27). Accept: "Report a vulnerability" works.
-- [ ] **M0.21 Sandbox PoC: Windows** - `spikes/sandbox/` helper (inherited input handle, no path; RGB8 via shared memory) under a job object plus restricted token, then AppContainer (stronger). Escape tests (file, socket, spawn, limits); record the level reached on `windows-2025` and the Surface.
-- [ ] **M0.22 Sandbox PoC: Linux** - Same helper under Landlock (5.13+), a `seccompiler` allow-list (no sockets, no exec) and rlimits, pixels via `memfd`. Accept: results on `ubuntu-22.04`, Ubuntu 24.04 and Fedora, incl. Landlock absent (recorded `seccomp-only` or `process-only`, never silent).
-- [ ] **M0.23 Sandbox PoC: macOS and ADR** - Same helper under `sandbox_init` (deny-default) on `macos-latest` and a real Mac (macOS 12 UNMEASURED). ADR: level per OS, shared-memory mechanism, `birdcage` ruled out (GPL-3.0), M6/M8/M9 work. Accept: escape tests pass on `macos-latest`; go/no-go line.
+- [x] **M0.21 Sandbox PoC: Windows** - `spikes/sandbox/` helper (inherited input handle, no path; RGB8 via shared memory) under a job object plus restricted token, then AppContainer (stronger). Escape tests (file, socket, spawn, limits); record the level reached on `windows-2025` and the Surface. Result (ADR-0006): AppContainer + job blocks all four escapes on `windows-2025`; the Surface cell is UNMEASURED (A-9), re-run in M8.
+- [x] **M0.22 Sandbox PoC: Linux** - Same helper under Landlock (5.13+), a `seccompiler` allow-list (no sockets, no exec) and rlimits, pixels via `memfd`. Accept: results on `ubuntu-22.04`, Ubuntu 24.04 and Fedora, incl. Landlock absent (recorded `seccomp-only` or `process-only`, never silent).
+- [x] **M0.23 Sandbox PoC: macOS and ADR** - Same helper under `sandbox_init` (deny-default) on `macos-latest` and a real Mac (macOS 12 UNMEASURED). ADR: level per OS, shared-memory mechanism, `birdcage` ruled out (GPL-3.0), M6/M8/M9 work. Accept: escape tests pass on `macos-latest`; go/no-go line.
 - [x] **M0.24 Model-weights policy** - `docs/policy/model-weights.md`: weights need an OSI licence, training-data statement; non-commercial, research-only, unlicensed banned; ImageNet-initialised, DocQuadNet-derived, UVDoc weights need an owner-granted exception (A-7); `check-models` (M4) enforces.
 - [x] **M0.25 Provenance log template** - JSON-lines log (source of truth; `auto-crop-models` from M1.75) plus generated CSV/MD: licence URL, SHA-256, status (`cleared`, `pending`, `blocked`, `banned`, `exception`). Seed rows cite licence URLs (SmartDoc cleared, DocTr banned, DocQuadNet pending).
 - [ ] **M0.26 MakeACopy licence query** - Ask the MakeACopy maintainer for a licence and training-data statement for DocQuadNet-256 (GitHub reports NOASSERTION). Accept: reply, or no reply after 14 days (PROVISIONAL), logged; no reply = dev-only use and earlier M4 from-scratch training.
