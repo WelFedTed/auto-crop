@@ -102,3 +102,4 @@ The owner reviewed section H and answered as follows. These are now decisions, n
 - **Copyright holder:** `WelFedTed` (LICENSE-MIT, LICENSE-APACHE; see B2).
 - **Milestone order confirmed (2026-10-01):** M0-M13 as in ROADMAP.md.
 - **Still open:** the owner's go-ahead to start M0 (ROADMAP item P.05).
+- **Push to `main` (2026-10-01):** the owner pushes directly to `main` (no feature branches or PRs for the maintainer). ROADMAP item M0.07 was changed accordingly: the `main` ruleset blocks force-push and deletion only; CI runs on every push and failures are fixed forward. External contributors still use forks and pull requests.

@@ -6,6 +6,7 @@
 mod dco;
 mod deny_selftest;
 mod deps;
+mod licenses;
 mod profiles;
 mod roadmap;
 
@@ -22,6 +23,8 @@ Commands:
         docs/roadmap/retired.txt.
   check-deps
         Enforce crate dependency direction rules (core, imgproc, cli, shell).
+  licenses --check
+        Require about.toml accepted licences to equal the deny.toml allow-list.
   check-dco [<rev-range>]
         Require a matching Signed-off-by trailer on every non-merge commit in the range
         (default HEAD^..HEAD); bot authors are skipped.
@@ -39,6 +42,7 @@ fn main() -> ExitCode {
     let result = match cmd.as_str() {
         "roadmap-check" => roadmap::run(&rest),
         "check-deps" => deps::run(&rest),
+        "licenses" => licenses::run(&rest),
         "check-dco" => dco::run(&rest),
         "deny-selftest" => deny_selftest::run(&rest),
         "check-profiles" => profiles::run(&rest),

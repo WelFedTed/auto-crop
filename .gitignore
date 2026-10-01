@@ -4,3 +4,4 @@
 Thumbs.db
 xtask/fixtures/**/Cargo.lock
 xtask/fixtures/**/target/
+THIRD_PARTY_NOTICES.md

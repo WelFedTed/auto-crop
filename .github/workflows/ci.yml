@@ -60,6 +60,9 @@ jobs:
           fi
       - run: cargo deny check
       - run: cargo xtask deny-selftest
+      - run: cargo xtask licenses --check
+      - name: Third-party notices (cargo about)
+        run: cargo about generate about.hbs -o THIRD_PARTY_NOTICES.md
 
   reuse:
     name: reuse lint
