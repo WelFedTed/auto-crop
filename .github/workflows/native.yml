@@ -17,6 +17,7 @@ on:
       - "xtask/src/check_native.rs"
       - "packaging/allowed-libs.txt"
       - "spikes/turbojpeg/**"
+      - "spikes/heic/**"
       - ".github/workflows/native.yml"
 
 permissions:
@@ -97,6 +98,33 @@ jobs:
             export PATH="$(cygpath -u "${GITHUB_WORKSPACE}")/target/native/prefix/bin:$PATH"
           fi
           cargo test --manifest-path spikes/turbojpeg/Cargo.toml -- --nocapture
+      - name: HEIC spike (plugin present decodes a real HEVC HEIC; plugin absent fails clearly)
+        shell: bash
+        run: |
+          prefix="${GITHUB_WORKSPACE}/target/native/prefix"
+          prefix_u="$prefix"
+          if command -v cygpath >/dev/null 2>&1; then prefix_u="$(cygpath -u "$prefix")"; export PATH="$prefix_u/bin:$PATH"; fi
+          export AUTOCROP_NATIVE_PREFIX="$prefix"
+          export LD_LIBRARY_PATH="$prefix/lib:${LD_LIBRARY_PATH:-}"
+          export DYLD_LIBRARY_PATH="$prefix/lib:${DYLD_LIBRARY_PATH:-}"
+          cargo test --manifest-path spikes/heic/Cargo.toml
+          cargo build --manifest-path spikes/heic/Cargo.toml
+          probe="spikes/heic/target/debug/heic-probe"
+          fixture=$(find target/native -name conformance_window_padding.heic | head -1)
+          test -n "$fixture"
+          plugdir_u="$prefix_u/lib/libheif"
+          test -d "$plugdir_u" && ls "$plugdir_u"
+          # 1) plugin present: decodes
+          export LIBHEIF_PLUGIN_PATH="$prefix/lib/libheif"
+          out=$("$probe" "$fixture"); echo "plugin present: $out"
+          echo "$out" | grep -q "^OK "
+          # 2) plugin absent: the HEVC decoder is missing, decoding must fail with a clear error
+          mv "$plugdir_u" "$plugdir_u.off"
+          trap 'mv "$plugdir_u.off" "$plugdir_u" 2>/dev/null || true' EXIT
+          unset LIBHEIF_PLUGIN_PATH
+          if out=$("$probe" "$fixture"); then echo "decoded without the libde265 plugin: $out"; exit 1; fi
+          echo "plugin absent: $out"
+          echo "$out" | grep -q "^ERR "
       - name: List installed libraries
         shell: bash
         run: |

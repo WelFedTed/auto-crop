@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+# Throwaway spike (ROADMAP M0.43): decode a HEIC to RGB8 from bytes through our own decode-only
+# libheif (1.23.5+) with libde265 as a separate plugin, via a hand-written binding.
+# Never part of the shipping workspace or default CI.
+[workspace]
+
+[package]
+name = "spike-heic"
+version = "0.0.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+build = "build.rs"
+
+[[bin]]
+name = "heic-probe"
+path = "src/main.rs"
+
+[profile.release]
+panic = "unwind"
