@@ -64,6 +64,28 @@ jobs:
       - name: Third-party notices (cargo about)
         run: cargo about generate about.hbs -o THIRD_PARTY_NOTICES.md
 
+  repo-checks:
+    name: repo checks
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo xtask check-identity
+      - run: cargo xtask provenance
+      - name: Toolchain report (informational)
+        run: cargo xtask doctor || true
+
+  zizmor:
+    name: workflow lint (zizmor)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: pipx run zizmor .github/workflows
+
   reuse:
     name: reuse lint
     runs-on: ubuntu-22.04

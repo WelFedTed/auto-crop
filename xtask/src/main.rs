@@ -6,8 +6,11 @@
 mod dco;
 mod deny_selftest;
 mod deps;
+mod doctor;
+mod identity;
 mod licenses;
 mod profiles;
+mod provenance;
 mod roadmap;
 
 use std::process::ExitCode;
@@ -23,6 +26,14 @@ Commands:
         docs/roadmap/retired.txt.
   check-deps
         Enforce crate dependency direction rules (core, imgproc, cli, shell).
+  check-identity
+        Fail if any io.github.* identifier other than the one in identity.toml appears.
+  doctor
+        Check the native build toolchain (git, CMake, Ninja, NASM, Node, C/C++) and print
+        install commands for what is missing.
+  provenance [--render]
+        Validate the provenance log; --render regenerates the CSV/MD views (otherwise they
+        must be up to date).
   licenses --check
         Require about.toml accepted licences to equal the deny.toml allow-list.
   check-dco [<rev-range>]
@@ -42,6 +53,9 @@ fn main() -> ExitCode {
     let result = match cmd.as_str() {
         "roadmap-check" => roadmap::run(&rest),
         "check-deps" => deps::run(&rest),
+        "check-identity" => identity::run(&rest),
+        "doctor" => doctor::run(&rest),
+        "provenance" => provenance::run(&rest),
         "licenses" => licenses::run(&rest),
         "check-dco" => dco::run(&rest),
         "deny-selftest" => deny_selftest::run(&rest),
