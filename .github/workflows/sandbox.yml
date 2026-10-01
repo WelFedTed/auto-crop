@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+# Sandbox proof of concept (ROADMAP M0.21-M0.23): runs the spike on each OS and records the
+# level reached (see docs/adr). The spike is throwaway code under spikes/sandbox.
+name: Sandbox spike
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "spikes/sandbox/**"
+      - ".github/workflows/sandbox.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: ${{ matrix.os }}${{ matrix.best-effort && ' (best-effort)' || '' }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.best-effort }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-22.04, best-effort: false }
+          - { os: ubuntu-24.04, best-effort: true }
+          - { os: ubuntu-22.04-arm, best-effort: true }
+          - { os: macos-latest, best-effort: false }
+          - { os: windows-2025, best-effort: false }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Kernel / OS
+        shell: bash
+        run: uname -a; cat /proc/sys/kernel/unprivileged_userns_clone 2>/dev/null || true; (cat /sys/kernel/security/lsm 2>/dev/null || true); echo
+      - name: Run the sandbox probe
+        shell: bash
+        run: cargo run --manifest-path spikes/sandbox/Cargo.toml -- spikes/sandbox/Cargo.toml
