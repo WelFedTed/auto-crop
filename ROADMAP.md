@@ -22,7 +22,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | Milestone | Title | Release | Platforms | Size | Progress |
 |---|---|---|---|---|---|
 | P | Planning | none | documents | - | 4 / 5 (80%) |
-| M0 | Foundations and week-1 spikes | none | CI only (Windows, macOS, Linux) | XL | 47 / 94 (50%) |
+| M0 | Foundations and week-1 spikes | none | CI only (Windows, macOS, Linux) | XL | 48 / 94 (51%) |
 | M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 0 / 94 (0%) |
 | M2 | Classical pipeline, safe writes and CLI | v0.1.0 | Windows 10/11 x64 | L | 0 / 91 (0%) |
 | M3 | GUI alpha: single-image editor | v0.2.0 | Windows 10/11 x64 | XL | 0 / 93 (0%) |
@@ -39,7 +39,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | X | Continuous and cross-cutting | - | - | - | 0 / 42 (0%) |
 | X | Post-1.0 backlog (1.x) | - | - | - | 0 / 43 (0%) |
 | X | Spikes and open decisions | - | - | - | 0 / 28 (0%) |
-| **Total** | | | | | **51 / 1404 (3%)** |
+| **Total** | | | | | **52 / 1404 (3%)** |
 <!-- progress:end -->
 
 ## Why this order
@@ -161,7 +161,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [ ] **M0.80 Owner review of the GUI design canvas** - The clickable design canvas of PLAN 6.16 (home, batch review, adjust, convert, backups, settings, scan split, dark theme, tablet) is reviewed by the owner. Accept: each deviation listed in PLAN 6.16 is accepted, vetoed or turned into a PLAN 6 edit, and the outcome is noted there.
 ### Docs
 - [x] **M0.72 README** - Name paired with the tagline "Auto Crop - the offline batch fixer for scans, receipts and photos", pre-alpha status, privacy line, licence, PLAN/ROADMAP links and the B17 AI disclosure (PLAN 8.2.4; text identical in CONTRIBUTING). Accept: renders on GitHub, links resolve.
-- [ ] **M0.73 CONTRIBUTING, CODE_OF_CONDUCT** - CONTRIBUTING (doctor/devcontainer, "no C toolchain" is false, DCO, Conventional Commits, clean-room, AI-use, licences) plus the README AI disclosure and a "Ticking the ROADMAP" paragraph; Contributor Covenant. A clean Ubuntu 22.04 container builds.
+- [x] **M0.73 CONTRIBUTING, CODE_OF_CONDUCT** - CONTRIBUTING (doctor/devcontainer, "no C toolchain" is false, DCO, Conventional Commits, clean-room, AI-use, licences) plus the README AI disclosure and a "Ticking the ROADMAP" paragraph; Contributor Covenant. A clean Ubuntu 22.04 container builds.
 - [x] **M0.74 Forms, PR template, CODEOWNERS** - Issue forms (bug, feature, detection failure with a sensitive-image warning), PR template (DCO, tests, ROADMAP ID, licence, AI disclosure, box ticked or n/a, `roadmap-check` green), `CODEOWNERS` (PLAN 8.2.2 paths; `packaging/flathub/` human-only).
 - [x] **M0.75 ADR directory and index** - `docs/adr/` with `0000-template.md` (results table, time box), an index and `NNNN-slug.md` numbering, before any spike ADR; ADR-0001 "Licence, name and app ID" (B2, B16). The index lists every ADR; an ADR without numbers or a go/no-go line is rejected.
 - [x] **M0.76 Commit PLAN.md and ROADMAP.md** - Add both planning documents to the repo root after the licence files (REUSE headers) and link ROADMAP.md from the README. Accept: both render on GitHub; `roadmap-check` (M0.78) passes and the status table shows M0 progress from its checkboxes.
