@@ -10,3 +10,4 @@ Numbered `NNNN-slug.md` records using [0000-template.md](0000-template.md). Ever
 | [0004](0004-native-libraries.md) | Native libraries: pinned CMake builds, libde265 plugin, libjpeg-turbo pin | accepted |
 | [0005](0005-heic-binding.md) | HEIC binding: own thin libheif FFI, libde265 plugin, HeicBackend | accepted |
 | [0006](0006-decode-sandbox.md) | Decode sandbox: level per OS, shared memory, fallbacks | accepted |
+| [0007](0007-inference-backend.md) | Inference backend: ort load-dynamic, rten fallback | accepted |

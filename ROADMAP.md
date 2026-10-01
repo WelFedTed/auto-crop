@@ -22,7 +22,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | Milestone | Title | Release | Platforms | Size | Progress |
 |---|---|---|---|---|---|
 | P | Planning | none | documents | - | 4 / 5 (80%) |
-| M0 | Foundations and week-1 spikes | none | CI only (Windows, macOS, Linux) | XL | 45 / 94 (47%) |
+| M0 | Foundations and week-1 spikes | none | CI only (Windows, macOS, Linux) | XL | 47 / 94 (50%) |
 | M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 0 / 94 (0%) |
 | M2 | Classical pipeline, safe writes and CLI | v0.1.0 | Windows 10/11 x64 | L | 0 / 91 (0%) |
 | M3 | GUI alpha: single-image editor | v0.2.0 | Windows 10/11 x64 | XL | 0 / 93 (0%) |
@@ -39,7 +39,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | X | Continuous and cross-cutting | - | - | - | 0 / 42 (0%) |
 | X | Post-1.0 backlog (1.x) | - | - | - | 0 / 43 (0%) |
 | X | Spikes and open decisions | - | - | - | 0 / 28 (0%) |
-| **Total** | | | | | **49 / 1404 (3%)** |
+| **Total** | | | | | **51 / 1404 (3%)** |
 <!-- progress:end -->
 
 ## Why this order
@@ -116,10 +116,10 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [x] **M0.29 Cargo workspace skeleton** - Edition 2024, resolver 3, `crates/{core,codecs,imgproc,engine,cli,shell}` (`auto-crop-*`, CLI binary `auto-crop`) plus `xtask`, each with a placeholder type and test; `shell` has no `tauri` yet. Accept: build and nextest pass on three OSes.
 - [x] **M0.30 Dependency-direction test** - `xtask check-deps` fails if any crate but `shell` depends on `tauri*` or `wry`, `core` needs more than `serde` and `thiserror`, `imgproc` needs an I/O or codec crate, or `cli` needs `shell`. Accept: a planted `tauri` dependency in `engine` fails CI.
 - [x] **M0.31 panic=unwind guard** - All profiles set `panic = "unwind"`; `unsafe_code` is forbidden in `core`, `imgproc`, `engine`, denied elsewhere. `xtask check-profiles` fails on `panic = "abort"`; a release-profile binary must catch a panic. Planting abort in `[profile.release]` fails both.
-- [ ] **M0.32 Inference op coverage** - Export a DocQuadNet-shaped net (MobileNetV3 + FPN, 256x256, opset 17), try `paddle2onnx` on PP-LCNet doc-orientation, load both in `ort =2.0.0-rc.13`, `rten` 0.26.0, `tract-onnx` 0.23.8. Accept: 2 nets x 3 backends x fp32/int8 matrix, within 1e-3 of ORT.
-- [ ] **M0.33 Inference latency, size** - Per backend: median and p95 of a 256x256 pass at 1 and 4 threads, cold-load, binary and runtime size, corner-peak agreement with ORT within 0.1 px, CI friction; Windows Tier-M, macOS arm64, Linux. PROVISIONAL bar: median <= 25 ms on Tier-M, 4 threads.
-- [ ] **M0.34 Inference int8, platforms** - Per-OS int8 check (static QDQ, ~500 images): a platform fails if p95 corner-error rise > 0.05% of diagonal or mean IoU delta > 0.3 pt (PROVISIONAL); smoke-run once on the stand-in. Rate Intel-Mac and Windows arm64: works, needs source build, or not viable.
-- [ ] **M0.35 ADR: inference backend** - Choose ONE backend behind an `InferenceBackend` trait (CPU by default; CoreML, DirectML, CUDA opt-in after benchmarks): measured table, Intel-Mac/arm64 outcome, exact `=` pin, hash-checked `models.lock` models only, revisit trigger. Accept: go/no-go line.
+- [ ] **M0.32 Inference op coverage** - Export a DocQuadNet-shaped net (MobileNetV3 + FPN, 256x256, opset 17), try `paddle2onnx` on PP-LCNet doc-orientation, load both in `ort =2.0.0-rc.13`, `rten` 0.26.0, `tract-onnx` 0.23.8. Accept: 2 nets x 3 backends x fp32/int8 matrix, within 1e-3 of ORT. Status (ADR-0007): stand-in nets run on all three backends; fp32 within 5e-7 of ORT, but int8 differs by 0.01 and `paddle2onnx` on a real PP-LCNet was not run, so this stays open.
+- [x] **M0.33 Inference latency, size** - Per backend: median and p95 of a 256x256 pass at 1 and 4 threads, cold-load, binary and runtime size, corner-peak agreement with ORT within 0.1 px, CI friction; Windows Tier-M, macOS arm64, Linux. PROVISIONAL bar: median <= 25 ms on Tier-M, 4 threads. Result (ADR-0007): ort 2.8 ms, rten 6.7 ms, tract 17.7 ms median at 4 threads on the local i7-8700K (Tier-M); peak agreement <= 4e-5 px; stand-in nets.
+- [ ] **M0.34 Inference int8, platforms** - Per-OS int8 check (static QDQ, ~500 images): a platform fails if p95 corner-error rise > 0.05% of diagonal or mean IoU delta > 0.3 pt (PROVISIONAL); smoke-run once on the stand-in. Rate Intel-Mac and Windows arm64: works, needs source build, or not viable. Status (ADR-0007): per-platform run and speed recorded; accuracy bars UNMEASURED until a trained model and labelled images exist; tract int8 is wrong on the orientation net.
+- [x] **M0.35 ADR: inference backend** - Choose ONE backend behind an `InferenceBackend` trait (CPU by default; CoreML, DirectML, CUDA opt-in after benchmarks): measured table, Intel-Mac/arm64 outcome, exact `=` pin, hash-checked `models.lock` models only, revisit trigger. Accept: go/no-go line. Done: ADR-0007 (ort load-dynamic default, rten fallback, tract rejected).
 - [x] **M0.36 Lanczos: oracle and kornia** - OpenCV oracle (dev-only; `cargo tree -i opencv` empty) and an f64 Lanczos3 reference vs `kornia-imgproc` 0.2.0 `warp_perspective` at 12 MP: time at 1 and 8 threads, peak RSS, PSNR, licences. PROVISIONAL bars: PSNR >= 45 dB, <= 90 ms at 12 MP, 8 threads.
 - [x] **M0.37 Lanczos: own strip warp** - `spikes/warp/`: strip-wise Lanczos3 (64-row rayon strips, per-strip source box, u8/u16 in and out, f32 accumulation, no full-frame f32 buffer). Accept: M0.36 fixtures and metrics at 12 and 48 MP beside kornia; 3-day box, go/no-go, no SIMD tuning.
 - [x] **M0.38 ADR: Lanczos warp** - Pick kornia-imgproc f32 (possibly strip-wise) or the own u8/u16 warp, with speed, memory and error at 12 MP, the M2 implementation and test approach (oracle dev-only, pinned golden outputs in CI) and open items (SIMD, linear-light resize). Accept: go/no-go line.
