@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+# Inference backend spike (ROADMAP M0.32-M0.35): ort vs rten vs tract on two stand-in nets, fp32 and
+# int8, on every OS and architecture we target. The throwaway code is under spikes/inference.
+name: Inference spike
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "spikes/inference/**"
+      - ".github/workflows/inference.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    name: ${{ matrix.os }}${{ matrix.best-effort && ' (best-effort)' || '' }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.best-effort }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-22.04, best-effort: false }
+          - { os: ubuntu-22.04-arm, best-effort: true }
+          - { os: macos-latest, best-effort: false }
+          - { os: macos-26-intel, best-effort: true }
+          - { os: windows-2025, best-effort: false }
+          - { os: windows-11-arm, best-effort: true }
+    defaults:
+      run:
+        shell: bash
+        working-directory: spikes/inference
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Python tools (stand-in generator and orchestrator)
+        run: |
+          PY=$(command -v python3 || command -v python)
+          "$PY" -m pip install --quiet numpy onnx onnxruntime
+          "$PY" gen_models.py models --quantize > /dev/null 2>&1
+          ls -la models
+      - name: Build the harness (release)
+        run: cargo build --release
+      - name: Run the matrix
+        run: |
+          PY=$(command -v python3 || command -v python)
+          EXE=target/release/infer
+          [ -f "$EXE.exe" ] && EXE="$EXE.exe"
+          "$PY" run.py "$EXE" 30 | tee table.md
+          { echo "### ${{ matrix.os }}"; echo; cat table.md; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Binary sizes per backend
+        run: |
+          for f in ort-b rten-b tract-b; do
+            cargo build --release --no-default-features --features $f 2>&1 | tail -1
+            EXE=target/release/infer; [ -f "$EXE.exe" ] && EXE="$EXE.exe"
+            echo "$f: $(wc -c < "$EXE") bytes"
+          done

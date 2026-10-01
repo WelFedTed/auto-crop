@@ -11,3 +11,6 @@ spikes/**/out/
 spikes/**/out48/
 spikes/**/Cargo.lock
 __pycache__/
+spikes/inference/models/
+spikes/inference/out_*.f32
+spikes/inference/results.jsonl
