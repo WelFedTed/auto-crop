@@ -1,0 +1,12 @@
+{
+  "name": "auto-crop",
+  "build": { "dockerfile": "Dockerfile" },
+  "features": {
+    "ghcr.io/devcontainers/features/rust:1": { "profile": "minimal" },
+    "ghcr.io/devcontainers/features/node:1": { "version": "lts" }
+  },
+  "postCreateCommand": "cargo xtask doctor",
+  "customizations": {
+    "vscode": { "extensions": ["rust-lang.rust-analyzer", "svelte.svelte-vscode"] }
+  }
+}

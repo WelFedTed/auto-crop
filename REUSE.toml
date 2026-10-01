@@ -23,6 +23,7 @@ path = [
     "rust-toolchain.toml",
     "xtask/fixtures/**/Cargo.lock",
     "spikes/**/Cargo.lock",
+    ".devcontainer/devcontainer.json",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Auto Crop contributors"
