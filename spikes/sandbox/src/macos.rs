@@ -38,8 +38,14 @@ pub fn shared_create(size: usize) -> io::Result<Shm> {
     Ok(f)
 }
 
-pub fn prepare(cmd: &mut Command, shm: &Shm, _mode: &str) {
+/// Runs the worker: input through its stdin (an inherited handle, no path), shared memory
+/// inherited as fd 3, stdout and stderr captured.
+pub fn run(job: &super::Job, shm: &Shm, _mode: &str) -> io::Result<Output> {
     let fd = shm.as_raw_fd();
+    let mut cmd = Command::new(std::env::current_exe()?);
+    cmd.args(&job.args);
+    cmd.stdin(std::process::Stdio::from(File::open(job.input_path)?));
+    cmd.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
     unsafe {
         cmd.pre_exec(move || {
             if fd == 3 {
@@ -51,9 +57,6 @@ pub fn prepare(cmd: &mut Command, shm: &Shm, _mode: &str) {
             Ok(())
         });
     }
-}
-
-pub fn run(mut cmd: Command, _mode: &str) -> io::Result<Output> {
     cmd.spawn()?.wait_with_output()
 }
 
@@ -100,3 +103,6 @@ pub fn expect(mode: &str, _level: &str) -> Expect {
         Expect { file: "allowed", tcp: "allowed", spawn: "allowed", alloc: "allowed" }
     }
 }
+
+/// Nothing to clean up on this OS.
+pub fn cleanup() {}

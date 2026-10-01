@@ -29,6 +29,13 @@ mod os;
 /// Bytes of "decoded pixels" the worker writes to shared memory.
 pub const PIXELS: usize = 4096;
 
+/// What the harness asks a back end to run: the worker's arguments and its input file (which the
+/// worker receives as an inherited handle, never as a path).
+pub struct Job<'a> {
+    pub args: Vec<String>,
+    pub input_path: &'a str,
+}
+
 /// What a mode is expected to block ("blocked") or allow ("allowed"); "any" is not checked.
 #[derive(Clone, Copy)]
 pub struct Expect {
@@ -44,9 +51,10 @@ pub fn expected_pixels(input: &[u8]) -> Vec<u8> {
 }
 
 fn t_file() -> String {
-    let path = if cfg!(windows) { "C:\\Windows\\win.ini" } else { "/etc/passwd" };
-    match std::fs::File::open(path) {
-        Ok(_) => "allowed".into(),
+    // Windows: a file only the current user can read (created by the parent); elsewhere /etc/passwd
+    let path = std::env::var("AUTOCROP_SECRET").unwrap_or_else(|_| "/etc/passwd".to_owned());
+    match std::fs::File::open(&path) {
+        Ok(_) => format!("allowed ({path})"),
         Err(e) => format!("blocked({:?})", e.kind()),
     }
 }
@@ -131,12 +139,8 @@ fn parent(input_path: &str) -> i32 {
     println!("os={} arch={}", std::env::consts::OS, std::env::consts::ARCH);
     for mode in os::modes() {
         let shm = os::shared_create(PIXELS).expect("shared memory");
-        let mut cmd = Command::new(std::env::current_exe().unwrap());
-        cmd.args(["--worker", mode, &port.to_string()]);
-        cmd.stdin(Stdio::from(std::fs::File::open(input_path).expect("input")));
-        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
-        os::prepare(&mut cmd, &shm, mode);
-        let out = match os::run(cmd, mode) {
+        let job = Job { args: vec!["--worker".into(), mode.to_string(), port.to_string()], input_path };
+        let out = match os::run(&job, &shm, mode) {
             Ok(o) => o,
             Err(e) => {
                 println!("[{mode}] FAILED to run worker: {e}");
@@ -167,6 +171,7 @@ fn parent(input_path: &str) -> i32 {
             failures += 1;
         }
     }
+    os::cleanup();
     failures
 }
 

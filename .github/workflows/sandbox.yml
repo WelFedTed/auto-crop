@@ -40,3 +40,26 @@ jobs:
       - name: Run the sandbox probe
         shell: bash
         run: cargo run --manifest-path spikes/sandbox/Cargo.toml -- spikes/sandbox/Cargo.toml
+      - name: Run the probe with Landlock disabled (the fallback must be recorded, never silent)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          AUTOCROP_SANDBOX_NO_LANDLOCK: "1"
+        run: |
+          out=$(cargo run --manifest-path spikes/sandbox/Cargo.toml -- spikes/sandbox/Cargo.toml | tee /dev/stderr)
+          echo "$out" | grep -q 'landlock=unavailable(disabled by AUTOCROP_SANDBOX_NO_LANDLOCK)'
+
+  fedora:
+    name: fedora (best-effort)
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    container:
+      image: fedora@sha256:43b29f65a41eb9c35e1cd5323e3bdf3b655c2357a9f4f1ff2f9c2798e5045d80 # fedora:latest on 2026-10-01
+    steps:
+      - name: Toolchain
+        run: dnf install -y --setopt=install_weak_deps=False rust cargo gcc git
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run the sandbox probe
+        run: cargo run --manifest-path spikes/sandbox/Cargo.toml -- spikes/sandbox/Cargo.toml
