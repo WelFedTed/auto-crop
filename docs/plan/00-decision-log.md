@@ -98,6 +98,7 @@ The owner reviewed section H and answered as follows. These are now decisions, n
 - **A-3 confirmed:** early previews default to Strict; Balanced is labelled experimental until the private golden set shows it meets its 1% silent-failure target.
 - **A-4 confirmed:** a missed exit gate delays 1.0; shipping a feature as Experimental or moving it to 1.x is the owner's decision, made with measured numbers. Nothing is cut silently.
 - **A-2, A-5, A-6, A-7, A-8, A-9, A-10, A-11, A-12 accepted as written.** A-8: the owner will build the private golden set over time (v0 about 150 images in M1, 500 before the ML gate, 800 before 1.0).
-- **Hardware available (A-9):** a Windows touchscreen device, an Apple silicon Mac, an Intel MacBook, a Linux machine and a flatbed scanner. Intel Mac results can therefore be measured (still best-effort until 1.0, C1); whether the Linux machine has a touchscreen is not yet recorded.
+- **Hardware available (A-9):** a Windows touchscreen device, an Apple silicon Mac, an Intel MacBook, a Linux machine and a flatbed scanner. Intel Mac results can therefore be measured (still best-effort until 1.0, C1); the Linux machine has **no touchscreen**, so Linux touch gestures cannot be measured on real touch hardware: those cells stay UNMEASURED (A-9) and Linux touch remains best-effort (B8); mouse, trackpad and keyboard on Linux are still tested.
 - **Copyright holder:** `WelFedTed` (LICENSE-MIT, LICENSE-APACHE; see B2).
-- **Still open:** confirm the milestone order and say "start M0" (ROADMAP item P.05).
+- **Milestone order confirmed (2026-10-01):** M0-M13 as in ROADMAP.md.
+- **Still open:** the owner's go-ahead to start M0 (ROADMAP item P.05).
