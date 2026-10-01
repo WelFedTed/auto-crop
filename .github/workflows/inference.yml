@@ -3,6 +3,8 @@
 
 # Inference backend spike (ROADMAP M0.32-M0.35): ort vs rten vs tract on two stand-in nets, fp32 and
 # int8, on every OS and architecture we target. The throwaway code is under spikes/inference.
+# The nets are generated once (Linux, where onnxruntime wheels exist) and shared as an artifact:
+# Python onnxruntime has no macOS x86_64 wheels, so the Intel Mac cell could not generate them.
 name: Inference spike
 
 on:
@@ -17,7 +19,28 @@ permissions:
   contents: read
 
 jobs:
+  models:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Generate the stand-in nets and int8 variants
+        working-directory: spikes/inference
+        env:
+          PIP_BREAK_SYSTEM_PACKAGES: "1" # throwaway runner
+        run: |
+          python3 -m pip install --quiet numpy onnx onnxruntime
+          python3 gen_models.py models --quantize > /dev/null 2>&1
+          ls -la models
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: models
+          path: spikes/inference/models
+          retention-days: 3
+
   bench:
+    needs: models
     name: ${{ matrix.os }}${{ matrix.best-effort && ' (best-effort)' || '' }}
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.best-effort }}
@@ -25,40 +48,64 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-22.04, best-effort: false }
-          - { os: ubuntu-22.04-arm, best-effort: true }
-          - { os: macos-latest, best-effort: false }
-          - { os: macos-26-intel, best-effort: true }
-          - { os: windows-2025, best-effort: false }
-          - { os: windows-11-arm, best-effort: true }
+          # ort_mode: dl = ort downloads its own runtime (Windows, macOS arm64); dyn = ort loads the
+          # runtime we fetch (Linux: the downloaded static runtime needs a newer libstdc++ than
+          # Ubuntu 22.04 has); none = no ONNX Runtime binaries exist (Intel Mac).
+          - { os: ubuntu-22.04, best-effort: false, ort_mode: dyn, ort_url: "https://github.com/microsoft/onnxruntime/releases/download/v1.28.2/onnxruntime-linux-x64-1.28.2.tgz", ort_sha256: "d7209b8751b27b862b0c76332c2e20e203396edb5dab700ecf4bb485cf147415" }
+          - { os: ubuntu-22.04-arm, best-effort: true, ort_mode: dyn, ort_url: "https://github.com/microsoft/onnxruntime/releases/download/v1.28.2/onnxruntime-linux-aarch64-1.28.2.tgz", ort_sha256: "" }
+          - { os: macos-latest, best-effort: false, ort_mode: dl }
+          - { os: macos-26-intel, best-effort: true, ort_mode: none }
+          - { os: windows-2025, best-effort: false, ort_mode: dl }
+          - { os: windows-11-arm, best-effort: true, ort_mode: dl }
     defaults:
       run:
         shell: bash
         working-directory: spikes/inference
+    env:
+      PIP_BREAK_SYSTEM_PACKAGES: "1" # throwaway runner; Homebrew Python enforces PEP 668
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Python tools (stand-in generator and orchestrator)
-        env:
-          PIP_BREAK_SYSTEM_PACKAGES: "1" # throwaway runner; Homebrew Python enforces PEP 668
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: models
+          path: spikes/inference/models
+      - name: numpy for the orchestrator
         run: |
           PY=$(command -v python3 || command -v python)
-          "$PY" -m pip install --quiet numpy onnx onnxruntime
-          "$PY" gen_models.py models --quantize > /dev/null 2>&1
-          ls -la models
+          "$PY" -m pip install --quiet numpy
+      - name: Fetch the ONNX Runtime we load (Linux)
+        if: matrix.ort_mode == 'dyn'
+        run: |
+          curl -sSL -o ort.tgz "${{ matrix.ort_url }}"
+          SHA=$(sha256sum ort.tgz | cut -d' ' -f1)
+          echo "ort.tgz sha256 $SHA"
+          if [ -n "${{ matrix.ort_sha256 }}" ] && [ "$SHA" != "${{ matrix.ort_sha256 }}" ]; then echo "SHA-256 mismatch"; exit 1; fi
+          mkdir ort && tar -xzf ort.tgz -C ort --strip-components=1
+          LIB=$(ls "$PWD"/ort/lib/libonnxruntime.so.* | head -1)
+          echo "ORT_DYLIB_PATH=$LIB" >> "$GITHUB_ENV"
+          ls -la ort/lib
       - name: Build the harness (release)
-        run: cargo build --release
+        run: |
+          case "${{ matrix.ort_mode }}" in
+            dl) F=ort-b,rten-b,tract-b ;;
+            dyn) F=ort-dyn,rten-b,tract-b ;;
+            none) F=rten-b,tract-b ;;
+          esac
+          echo "FEATURES=$F" >> "$GITHUB_ENV"
+          cargo build --release --no-default-features --features "$F"
       - name: Run the matrix
         run: |
           PY=$(command -v python3 || command -v python)
           EXE=target/release/infer
           [ -f "$EXE.exe" ] && EXE="$EXE.exe"
+          if [ "${{ matrix.ort_mode }}" = none ]; then export BACKENDS=rten,tract; fi
           "$PY" run.py "$EXE" 30 | tee table.md
           { echo "### ${{ matrix.os }}"; echo; cat table.md; } >> "$GITHUB_STEP_SUMMARY"
       - name: Binary sizes per backend
         run: |
-          for f in ort-b rten-b tract-b; do
+          for f in $(echo "$FEATURES" | tr ',' ' '); do
             cargo build --release --no-default-features --features $f 2>&1 | tail -1
             EXE=target/release/infer; [ -f "$EXE.exe" ] && EXE="$EXE.exe"
             echo "$f: $(wc -c < "$EXE") bytes"

@@ -9,6 +9,7 @@ exe = os.path.abspath(sys.argv[1])
 runs = sys.argv[2] if len(sys.argv) > 2 else "50"
 nets = {"quadnet": (256, 4, 64), "orient": (224, 4, None)}
 rows = []
+backends = os.environ.get("BACKENDS", "ort,rten,tract").split(",")
 
 
 def peaks(out):  # (4,64,64) heatmaps -> subpixel peaks in input pixels (5x5 centroid around the max)
@@ -38,18 +39,18 @@ for net in nets:
         inp = f"models/{net}_input.f32"
         ref = None
         results = {}
-        for be in ("ort", "rten", "tract"):
+        for be in backends:
             for th in (1, 4):
                 r = run(be, model, inp, th)
                 r.update(net=net, prec=prec, backend=be)
                 results[(be, th)] = r
-        refr = results[("ort", 1)]
-        if refr["ok"]:
+        refr = next((results[(b, 1)] for b in backends if results[(b, 1)]["ok"]), None)  # first working backend (ORT when present)
+        if refr:
             ref = np.fromfile(refr["out"], dtype=np.float32)
         # fp32 reference for int8 accuracy
         ref32 = None
         if prec == "int8":
-            r32 = run("ort", f"models/{net}.onnx", inp, 1)
+            r32 = run(refr["backend"], f"models/{net}.onnx", inp, 1) if refr else {"ok": False}
             if r32["ok"]:
                 ref32 = np.fromfile(r32["out"], dtype=np.float32)
         for (be, th), r in results.items():
