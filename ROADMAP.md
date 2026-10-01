@@ -22,7 +22,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | Milestone | Title | Release | Platforms | Size | Progress |
 |---|---|---|---|---|---|
 | P | Planning | none | documents | - | 4 / 5 (80%) |
-| M0 | Foundations and week-1 spikes | none | CI only (Windows, macOS, Linux) | XL | 30 / 93 (32%) |
+| M0 | Foundations and week-1 spikes | none | CI only (Windows, macOS, Linux) | XL | 34 / 93 (36%) |
 | M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 0 / 94 (0%) |
 | M2 | Classical pipeline, safe writes and CLI | v0.1.0 | Windows 10/11 x64 | L | 0 / 91 (0%) |
 | M3 | GUI alpha: single-image editor | v0.2.0 | Windows 10/11 x64 | XL | 0 / 92 (0%) |
@@ -39,7 +39,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | X | Continuous and cross-cutting | - | - | - | 0 / 42 (0%) |
 | X | Post-1.0 backlog (1.x) | - | - | - | 0 / 43 (0%) |
 | X | Spikes and open decisions | - | - | - | 0 / 28 (0%) |
-| **Total** | | | | | **34 / 1402 (2%)** |
+| **Total** | | | | | **38 / 1402 (2%)** |
 <!-- progress:end -->
 
 ## Why this order
@@ -93,7 +93,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [x] **M0.09 cargo-about notices** - `about.toml` and `about.hbs` generate `THIRD_PARTY_NOTICES.md` for the shipping workspace; accepted licences equal the cargo-deny allow-list (`xtask licenses --check` fails on drift). Accept: passes on three OSes; a planted unlisted licence fails.
 - [ ] **M0.10 Security workflow** - `security.yml` (daily): `cargo deny` advisories, `cargo audit` and a watch on each `native-deps.toml` library that opens a `security-native` issue on a stale pin (fake-pin test). SLA (PROVISIONAL): critical/high 7 days (72 h for critical), moderate/low <= 30 days.
 - [x] **M0.11 xtask bootstrap** - `xtask/` (alias in `.cargo/config.toml`); `doctor` checks the C/C++ toolchain, CMake, NASM (x86 only), Ninja, Node LTS and git and prints the winget, brew or apt command per missing tool. Accept: clean Windows 11 and Ubuntu 22.04 list exactly the missing tools.
-- [ ] **M0.12 Devcontainer** - `.devcontainer/` on Ubuntu 22.04 with the pinned toolchain, CMake, NASM, Ninja, `libwebkit2gtk-4.1-dev`, Node LTS; a weekly CI job runs `cargo xtask doctor && cargo build --workspace` inside it. Accept: a fresh `devcontainer up` builds with no manual steps.
+- [x] **M0.12 Devcontainer** - `.devcontainer/` on Ubuntu 22.04 with the pinned toolchain, CMake, NASM, Ninja, `libwebkit2gtk-4.1-dev`, Node LTS; a weekly CI job runs `cargo xtask doctor && cargo build --workspace` inside it. Accept: a fresh `devcontainer up` builds with no manual steps.
 - [ ] **M0.13 release-plz and tag credentials** - `release-plz.toml` (release PR and `CHANGELOG.md`, `publish = false`, tags only) and a GitHub App token in an approval-gated `release` environment. Accept: in the scratch repo an App-token tag triggers `release.yml`; a `GITHUB_TOKEN` tag does not.
 - [ ] **M0.14 Release dry-run** - Scratch repo: dummy artifacts, draft, upload all, publish with immutable releases; a late upload must be refused. Accept: only environment approval needed; "attach everything first" goes in `docs/release-runbook.md`; real-repo immutability decided (proposed: M2).
 - [ ] **M0.15 Checksums, attestation, SBOM** - Scratch release: `SHA256SUMS`, an `actions/attest@v4` attestation per asset (job-level `id-token` and `attestations` write) and an attested `cargo-cyclonedx` SBOM. Accept: `sha256sum -c` and `gh attestation verify` pass; a tampered asset fails both.
@@ -139,8 +139,8 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [x] **M0.51 Golden-set strata and sizes** - Strata and label JSON Schema (blank-quad, never from the app suggestion). Staging: v0 >= 150 (>= 25 per slice, M1), v1 >= 500 (>= 50, before G2), v2 >= 800 locked (>= 80 per gated slice, before 1.0); slices overlap; +~300 dev tier; n < 30 unpublished.
 - [ ] **M0.52 Golden-set CI dry run** - Private `auto-crop-golden` repo: hosted runner builds (no golden token); self-hosted runner (repo-only) runs the built `auto-crop-eval` in a network-less container, data read-only; a reviewed publisher pushes allow-listed aggregates. Dry run: synthetic images.
 - [ ] **M0.53 Fork-PR negative test** - Triggers: nightly, dispatch and release dispatch only. From a second-account fork, a PR tries to read a secret and dispatch the workflow. Accept: no secret exposed, workflow not run, no `pull_request_target` (zizmor), no third-party code beside the data.
-- [ ] **M0.54 8:1 strip generator** - `spikes/strips/gen.py` renders 500 synthetic long receipts in aspect buckets 4:1, 6:1, 8:1, 10:1 (equal counts) with known quads, random homographies (tilt up to 30 degrees), noise, blur, JPEG q40-95. Seeded fixtures and quads written; 20 images spot-checked.
-- [ ] **M0.55 8:1 strip run, failure rate** - Dev-only, weights never committed: DocQuadNet-256 at 256x256 and an elongated 512x128 variant; with no M0.26 answer or approval, only the classical Canny/contour baseline. ADR: per-bucket failure rate (IoU < 0.9) and corner error as an M4 input.
+- [x] **M0.54 8:1 strip generator** - `spikes/strips/gen.py` renders 500 synthetic long receipts in aspect buckets 4:1, 6:1, 8:1, 10:1 (equal counts) with known quads, random homographies (tilt up to 30 degrees), noise, blur, JPEG q40-95. Seeded fixtures and quads written; 20 images spot-checked.
+- [x] **M0.55 8:1 strip run, failure rate** - Dev-only, weights never committed: DocQuadNet-256 at 256x256 and an elongated 512x128 variant; with no M0.26 answer or approval, only the classical Canny/contour baseline. ADR: per-bucket failure rate (IoU < 0.9) and corner error as an M4 input.
 ### UI/UX
 - [ ] **M0.56 GUI spike plan and devices** - Devices (Surface, MacBook, Ubuntu 24.04 and Fedora on Wayland/X11, NVIDIA/Intel, touchscreen), UNMEASURED rule, 24 MP workload (A real design, B raw bitmap; 10 s runs). Bars: median <= 17 ms, p95 <= 20; Linux trigger median > 22 ms after shims (A-10).
 - [ ] **M0.57 Tauri + Svelte prototype** - `spikes/gui-tauri/` (Tauri 2.12, Svelte 5): Rust serves the pyramid via a launch-token scheme (`no-store`, `nosniff`) under the PLAN 8.6.4 CSP and a plugin-free capability file; `matrix3d` view, 48 px SVG quad handles, Pointer Events gestures, frame HUD.
@@ -176,7 +176,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [ ] **GATE:** Decode-only libheif >= 1.23.5 plus libde265 build as separate shared libraries on `windows-2025`, `macos-latest` and `ubuntu-22.04` via CMake, and `cargo xtask check-native` proves no x265 or x264 symbols and no GPL libraries are linked.
 - [ ] **GATE:** turbojpeg builds on three OSes with libjpeg-turbo >= 3.1.4 and a CI version assertion; the Lanczos ADR records speed and memory at 12 MP for kornia-imgproc f32 vs own strip-wise u8/u16 against the OpenCV oracle (PROVISIONAL: PSNR >= 45 dB, <= 90 ms at 8 threads).
 - [ ] **GATE:** The sandbox ADR records per-OS feasibility (job object + restricted token or AppContainer, Landlock + seccomp, `sandbox_init`) with escape-test results, the achieved level per OS and the M6, M8 and M9 work implied.
-- [ ] **GATE:** The 8:1 long-strip failure rate per aspect bucket (4:1, 6:1, 8:1, 10:1) is recorded as an M4 input, the ML part marked dev-only or skipped per the MakeACopy licence outcome.
+- [x] **GATE:** The 8:1 long-strip failure rate per aspect bucket (4:1, 6:1, 8:1, 10:1) is recorded as an M4 input, the ML part marked dev-only or skipped per the MakeACopy licence outcome.
 - [ ] **GATE:** Writing plans are approved for the HEVC legal read, the private golden set (consent and redaction) and model provenance, and the MakeACopy DocQuadNet weights licence has an answer (a reply, or a documented no-reply after 14 days).
 - [ ] **GATE:** Tier-M is defined and the Apple-silicon access decision made; >= 3 real files per size class of the 12/48/100 MP corpus logged with licences (gaps recorded); the HEIC plan is merged; the golden-set dry run publishes aggregates only and the fork-PR test exposes no secret.
 - [ ] **GATE:** In the scratch repo an App-created tag triggers `release.yml` and the draft, upload-all, publish flow works under immutable releases with `SHA256SUMS`, `gh attestation verify` and a CycloneDX SBOM; a fresh devcontainer builds with `cargo xtask doctor` green.
