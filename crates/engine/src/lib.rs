@@ -1,7 +1,24 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // SPDX-FileCopyrightText: 2026 Auto Crop contributors
 
-//! Job queue, edit pipeline and safe writes (placeholder).
+//! Job queue, edit pipeline and safe writes.
+
+pub mod api;
+pub mod commit;
+mod engine;
+pub mod enumerate;
+pub mod error;
+pub mod paths;
+pub mod samples;
+pub mod settings;
+pub mod store;
+pub mod util;
+
+pub use api::*;
+pub use engine::{Engine, Notify};
+pub use error::ErrKind;
+pub use paths::AppPaths;
+pub use settings::Settings;
 
 use auto_crop_core::EditState;
 

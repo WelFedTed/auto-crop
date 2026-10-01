@@ -7,7 +7,12 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
-ignore = []
+ignore = [
+    # proc-macro-error comes in through gtk3-macros, which Tauri's Linux WebKitGTK stack needs. It is a
+    # compile-time macro crate, absent from Windows and macOS builds, and Linux is a best-effort
+    # target (B8, B9). Revisit when Tauri moves off GTK3 or at ROADMAP M3.68.
+    { id = "RUSTSEC-2024-0370", reason = "unmaintained build-time macro crate, Linux GTK3 stack only (Tauri)" },
+]
 
 [licenses]
 version = 2
