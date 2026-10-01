@@ -118,6 +118,8 @@ Full register with likelihood, impact and owner milestone: [PLAN 8](docs/plan/08
 
 ## Decisions and vetoes for you
 
+**Update 2026-10-01: the owner accepted all twelve as written** (A-1 CLI overwrites by default, A-3 Strict until proven, A-4 delay 1.0 and the owner decides were explicitly confirmed; see [decision log section I](docs/plan/00-decision-log.md)). They stay listed here for reference.
+
 These were needed to resolve conflicts between documents without reopening B1-B21. **Each is an assumption the plan follows until you say otherwise** (wording in [decision log section H](docs/plan/00-decision-log.md) and [PLAN 1.7](docs/plan/01-vision-decisions.md)).
 
 | ID | Assumption (default the plan follows) |
@@ -139,7 +141,7 @@ Also unasked and open to veto (defaults C1-C7 and P1-P3 in PLAN 1.7): hardware f
 
 ## What happens next
 
-1. **You review** this file and skim [ROADMAP.md](ROADMAP.md); veto or accept A-1..A-12 and confirm the milestone order (ROADMAP item P.05).
+1. **You confirm the milestone order** and say "start M0" (ROADMAP item P.05). A-1..A-12 are already accepted.
 2. **Then M0 starts:** create the public repo `WelFedTed/auto-crop` with licence, CI on all three OSes and dependency policy, and run the week-1 spikes (GUI stack, inference runtime, warp kernels, HEIC on real files, sandboxing). Nothing is built before you say so.
 
 ## How this plan was made

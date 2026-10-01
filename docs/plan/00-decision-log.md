@@ -89,3 +89,15 @@ These readings were needed to resolve conflicts between documents without changi
 - **A-10** (Slint fallback thresholds and waivers?) For B8, "cannot hold about 60 fps" on Linux means median frame > 22 ms after shims on the 24 MP proxy; Linux touch stays best-effort; switching to Slint needs the owner's waiver of B20 RTL layout and a licence decision.
 - **A-11** (Scope readings?) Radial lens correction is not in 1.0 (perspective and curved-page dewarp deliver "distortion"); Orca results are best-effort and do not gate 1.0; the default crop margin is per route (04 §4.6).
 - **A-12** (Release process?) 1.0 needs two RC windows of 14 days (3 days if the RC differs only by native-library bumps); 0.x previews are ordinary releases; `auto-crop` is reserved on crates.io at the first release, no `auto-crop-core`.
+
+## I. Owner confirmations (2026-10-01)
+
+The owner reviewed section H and answered as follows. These are now decisions, not assumptions.
+
+- **A-1 confirmed:** the CLI overwrites in place after a verified backup when no output flag is given (follows B3).
+- **A-3 confirmed:** early previews default to Strict; Balanced is labelled experimental until the private golden set shows it meets its 1% silent-failure target.
+- **A-4 confirmed:** a missed exit gate delays 1.0; shipping a feature as Experimental or moving it to 1.x is the owner's decision, made with measured numbers. Nothing is cut silently.
+- **A-2, A-5, A-6, A-7, A-8, A-9, A-10, A-11, A-12 accepted as written.** A-8: the owner will build the private golden set over time (v0 about 150 images in M1, 500 before the ML gate, 800 before 1.0).
+- **Hardware available (A-9):** a Windows touchscreen device, an Apple silicon Mac, an Intel MacBook, a Linux machine and a flatbed scanner. Intel Mac results can therefore be measured (still best-effort until 1.0, C1); whether the Linux machine has a touchscreen is not yet recorded.
+- **Copyright holder:** `WelFedTed` (LICENSE-MIT, LICENSE-APACHE; see B2).
+- **Still open:** confirm the milestone order and say "start M0" (ROADMAP item P.05).
