@@ -9,9 +9,31 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
+build = "build.rs"
+
+[features]
+# The Tauri GUI. Off by default so the workspace-wide jobs (fmt, clippy, nextest, deny) and Linux CI
+# without the WebKitGTK system libraries keep building until the M3.70 shell jobs exist.
+# Build the app with: cargo build -p auto-crop-shell --release --features gui,custom-protocol
+gui = ["dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-build", "dep:getrandom"]
+# Serve the embedded UI (ui/dist) instead of the dev server URL.
+custom-protocol = ["tauri/custom-protocol"]
 
 [dependencies]
 auto-crop-engine = { path = "../engine" }
+serde.workspace = true
+serde_json.workspace = true
+tauri = { version = "=2.12.1", default-features = false, features = ["wry", "common-controls-v6", "compression"], optional = true }
+tauri-plugin-dialog = { version = "2", optional = true }
+getrandom = { version = "0.3", optional = true }
+
+[build-dependencies]
+tauri-build = { version = "2", optional = true }
+
+[[bin]]
+name = "AutoCrop"
+path = "src/main.rs"
+required-features = ["gui"]
 
 [lints]
 workspace = true

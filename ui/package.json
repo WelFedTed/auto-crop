@@ -1,0 +1,26 @@
+{
+  "name": "auto-crop-ui",
+  "private": true,
+  "version": "0.0.0",
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "node --test \"src/**/*.test.ts\"",
+    "check": "svelte-check --tsconfig ./tsconfig.json"
+  },
+  "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5",
+    "@fontsource/ibm-plex-sans": "^5",
+    "@tauri-apps/api": "2.12.0"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "@types/node": "^24",
+    "svelte": "5.57.1",
+    "svelte-check": "^4",
+    "typescript": "^5",
+    "vite": "8.3.2"
+  }
+}

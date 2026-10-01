@@ -1,0 +1,486 @@
+/* SPDX-License-Identifier: MIT OR Apache-2.0 */
+/* SPDX-FileCopyrightText: 2026 Auto Crop contributors */
+
+/* Design tokens (PLAN 6.16). Light is the default; dark follows prefers-color-scheme, and a
+   data-theme="light|dark" attribute on <html> (Settings > Theme) overrides the system choice. */
+:root {
+  color-scheme: light;
+  --bg: #f2f3f5;
+  --surface: #ffffff;
+  --surface-2: #f7f8fa;
+  --line: #dde0e6;
+  --line-soft: #e8eaee;
+  --line-strong: #cdd1d9;
+  --text: #15181e;
+  --text-2: #4a5160;
+  --text-3: #5f6675;
+  --accent: #2b4fd8;
+  --accent-hover: #2343bd;
+  --accent-tint: #e8edfc;
+  --accent-text: #1f3fb0;
+  --on-accent: #ffffff;
+  --focus: #2b4fd8;
+  --info-bg: #eef2fd;
+  --info-line: #c5d1f5;
+  --info-text: #2a3350;
+  --good-fg: #0b5b33;
+  --good-bg: #e3f4ea;
+  --good-line: #a9dbbe;
+  --check-fg: #7a4200;
+  --check-bg: #fdf0d5;
+  --check-line: #e9c071;
+  --check-text-strong: #4a2800;
+  --fail-fg: #a3201a;
+  --fail-bg: #fce7e5;
+  --fail-line: #e3b5b1;
+  --seg-bg: #ebedf1;
+  --seg-on: #ffffff;
+  --switch-off: #7b8394;
+  --tile-bg: #d5d9e0;
+  --shadow-sm: 0 1px 2px rgba(20, 24, 30, 0.18);
+  --shadow-lg: 0 12px 36px rgba(20, 24, 30, 0.22);
+  --bulk-bg: #15181e;
+  --bulk-text: #ffffff;
+  --scrim: rgba(21, 24, 30, 0.55);
+  /* the editor canvas stays a mid-dark neutral grey in every theme (PLAN 6.10) */
+  --canvas: #353a42;
+  --canvas-bar: #262a33;
+  --canvas-line: #3a3f4b;
+  --canvas-text: #ffffff;
+  --canvas-text-2: #c4cad6;
+  --canvas-btn: rgba(255, 255, 255, 0.1);
+  --canvas-btn-line: rgba(255, 255, 255, 0.28);
+  --canvas-accent: #7c9bff;
+  --font-sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  --ctl-h: 36px;
+  --ctl-h-sm: 32px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --bg: #14171c;
+    --surface: #1d2128;
+    --surface-2: #181c22;
+    --line: #2f3541;
+    --line-soft: #272c36;
+    --line-strong: #3a404d;
+    --text: #eceef2;
+    --text-2: #b4bac6;
+    --text-3: #9199a8;
+    --accent: #3e63e6;
+    --accent-hover: #5072ee;
+    --accent-tint: #1b2438;
+    --accent-text: #9db4ff;
+    --focus: #9db4ff;
+    --info-bg: #1b2438;
+    --info-line: #2d3a5e;
+    --info-text: #d5def8;
+    --good-fg: #7fe0a8;
+    --good-bg: #12301f;
+    --good-line: #1f5a3a;
+    --check-fg: #f5c56b;
+    --check-bg: #3a2a0a;
+    --check-line: #6b5116;
+    --check-text-strong: #f8d98f;
+    --fail-fg: #ff9c94;
+    --fail-bg: #3f1613;
+    --fail-line: #6b2a25;
+    --seg-bg: #2a2f39;
+    --seg-on: #3b424f;
+    --switch-off: #7b8394;
+    --tile-bg: #2a2f39;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --shadow-lg: 0 12px 36px rgba(0, 0, 0, 0.55);
+    --bulk-bg: #0f1216;
+    --bulk-text: #eceef2;
+    --scrim: rgba(0, 0, 0, 0.62);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #14171c;
+  --surface: #1d2128;
+  --surface-2: #181c22;
+  --line: #2f3541;
+  --line-soft: #272c36;
+  --line-strong: #3a404d;
+  --text: #eceef2;
+  --text-2: #b4bac6;
+  --text-3: #9199a8;
+  --accent: #3e63e6;
+  --accent-hover: #5072ee;
+  --accent-tint: #1b2438;
+  --accent-text: #9db4ff;
+  --focus: #9db4ff;
+  --info-bg: #1b2438;
+  --info-line: #2d3a5e;
+  --info-text: #d5def8;
+  --good-fg: #7fe0a8;
+  --good-bg: #12301f;
+  --good-line: #1f5a3a;
+  --check-fg: #f5c56b;
+  --check-bg: #3a2a0a;
+  --check-line: #6b5116;
+  --check-text-strong: #f8d98f;
+  --fail-fg: #ff9c94;
+  --fail-bg: #3f1613;
+  --fail-line: #6b2a25;
+  --seg-bg: #2a2f39;
+  --seg-on: #3b424f;
+  --switch-off: #7b8394;
+  --tile-bg: #2a2f39;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 12px 36px rgba(0, 0, 0, 0.55);
+  --bulk-bg: #0f1216;
+  --bulk-text: #eceef2;
+  --scrim: rgba(0, 0, 0, 0.62);
+}
+
+/* Density follows the last pointer (PLAN 6.5): touch makes controls 48 px. */
+:root[data-input='touch'] {
+  --ctl-h: 48px;
+  --ctl-h-sm: 44px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.4;
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior: none;
+}
+
+#app {
+  height: 100%;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+a {
+  color: var(--accent-text);
+}
+
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+[data-route-heading]:focus {
+  outline: none;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+/* ---- buttons ------------------------------------------------------------------------------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: var(--ctl-h);
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 500;
+  font-size: 14px;
+  line-height: 1.2;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.btn:disabled,
+.btn[aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.btn-danger {
+  color: var(--fail-fg);
+  border-color: var(--fail-line);
+}
+
+.btn-lg {
+  min-height: max(48px, var(--ctl-h));
+  padding: 0 22px;
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 10px;
+}
+
+.btn-sm {
+  min-height: var(--ctl-h-sm);
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.btn-link {
+  min-height: var(--ctl-h-sm);
+  padding: 0 6px;
+  background: transparent;
+  border: 0;
+  color: var(--accent-text);
+  text-decoration: underline;
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.btn-link:hover:not(:disabled) {
+  background: transparent;
+  text-decoration-thickness: 2px;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ctl-h);
+  height: var(--ctl-h);
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: var(--seg-bg);
+}
+
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ---- surfaces ------------------------------------------------------------------------------ */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.info-card {
+  background: var(--info-bg);
+  border: 1px solid var(--info-line);
+  border-radius: 12px;
+  color: var(--info-text);
+}
+
+/* ---- tier badges: icon plus word, never colour alone ---------------------------------------- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px 0 6px;
+  border-radius: 11px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge.good {
+  background: var(--good-bg);
+  color: var(--good-fg);
+}
+
+.badge.check {
+  background: var(--check-bg);
+  color: var(--check-fg);
+}
+
+.badge.failed {
+  background: var(--fail-bg);
+  color: var(--fail-fg);
+}
+
+.badge.neutral {
+  background: var(--seg-bg);
+  color: var(--text-2);
+}
+
+.badge.accent {
+  background: var(--accent-tint);
+  color: var(--accent-text);
+}
+
+/* ---- form controls ------------------------------------------------------------------------- */
+.select,
+.input {
+  min-height: var(--ctl-h);
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.input.mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--seg-bg);
+  border-radius: 9px;
+}
+
+.seg button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: calc(var(--ctl-h-sm) - 2px);
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.seg button[aria-pressed='true'] {
+  background: var(--seg-on);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+}
+
+.tag {
+  display: inline-block;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: var(--check-bg);
+  color: var(--check-fg);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+input[type='range'] {
+  accent-color: var(--accent);
+  min-height: var(--ctl-h-sm);
+}
+
+input[type='checkbox'],
+input[type='radio'] {
+  accent-color: var(--accent);
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}
+
+/* ---- page chrome --------------------------------------------------------------------------- */
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.page-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--tile-bg) 0%, var(--seg-bg) 50%, var(--tile-bg) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media (forced-colors: active) {
+  .badge,
+  .btn,
+  .seg button[aria-pressed='true'] {
+    border: 1px solid CanvasText;
+  }
+}

@@ -6,7 +6,20 @@ Auto Crop is a free, open-source desktop app for Windows, macOS and Linux. Drop 
 
 Everything runs locally: no account, no upload, no telemetry.
 
-> **Status: planning stage. There is no code and no download yet.** The plan is complete and the first milestone (M0) has not started. Watch or star the repo to follow progress.
+> **Status: pre-alpha.** There is no release or download yet. A first, owner-directed slice of the desktop app can be built from source for testing (see [Try the early GUI](#try-the-early-gui)): it opens JPEG and PNG, finds the page with a classical detector, lets you adjust the crop, saves with a verified automatic backup, and restores originals. Most of the plan below is not built.
+
+## Try the early GUI
+
+Windows 10/11 (WebView2 is already part of Windows 11), Rust (see `rust-toolchain.toml`) and Node.js LTS are needed.
+
+```sh
+cd ui && npm ci && npm run build && cd ..
+cargo run -p auto-crop-shell --release --features gui,custom-protocol
+```
+
+Click **Try sample images** to get synthetic receipts and documents with a spread of difficulty, or open your own JPG or PNG files or a folder (or drop them on the window). Nothing leaves your computer. Originals are replaced only after a verified backup; **Save as copy** (Settings or Home) leaves them alone, and **Backups** restores them. To work on the interface without the Rust side, run `npm --prefix ui run dev` in a browser: it uses a built-in mock.
+
+Known limits of this slice: JPEG and PNG only (no HEIC yet), EXIF other than orientation is dropped on save, the confidence score is an uncalibrated heuristic, no enhancement, no multi-item splitting, Windows is the only tested platform. The detector is a simple baseline; expect to adjust some crops by hand.
 
 ## Planned features
 

@@ -24,8 +24,8 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | P | Planning | none | documents | - | 4 / 5 (80%) |
 | M0 | Foundations and week-1 spikes | none | CI only (Windows, macOS, Linux) | XL | 49 / 94 (52%) |
 | M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 0 / 94 (0%) |
-| M2 | Classical pipeline, safe writes and CLI | v0.1.0 | Windows 10/11 x64 | L | 0 / 91 (0%) |
-| M3 | GUI alpha: single-image editor | v0.2.0 | Windows 10/11 x64 | XL | 0 / 93 (0%) |
+| M2 | Classical pipeline, safe writes and CLI | v0.1.0 | Windows 10/11 x64 | L | 0 / 93 (0%) |
+| M3 | GUI alpha: single-image editor | v0.2.0 | Windows 10/11 x64 | XL | 0 / 94 (0%) |
 | M4 | ML detection, orientation and calibrated confidence | v0.3.0 | Windows 10/11 x64 | XL | 0 / 90 (0%) |
 | M5 | Batch review workflow, backups panel and trust features | v0.4.0 | Windows 10/11 x64 | L | 0 / 94 (0%) |
 | M6 | HEIC/HEIF, sandboxed decoding and format read breadth | v0.5.0 | Windows 10/11 x64 | XL | 0 / 96 (0%) |
@@ -39,7 +39,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | X | Continuous and cross-cutting | - | - | - | 0 / 42 (0%) |
 | X | Post-1.0 backlog (1.x) | - | - | - | 0 / 43 (0%) |
 | X | Spikes and open decisions | - | - | - | 0 / 28 (0%) |
-| **Total** | | | | | **53 / 1404 (3%)** |
+| **Total** | | | | | **53 / 1407 (3%)** |
 <!-- progress:end -->
 
 ## Why this order
@@ -378,6 +378,8 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [ ] **M2.37 Restore** - By id, path or batch: unchanged output restores silently, else `if_modified = fail | backup | copy`; same verify and swap; metadata restored; works after a restart or `library.db` loss. Acceptance: byte-identical in 100% of the M2.59 matrix. _(gate: restore)_
 - [ ] **M2.38 Idempotency guard** - A file whose blake3 matches a recorded output is `AlreadyProcessed` and skipped (`--reprocess` restarts from the original); a no-op rule (quad >= 97% of frame, |skew| < 0.1 deg) skips without rewriting. Acceptance: a second run classifies >= 99% as no-op.
 
+- [ ] **M2.83 Commit-protocol parity for the early GUI slice** - The slice's save path (engine `commit.rs`, `store.rs`) lacks the SQLite journal, start-up crash recovery and temp sweep, `ReplaceFileW`, the free-space preflight, `Fast` verify mode and the failpoint test suite; it verifies by blake3 re-read plus decode and swaps with `rename`. Accept: each gap closed with a fault-injection test, per PLAN 2.7.
+- [ ] **M2.84 Replace the stand-in JPEG and PNG codecs** - `crates/codecs` uses the pure-Rust `image` crate (full re-encode, EXIF other than orientation dropped, no lossless JPEG path). Accept: libjpeg-turbo >= 3.1.4 (ADR-0004) with EXIF, ICC and mtime kept and the lossless rotate and crop path of PLAN 2.7.
 ### CLI
 - [ ] **M2.39 CLI skeleton** - Console `auto-crop` (`clap`; `engine` only): `process`, `restore`, `backups`, `doctor`, `analyze`, `render`, `eval` (feature, off in release); `--json`, `--quiet`, `--verbose`, `--no-config`; stdout machine output. Acceptance: `--help` snapshots, usage exit 2.
 - [ ] **M2.40 Input expansion and walking** - Files, dirs and Windows globs (`wild`); `-r` via `walkdir` (depth 64); symlinks only with `--follow-symlinks`; skips hidden, system, temp and store entries; warns above 50,000 files. Acceptance: symlink/junction loops end, each file processed once.
@@ -510,6 +512,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [ ] **M3.45 Save feedback and Issues tray** - Save bar with Restore original and a non-modal Issues tray of `ErrKind` errors (read, permission, size, cloud, in-use, disk, verify, backup failures) with Retry, Show in folder, Copy details. Pass: e2e per code: tray entry, no modal, original intact.
 - [ ] **M3.46 Report issue button** - `Report issue` (Settings, crash prompt): preview, redacted diagnostics (<= 4 KB) to the clipboard, then a pre-filled issue URL carrying only version, OS, webview, channel, error code via an allow-listed Rust command (B18). Pass: no path or file name in the URL.
 - [ ] **M3.84 Match the design canvas** - Screens follow the tokens, type, spacing, copy and states of PLAN 6.16 (light and dark), with fonts bundled locally; deviations are recorded in PLAN 6.16, not left in code. Pass: Playwright screenshots of Home, Batch review, Adjust, Convert, Backups and Settings reviewed against the canvas by the owner.
+- [ ] **M3.85 Early GUI slice (owner-directed, before the M0.70 verdict)** - On 2026-10-01 the owner asked for a testable GUI before M0.70: `ui/` (Svelte 5), `crates/shell` (Tauri, behind the `gui` feature) and an engine slice (classical detector, Lanczos warp, history, save and restore) exist and build. It does not meet M3's gates: no measured interaction budgets, no touch or Linux/macOS checks, uncalibrated confidence, no i18n externalisation lint, no tile pyramid or 24 MP path. Accept: the owner tests a build and records what to keep, rework or drop; M3.01 still needs the M0.70 verdict before M3 work continues.
 - [ ] **M3.81 Opt-in tap undo and redo** - `Tap undo` switch (Settings > Input, default off): two-finger tap = undo, three-finger tap = redo in the recogniser; spike three-finger tap delivery in WebView2. Pass: a pinch never triggers undo in replays; buttons and Ctrl+Z stay primary; it persists.
 
 ### Accessibility and i18n

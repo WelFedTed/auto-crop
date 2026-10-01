@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "The single capability (PLAN 8.6.4): the webview may call the app's own commands and listen for its events. No fs, shell, http, process, opener or dialog permission; pickers and drag-drop run in Rust.",
+  "windows": ["main"],
+  "permissions": ["core:event:default"]
+}

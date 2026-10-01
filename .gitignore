@@ -17,3 +17,6 @@ spikes/inference/results.jsonl
 spikes/**/node_modules/
 spikes/gui-tauri/ui/dist/
 spikes/gui-tauri/gen/
+crates/shell/gen/
+ui/dist/
+ui/node_modules/

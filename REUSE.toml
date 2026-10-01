@@ -24,6 +24,10 @@ path = [
     "xtask/fixtures/**/Cargo.lock",
     "spikes/**/Cargo.lock",
     "spikes/gui-tauri/**/*.json",
+    "crates/shell/**/*.json",
+    "crates/shell/icons/**",
+    "ui/**/*.json",
+    "**/.gitignore",
     "spikes/gui-tauri/icons/**",
     ".devcontainer/devcontainer.json",
 ]
