@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+# Throwaway spike (ROADMAP M0.36-M0.38): never part of the shipping workspace or default CI.
+[workspace]
+
+[package]
+name = "spike-warp"
+version = "0.0.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[features]
+scale2 = []
+
+[dependencies]
+rayon = "1"
+kornia-imgproc = "0.2"
+kornia-image = "0.2"
+peak_alloc = "0.2"
+
+[profile.release]
+panic = "unwind"
+debug = false

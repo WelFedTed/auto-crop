@@ -5,3 +5,4 @@ Numbered `NNNN-slug.md` records using [0000-template.md](0000-template.md). Ever
 | ADR | Title | Status |
 |---|---|---|
 | [0001](0001-licence-name-app-id.md) | Licence, name and app ID | accepted |
+| [0002](0002-lanczos-warp.md) | Lanczos perspective warp: own strip-wise u8 kernel | accepted |

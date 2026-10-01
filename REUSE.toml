@@ -22,6 +22,7 @@ path = [
     "about.hbs",
     "rust-toolchain.toml",
     "xtask/fixtures/**/Cargo.lock",
+    "spikes/**/Cargo.lock",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Auto Crop contributors"

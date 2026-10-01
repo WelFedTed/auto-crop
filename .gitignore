@@ -5,3 +5,9 @@ Thumbs.db
 xtask/fixtures/**/Cargo.lock
 xtask/fixtures/**/target/
 THIRD_PARTY_NOTICES.md
+spikes/**/target/
+spikes/**/target48/
+spikes/**/out/
+spikes/**/out48/
+spikes/**/Cargo.lock
+__pycache__/
