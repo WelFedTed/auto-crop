@@ -14,6 +14,9 @@ on:
     paths:
       - "native-deps.toml"
       - "xtask/src/native.rs"
+      - "xtask/src/check_native.rs"
+      - "packaging/allowed-libs.txt"
+      - "spikes/turbojpeg/**"
       - ".github/workflows/native.yml"
 
 permissions:
