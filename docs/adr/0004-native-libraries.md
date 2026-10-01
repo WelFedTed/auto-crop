@@ -1,0 +1,51 @@
+# 0004 - Native libraries: pinned CMake builds, libde265 as a plugin, libjpeg-turbo pin
+
+- **Status:** accepted
+- **Date:** 2026-10-01
+- **Roadmap items:** M0.39, M0.40, M0.41, M0.42, M0.44, M0.45
+- **Decision log links:** B12, B2, D4, D6
+- **Time box:** 4 days (PROVISIONAL, with the HEIC binding in ADR-0005); actual about a day of CI iteration. Code: `native-deps.toml`, `xtask build-native`, `xtask check-native`, `.github/workflows/native.yml`, `spikes/turbojpeg/`.
+
+## Context
+
+HEIC/HEIF, JPEG scaled decode and lossless transforms need C libraries. Decision B12 bundles libde265 with a decode-only libheif as separate, dynamically linked, replaceable libraries; no x265/x264; no `libheif-sys` embedded mode and no vcpkg. The `turbojpeg` crate vendors an old libjpeg-turbo (3.1.0, which has a known double free fixed in 3.1.4), so we link our own.
+
+## Decision
+
+- **One manifest, hash-pinned.** `native-deps.toml` pins libheif 1.23.5, libde265 1.1.3, libjpeg-turbo 3.2.0, dav1d 1.5.4, libjxl 0.12.0, libwebp 1.6.0 and ONNX Runtime 1.28.2 (three prebuilt platform archives) by URL and SHA-256 with licence, build system and flags. `cargo xtask build-native` downloads with `curl`, **refuses any file whose SHA-256 differs** (unit-tested), extracts with `tar` and builds libde265, libjpeg-turbo and libheif with CMake into `target/native/prefix`. Version floors (libheif >= 1.23.5, libde265 >= 1.1.3, libjpeg-turbo >= 3.1.4) are enforced by the manifest check.
+- **libheif is decode-only.** Documentation, examples, gdk-pixbuf and libsharpyuv are off, and **every encoder and every unneeded codec is switched off explicitly** (`WITH_X265`, `WITH_X264`, `WITH_KVAZAAR`, VVC, AOM, rav1e, SVT, JPEG, OpenJPEG, FFmpeg ...). libheif's defaults enable the GPL x264 and x265 encoders if they are found on the machine, so the explicit switches are what keeps B12's "never x265/x264" true.
+- **libde265 is a separate plugin on every OS** (`WITH_LIBDE265_PLUGIN=ON`): `heif-libde265.dll` in `lib/libheif/` on Windows, the corresponding `libheif-libde265` plugin under `lib/libheif/` on Linux and macOS. libheif loads it in `heif_init` from its default plugin directory and from `LIBHEIF_PLUGIN_PATH`. Linked directly would also work (CMake option), but the plugin layout keeps libde265 replaceable (LGPL relinking) and gives a clean `no-hevc` variant: simply do not ship the plugin.
+- **`check-native` enforces it** on the built libraries: no `x265_`/`x264_` symbols, every dependency on `packaging/allowed-libs.txt` (system and runtime libraries plus our own), libjpeg-turbo's `jconfig.h` at or above 3.1.4, and no `embedded-libheif` anywhere. CI proves it with two **negative tests**: a library with a planted `x265_` symbol is rejected, and a copy of the install with `jconfig.h` edited to version 3.1.0 is rejected, each for the right reason. (The 3.1.0 case is a header edit, not a real 3.1.0 build.)
+- **libjpeg-turbo override.** We build our own libjpeg-turbo with CMake (NASM required on x86, `REQUIRE_SIMD=ON`, position-independent code) and link it through our own thin TurboJPEG 3 binding. The spike's build script reads `TURBOJPEG_VERSION_NUMBER` and refuses to link anything below 3.1.4. Fallback if the C build ever becomes unacceptable: `zune-jpeg` (pure Rust, but no DCT-domain scaling).
+
+## Results
+
+All on GitHub-hosted runners, 2026-10-01. Required = Windows, macOS, Linux (B9).
+
+| Cell | libde265 + libheif + libjpeg-turbo build | check-native | libjpeg-turbo spike | HEIC probe (ADR-0005) |
+|---|---|---|---|---|
+| windows-2025 x64 (required) | pass | pass | pass | pass |
+| macos-latest arm64 (required) | pass | pass | pass | pass |
+| ubuntu-22.04 x64 (required, glibc floor) | pass | pass | pass | pass |
+| ubuntu-24.04 x64 | pass | pass | pass | pass |
+| windows-11-arm | pass | pass | pass | pass |
+| ubuntu-22.04-arm | pass (needs the job cap `AUTOCROP_BUILD_JOBS=2`; unlimited parallelism got the runner killed mid-compile) | pass | pass | pass |
+| fedora (digest-pinned container) | pass after one fix: the bundled static zlib inside libjpeg-turbo 3.2.0 was linked into the shared library without `-fPIC` (Ubuntu's gcc default hid it); fixed with `CMAKE_POSITION_INDEPENDENT_CODE=ON` | pass | not run (build and check only) | not run (build and check only) |
+| Intel Mac (`macos-26-intel`) | build smoke only (nightly workflow), no native build yet | UNMEASURED | UNMEASURED | UNMEASURED |
+
+`heif_security_limits` (the decoder safety limits API) is installed with libheif 1.23.5 (`heif_security.h`).
+
+**libjpeg-turbo spike results (all three required OSes plus the extra cells, identical):**
+
+- 1/4 scaled decode: dimensions 64x48 give 16x12; mean absolute difference to a 4x4 box filter of the full decode is 0.64 levels.
+- Lossless 90-degree rotate into a **caller-owned buffer** (`TJPARAM_NOREALLOC`): the library writes into our buffer, and a too-small buffer is an error, not a reallocation. One rotation decodes within 2 levels of rotating the decoded pixels (integer inverse-DCT rounding is not perfectly symmetric); **four rotations return the exact original pixels**, which proves no coefficient was lost.
+- MCU-aligned crop (4:2:0, 16x16 MCU): exact against the same region of the decoded original.
+- `PERFECT` rotation of a 70x50 image (not MCU aligned) is refused: `Transform is not perfect`.
+
+## Consequences
+
+- **Engine policy:** a 90-degree rotate or crop is lossless only when the image dimensions (and the crop origin) are MCU-aligned. Otherwise the engine must either trim the partial edge MCUs, with the user's consent, or fall back to a re-encode at the policy quality (PLAN 3.8, 02 §2.7). This matches the plan's "lossless fast path for MCU-aligned operations".
+- **M6** promotes this build to the release recipe (Windows installer layout, plugin directory next to the executable, `LIBHEIF_PLUGIN_PATH` or a relative plugin path, notices for LGPL relinking). The `no-hevc` variant is the same build without the libde265 plugin.
+- **Security:** libheif and libde265 advisories are tracked by the daily security workflow and the `native-deps.toml` watch (M0.10, still open); the SLA is in PLAN 8.2.3.
+- **Open items:** ONNX Runtime, dav1d, libjxl and libwebp are pinned but not yet built (M4, M6, M11). `heif-libde265` plugin discovery on a relocated install is a packaging item (M6). Intel Mac native builds are best-effort until 1.0.
+- **Revisit trigger:** a libheif or libde265 security release (bump the pin), or a maintained pure-Rust HEVC decoder (re-evaluate in about six months, D4).

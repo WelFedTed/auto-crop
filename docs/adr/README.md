@@ -7,3 +7,5 @@ Numbered `NNNN-slug.md` records using [0000-template.md](0000-template.md). Ever
 | [0001](0001-licence-name-app-id.md) | Licence, name and app ID | accepted |
 | [0002](0002-lanczos-warp.md) | Lanczos perspective warp: own strip-wise u8 kernel | accepted |
 | [0003](0003-long-receipt-strips.md) | Long narrow receipts: classical baseline failure rates (M4 input) | accepted (ML half skipped) |
+| [0004](0004-native-libraries.md) | Native libraries: pinned CMake builds, libde265 plugin, libjpeg-turbo pin | accepted |
+| [0005](0005-heic-binding.md) | HEIC binding: own thin libheif FFI, libde265 plugin, HeicBackend | accepted |

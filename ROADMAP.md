@@ -22,7 +22,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | Milestone | Title | Release | Platforms | Size | Progress |
 |---|---|---|---|---|---|
 | P | Planning | none | documents | - | 4 / 5 (80%) |
-| M0 | Foundations and week-1 spikes | none | CI only (Windows, macOS, Linux) | XL | 34 / 93 (36%) |
+| M0 | Foundations and week-1 spikes | none | CI only (Windows, macOS, Linux) | XL | 42 / 93 (45%) |
 | M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 0 / 94 (0%) |
 | M2 | Classical pipeline, safe writes and CLI | v0.1.0 | Windows 10/11 x64 | L | 0 / 91 (0%) |
 | M3 | GUI alpha: single-image editor | v0.2.0 | Windows 10/11 x64 | XL | 0 / 92 (0%) |
@@ -39,7 +39,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | X | Continuous and cross-cutting | - | - | - | 0 / 42 (0%) |
 | X | Post-1.0 backlog (1.x) | - | - | - | 0 / 43 (0%) |
 | X | Spikes and open decisions | - | - | - | 0 / 28 (0%) |
-| **Total** | | | | | **38 / 1402 (2%)** |
+| **Total** | | | | | **46 / 1402 (3%)** |
 <!-- progress:end -->
 
 ## Why this order
@@ -123,13 +123,13 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [x] **M0.36 Lanczos: oracle and kornia** - OpenCV oracle (dev-only; `cargo tree -i opencv` empty) and an f64 Lanczos3 reference vs `kornia-imgproc` 0.2.0 `warp_perspective` at 12 MP: time at 1 and 8 threads, peak RSS, PSNR, licences. PROVISIONAL bars: PSNR >= 45 dB, <= 90 ms at 12 MP, 8 threads.
 - [x] **M0.37 Lanczos: own strip warp** - `spikes/warp/`: strip-wise Lanczos3 (64-row rayon strips, per-strip source box, u8/u16 in and out, f32 accumulation, no full-frame f32 buffer). Accept: M0.36 fixtures and metrics at 12 and 48 MP beside kornia; 3-day box, go/no-go, no SIMD tuning.
 - [x] **M0.38 ADR: Lanczos warp** - Pick kornia-imgproc f32 (possibly strip-wise) or the own u8/u16 warp, with speed, memory and error at 12 MP, the M2 implementation and test approach (oracle dev-only, pinned golden outputs in CI) and open items (SIMD, linear-light resize). Accept: go/no-go line.
-- [ ] **M0.39 Native deps manifest** - `native-deps.toml` pins libheif (>= 1.23.5), libde265 (>= 1.1.3), libjpeg-turbo (>= 3.1.4), dav1d, libjxl, libwebp and ONNX Runtime (URL, SHA-256, licence, flags); `xtask build-native [--target]` fetches by hash, builds with CMake. A wrong hash is refused.
-- [ ] **M0.40 libheif, libde265 on Windows** - CMake + MSVC on `windows-2025`: libde265 and a decode-only libheif as shared libraries (`WITH_X265=OFF`, `WITH_LIBDE265_PLUGIN=ON`); never `embedded-libheif` or vcpkg `hevc`. Accept: builds via `xtask build-native`; `heif_security_limits` present.
-- [ ] **M0.41 libheif, libde265 on macOS, Linux** - Same build on `macos-latest` (arm64), `ubuntu-22.04`, Ubuntu 24.04 and Fedora (spot checks), plus build-only arm64 runners. Accept: builds on all three OSes; per OS, libde265 as a libheif plugin or linked directly is recorded.
-- [ ] **M0.42 check-native: no GPL leak** - `xtask check-native` compares library dependencies with `packaging/allowed-libs.txt`, greps `x265_`/`x264_` symbols, asserts libheif registers no HEVC/AVC encoder and fails on `embedded-libheif`. Accept: green on three OSes; a dev-only x265 build fails.
-- [ ] **M0.43 HEIC binding, fixture, ADR** - Choose `libheif-rs` 3.0.0 (no vcpkg) or an own bindgen crate; decode a HEIC fixture (<= 50 KB) to RGB8 from bytes. ADR: plugin vs direct link, `HeicBackend` trait (ImageIO, WIC optional), `no-hevc` hook, LGPL layout. Decodes on three OSes; go/no-go.
-- [ ] **M0.44 turbojpeg, libjpeg-turbo >= 3.1.4** - `turbojpeg` 1.5.1 vendors libjpeg-turbo 3.1.0 (3.1.4 fixes a double-free): link our own >= 3.1.4 (CMake, NASM on x86), test 1/4 scaled decode, lossless 90-degree rotate and an MCU-aligned crop into a pre-allocated buffer. Passes on three OSes.
-- [ ] **M0.45 libjpeg-turbo assertion, ADR** - `xtask check-native` and CI read `LIBJPEG_TURBO_VERSION_NUMBER` from `jconfig.h` and fail below 3.1.4; ADR "libjpeg-turbo pin" records the override mechanism, zune-jpeg as pure-Rust fallback (no DCT scaling) and NASM. Accept: a 3.1.0 build fails CI.
+- [x] **M0.39 Native deps manifest** - `native-deps.toml` pins libheif (>= 1.23.5), libde265 (>= 1.1.3), libjpeg-turbo (>= 3.1.4), dav1d, libjxl, libwebp and ONNX Runtime (URL, SHA-256, licence, flags); `xtask build-native [--target]` fetches by hash, builds with CMake. A wrong hash is refused.
+- [x] **M0.40 libheif, libde265 on Windows** - CMake + MSVC on `windows-2025`: libde265 and a decode-only libheif as shared libraries (`WITH_X265=OFF`, `WITH_LIBDE265_PLUGIN=ON`); never `embedded-libheif` or vcpkg `hevc`. Accept: builds via `xtask build-native`; `heif_security_limits` present.
+- [x] **M0.41 libheif, libde265 on macOS, Linux** - Same build on `macos-latest` (arm64), `ubuntu-22.04`, Ubuntu 24.04 and Fedora (spot checks), plus build-only arm64 runners. Accept: builds on all three OSes; per OS, libde265 as a libheif plugin or linked directly is recorded.
+- [x] **M0.42 check-native: no GPL leak** - `xtask check-native` compares library dependencies with `packaging/allowed-libs.txt`, greps `x265_`/`x264_` symbols, asserts libheif registers no HEVC/AVC encoder and fails on `embedded-libheif`. Accept: green on three OSes; a dev-only x265 build fails.
+- [x] **M0.43 HEIC binding, fixture, ADR** - Choose `libheif-rs` 3.0.0 (no vcpkg) or an own bindgen crate; decode a HEIC fixture (<= 50 KB) to RGB8 from bytes. ADR: plugin vs direct link, `HeicBackend` trait (ImageIO, WIC optional), `no-hevc` hook, LGPL layout. Decodes on three OSes; go/no-go.
+- [x] **M0.44 turbojpeg, libjpeg-turbo >= 3.1.4** - `turbojpeg` 1.5.1 vendors libjpeg-turbo 3.1.0 (3.1.4 fixes a double-free): link our own >= 3.1.4 (CMake, NASM on x86), test 1/4 scaled decode, lossless 90-degree rotate and an MCU-aligned crop into a pre-allocated buffer. Passes on three OSes.
+- [x] **M0.45 libjpeg-turbo assertion, ADR** - `xtask check-native` and CI read `LIBJPEG_TURBO_VERSION_NUMBER` from `jconfig.h` and fail below 3.1.4; ADR "libjpeg-turbo pin" records the override mechanism, zune-jpeg as pure-Rust fallback (no DCT scaling) and NASM. Accept: a 3.1.0 build fails CI.
 ### Quality/Perf
 - [x] **M0.46 Spike charter and protocol** - `docs/adr/spikes.md`: a time box per spike; an overrun above 50% stops it as inconclusive; one protocol (>= 20 samples, median and p95, drop runs > 5% variation, AC power) and a results template. Merged before the first spike; ADRs link their time box.
 - [ ] **M0.47 Tier-M, Apple silicon** - `docs/perf/hardware.md`: Tier-M = 6C/12T AVX2 laptop or Apple M1, 16 GB, NVMe; Tier-L = C1 floor (4 cores, 8 GB, 2x budgets); machines recorded. Mac access: borrowed, or `macos-latest` (noisy); name who lends it and when, or macOS numbers are relative-only.
@@ -173,7 +173,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [ ] **GATE:** The B8 rule is applied once before any UI and its outcome recorded: Tauri confirmed (Linux touch best-effort, limits documented), Slint triggered (owner waiver needed), or Tauri failing on Windows or macOS (no UI code, owner asked).
 - [ ] **GATE:** 500-image tile serving scrolls at >= 30 fps (PROVISIONAL), IPC p95 (tile, Channel) is recorded, webview caches hold no tile bytes, and all folder-drop fixtures (symlink loop, OneDrive placeholder, SMB share, 10k files, long path, Unicode) pass without hang or crash on three OSes.
 - [ ] **GATE:** The ort vs rten vs tract ADR records measured 256x256 MobileNetV3+FPN-class latency, cold-load, binary size, op coverage, the int8 check method with a smoke result, and the macOS x86_64 and Windows arm64 story; ONE backend is chosen behind a trait.
-- [ ] **GATE:** Decode-only libheif >= 1.23.5 plus libde265 build as separate shared libraries on `windows-2025`, `macos-latest` and `ubuntu-22.04` via CMake, and `cargo xtask check-native` proves no x265 or x264 symbols and no GPL libraries are linked.
+- [x] **GATE:** Decode-only libheif >= 1.23.5 plus libde265 build as separate shared libraries on `windows-2025`, `macos-latest` and `ubuntu-22.04` via CMake, and `cargo xtask check-native` proves no x265 or x264 symbols and no GPL libraries are linked.
 - [ ] **GATE:** turbojpeg builds on three OSes with libjpeg-turbo >= 3.1.4 and a CI version assertion; the Lanczos ADR records speed and memory at 12 MP for kornia-imgproc f32 vs own strip-wise u8/u16 against the OpenCV oracle (PROVISIONAL: PSNR >= 45 dB, <= 90 ms at 8 threads).
 - [ ] **GATE:** The sandbox ADR records per-OS feasibility (job object + restricted token or AppContainer, Landlock + seccomp, `sandbox_init`) with escape-test results, the achieved level per OS and the M6, M8 and M9 work implied.
 - [x] **GATE:** The 8:1 long-strip failure rate per aspect bucket (4:1, 6:1, 8:1, 10:1) is recorded as an M4 input, the ML part marked dev-only or skipped per the MakeACopy licence outcome.
