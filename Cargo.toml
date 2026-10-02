@@ -9,6 +9,7 @@ members = [
     "crates/codecs",
     "crates/imgproc",
     "crates/engine",
+    "crates/eval",
     "crates/cli",
     "crates/shell",
     "xtask",
@@ -44,6 +45,9 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.auto-crop-engine]
 opt-level = 2
+# The accuracy harness runs bootstrap resampling and renders synthetic images in its tests.
+[profile.dev.package.auto-crop-eval]
+opt-level = 3
 
 [profile.release]
 panic = "unwind"

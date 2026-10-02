@@ -125,6 +125,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "auto-crop-eval"
+version = "0.0.1"
+dependencies = [
+ "auto-crop-codecs",
+ "auto-crop-core",
+ "auto-crop-imgproc",
+ "rayon",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "auto-crop-imgproc"
 version = "0.0.1"
 dependencies = [

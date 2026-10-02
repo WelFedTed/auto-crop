@@ -8,6 +8,7 @@ mod dco;
 mod deny_selftest;
 mod deps;
 mod doctor;
+mod eval;
 mod identity;
 mod licenses;
 mod native;
@@ -55,6 +56,12 @@ Commands:
         fail while the clean control passes.
   check-profiles
         Fail on panic = \"abort\" and require panic = \"unwind\" in release.
+  synth --suite smoke|full [--out DIR] [--seed N] [--count N] [--max-edge N]
+        Write a STAND-IN synthetic suite (images + manifest.jsonl) under target/synth/<suite> by
+        default. Never committed. Wraps `auto-crop-eval synth`.
+  eval <auto-crop-eval args>
+        Run the accuracy harness (run, compare, noise-floor, publish, validate-manifest,
+        self-check). Example: cargo xtask eval self-check
 ";
 
 fn main() -> ExitCode {
@@ -74,6 +81,8 @@ fn main() -> ExitCode {
         "check-dco" => dco::run(&rest),
         "deny-selftest" => deny_selftest::run(&rest),
         "check-profiles" => profiles::run(&rest),
+        "synth" => eval::run_synth(&rest),
+        "eval" => eval::run_eval(&rest),
         "" | "help" | "--help" | "-h" => {
             print!("{HELP}");
             Ok(())

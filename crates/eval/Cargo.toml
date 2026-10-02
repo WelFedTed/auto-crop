@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+[package]
+name = "auto-crop-eval"
+description = "Accuracy harness: runs a predictor over a manifest and reports geometry metrics (binary: auto-crop-eval)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The metric modules (geom, metrics, stats, calib) deliberately use none of these project crates:
+# ground-truth maths must not share code with the thing being measured (ROADMAP M1.46). Only the
+# predictor adapters and the synthetic suite writer do.
+auto-crop-core = { path = "../core" }
+auto-crop-imgproc = { path = "../imgproc" }
+auto-crop-codecs = { path = "../codecs" }
+rayon = "1"
+serde.workspace = true
+serde_json = { workspace = true, features = ["float_roundtrip"] }
+sha2 = "0.10"
+
+[[bin]]
+name = "auto-crop-eval"
+path = "src/main.rs"
+
+[lints]
+workspace = true

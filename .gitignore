@@ -21,3 +21,7 @@ crates/shell/gen/
 ui/dist/
 ui/node_modules/
 spikes/**/target-dyn/
+# Accuracy harness: synthetic suites and results are generated, never committed (xtask synth/eval
+# default to target/synth/, which is already ignored).
+/synth-out/
+/eval-out/
