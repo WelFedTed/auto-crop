@@ -8,6 +8,8 @@
 //! * [`unsafe_guard`]: `unsafe` only inside `ffi/` and `simd/` module directories (plus an
 //!   explicit allow-list), always with a `// SAFETY:` comment.
 //! * [`network_guard`]: no HTTP, TLS or socket crates in the shipped build (B18, C4).
+//! * [`corpus_guard`]: no dataset bytes in the repository (archives, scans, RAW files, big files,
+//!   dataset directories) and the cache directories stay in `.gitignore` (M1.36, B21).
 //! * [`workflow_guard`]: workflow hygiene (SHA pins, least privilege, no dangerous triggers,
 //!   required jobs always report, no release machinery yet).
 //!
@@ -16,6 +18,7 @@
 //! same cases run under `cargo test`. The allow-lists and the reasoning are in
 //! `docs/policy/ci-guards.md`.
 
+mod corpus_guard;
 mod network_guard;
 mod rust_lex;
 mod unsafe_guard;
@@ -26,17 +29,19 @@ use std::path::Path;
 fn selftest() -> Result<(), String> {
     let mut problems = unsafe_guard::selftest();
     problems.extend(workflow_guard::selftest());
+    problems.extend(corpus_guard::selftest());
     let base = std::env::temp_dir().join(format!("auto-crop-ci-guards-{}", std::process::id()));
     let net = network_guard::selftest(&base);
     let _ = std::fs::remove_dir_all(&base);
     problems.extend(net?);
     if problems.is_empty() {
         println!(
-            "ci-guards selftest: {} unsafe, {} manifest, {} workflow and {} network plants/controls behaved",
+            "ci-guards selftest: {} unsafe, {} manifest, {} workflow, {} network and {} corpus plants/controls behaved",
             unsafe_guard::CASES.len() + unsafe_guard::MANIFEST_CASES.len(),
             network_guard::MANIFEST_CASES.len(),
             workflow_guard::cases().len(),
-            network_guard::CASES.len()
+            network_guard::CASES.len(),
+            corpus_guard::cases().len() + corpus_guard::gitignore_cases().len()
         );
         Ok(())
     } else {
@@ -60,9 +65,10 @@ pub fn run(args: &[String]) -> Result<(), String> {
         network_guard::TRIPLES,
     )?);
     violations.extend(workflow_guard::check_tree(root)?);
+    violations.extend(corpus_guard::check_tree(root)?);
     if violations.is_empty() {
         println!(
-            "ci-guards: unsafe, network and workflow policies hold ({} allow-listed unsafe file(s))",
+            "ci-guards: unsafe, network, workflow and corpus policies hold ({} allow-listed unsafe file(s))",
             unsafe_guard::ALLOWED_FILES.len()
         );
         Ok(())

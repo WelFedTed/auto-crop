@@ -1,6 +1,6 @@
 # CI policy guards
 
-Roadmap: M1.72 (`cargo xtask ci-guards`), M1.73 (licence gates), M1.80 (workflow hardening); extends M0.31 (`check-profiles` owns the `panic = "abort"` ban). Decisions: B2 (licences), B12 (no GPL encoders, sandboxed C parsers), B18 and C4 (offline, no telemetry). Code: `xtask/src/ci_guards/`.
+Roadmap: M1.72 (`cargo xtask ci-guards`), M1.73 (licence gates), M1.80 (workflow hardening), M1.36 (dataset-bytes guard); extends M0.31 (`check-profiles` owns the `panic = "abort"` ban). Decisions: B2 (licences), B12 (no GPL encoders, sandboxed C parsers), B18 and C4 (offline, no telemetry). Code: `xtask/src/ci_guards/`.
 
 `cargo xtask ci-guards` runs in the `repo checks` job of `ci.yml`; `cargo xtask ci-guards --selftest` runs next to it. A guard that is not proven red is not a guard, so every rule below has planted violations (the `CASES` tables in each module) that must be detected, plus controls that must pass. The same cases run under `cargo test -p xtask`.
 
@@ -44,3 +44,21 @@ A line-based backstop in `workflow_guard.rs`; `zizmor` (the `workflow lint` job,
 ## 4. Licence gates (M1.73)
 
 `cargo deny check` (licences, bans, sources, advisories) runs in `ci.yml`. `cargo xtask deny-selftest` plants one fixture crate for **every entry of the `[bans] deny` list in `deny.toml`** (so a ban added later is tested automatically), plus the AGPL, GPL and non-commercial licence fixtures, and a clean control. Each must fail for the right reason. Confirmed bans: `dssim-core`, `heic`, `heic-decoder`, `jpegxl-rs`, `jpegxl-sys`, `x264`, `x265` (and their `-sys` crates), `opencv`, `purecv`, `birdcage`.
+
+## 5. No dataset bytes in the repository (M1.36, B21)
+
+`corpus_guard.rs` runs over the tracked files (`git ls-files`). Public corpora are fetched into a cache outside the checkout ([corpora guide](../testing/corpora.md)); this guard makes a commit that contains one fail CI.
+
+- **Never tracked, anywhere:** archives, columnar data and video (`zip tar tgz gz xz bz2 zst 7z rar parquet h5 npz avi mp4 mov mkv ...`).
+- **Scans and RAW photos** (`tif tiff heic heif dng cr2 nef arw ...`): only inside a fixtures directory (`crates/*/tests/fixtures/`, `crates/*/fixtures/`, `xtask/fixtures/`, `xtask/tests/fixtures/`), at most 5 MiB each (the plan allows small self-made HEIC and TIFF fixtures).
+- **Ordinary images** (`png jpg jpeg webp bmp gif avif jxl`): fixtures directories, or `crates/shell/icons/`, `spikes/gui-tauri/icons/`, `ui/`, `docs/`, `packaging/`.
+- **No tracked file over 5 MiB**, whatever it is called.
+- **No tracked file inside a directory called** `corpus-cache`, `corpus_cache`, `corpora`, `datasets`, `dataset` or `golden`.
+- **`.gitignore` must keep** `/corpus-cache/`, `/corpora/`, `/datasets/` and `/golden/` (a unit test also asks the version control tool itself whether it ignores them).
+- Exceptions: `corpus_guard::ALLOWED_FILES`, empty today; an entry needs a row here and the owner's agreement.
+
+The planted cases (`corpus_guard::cases()`: a SmartDoc tarball, a CORD parquet, a MIDV TIFF, a RAW photo, an oversized fixture, a cache directory, controls for icons and small fixtures) run in `cargo xtask ci-guards --selftest` and under `cargo test -p xtask`.
+
+### What xtask may use for the network
+
+`xtask` is a developer tool and is never shipped, so the shipped-crate ban of section 2 does not apply to it, but it still carries **no HTTP or TLS crate**: `fetch-corpus` and `build-native` shell out to the system `curl` as a separate program. `fetch-corpus` runs it with `--proto` pinned to the URL's scheme (https, ftp, or http for a loopback host only, which is how the tests serve fixtures), `--proto-redir =https` (a redirect may only lead to https), `--max-filesize` set to the pinned size and `--fail`, and it never moves a download into the cache until the SHA-256 and size match the lock. Adding an HTTP crate to xtask needs the owner's agreement and a row here.

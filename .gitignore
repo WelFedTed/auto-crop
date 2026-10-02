@@ -25,3 +25,11 @@ spikes/**/target-dyn/
 # default to target/synth/, which is already ignored).
 /synth-out/
 /eval-out/
+# Public corpora (M1.36) are fetched into a cache OUTSIDE the checkout and never committed; xtask
+# refuses a cache inside the repo. These lines are the second lock (and `xtask ci-guards` fails
+# if they disappear or if a tracked file looks like dataset bytes). The private golden set (B21)
+# never lives in this repository either.
+/corpus-cache/
+/corpora/
+/datasets/
+/golden/
