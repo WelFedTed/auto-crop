@@ -14,5 +14,10 @@ publish.workspace = true
 auto-crop-core = { path = "../core" }
 rayon = "1"
 
+[dev-dependencies]
+peak_alloc = "0.3"
+proptest = "1"
+serde_json.workspace = true
+
 [lints.rust]
 unsafe_code = "forbid"

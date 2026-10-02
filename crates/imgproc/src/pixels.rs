@@ -8,6 +8,9 @@
 pub trait Sample: Copy + Default + Send + Sync + 'static {
     /// Largest representable value as f32.
     const MAX_F32: f32;
+    /// Whether warps must interpolate the weight table (16-bit samples) rather than take the
+    /// nearest entry (8-bit).
+    const PRECISE: bool;
     fn to_f32(self) -> f32;
     /// Rounds to nearest and clamps into range (NaN maps to 0).
     fn from_f32_round(v: f32) -> Self;
@@ -15,6 +18,7 @@ pub trait Sample: Copy + Default + Send + Sync + 'static {
 
 impl Sample for u8 {
     const MAX_F32: f32 = 255.0;
+    const PRECISE: bool = false;
     #[inline(always)]
     fn to_f32(self) -> f32 {
         f32::from(self)
@@ -27,6 +31,7 @@ impl Sample for u8 {
 
 impl Sample for u16 {
     const MAX_F32: f32 = 65535.0;
+    const PRECISE: bool = true;
     #[inline(always)]
     fn to_f32(self) -> f32 {
         f32::from(self)

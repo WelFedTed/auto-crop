@@ -32,6 +32,9 @@ path = [
     "crates/engine/fixtures/**",
     "crates/*/src/snapshots/*.snap",
     ".devcontainer/devcontainer.json",
+    "crates/imgproc/tests/fixtures/**",
+    "tools/imgproc-oracles/requirements.txt",
+    "**/*.proptest-regressions",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Auto Crop contributors"

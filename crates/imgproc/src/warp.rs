@@ -33,6 +33,7 @@ pub const BAND_ROWS: usize = 64;
 const LUT_N: usize = 1024;
 /// 1.5 * 2^52: adding it to a value below 2^51 leaves the rounded integer in the low mantissa bits.
 const MAGIC: f64 = 6_755_399_441_055_744.0;
+const MAGIC_BITS: i64 = MAGIC.to_bits() as i64;
 
 fn lanczos3(x: f64) -> f64 {
     if x == x.round() {
@@ -57,14 +58,40 @@ pub(crate) fn lanczos3_weights(f: f64) -> [f32; 6] {
     std::array::from_fn(|k| (w[k] / sum) as f32)
 }
 
-/// `LUT_N` entries: fractional position `i / LUT_N`.
+/// `LUT_N + 1` entries: fractional position `i / LUT_N` (the last one is the whole-pixel weights
+/// of the next pixel, present so 16-bit sampling can interpolate between neighbouring entries).
 fn lut() -> &'static [[f32; 6]] {
     static LUT: OnceLock<Vec<[f32; 6]>> = OnceLock::new();
     LUT.get_or_init(|| {
-        (0..LUT_N)
+        (0..=LUT_N)
             .map(|i| lanczos3_weights(i as f64 / LUT_N as f64))
             .collect()
     })
+}
+
+/// Fractional bits of the per-pixel source position (16-bit samples use all of them, 8-bit
+/// samples round to the 10 bits of the weight table).
+const POS_BITS: u32 = 16;
+
+/// Splits a fixed-point position `p` (source coordinate plus one, in 1/65536 pixel) into the
+/// tap origin `x0` (the pixel at or left of the position), whether it is a whole pixel, and the
+/// six tap weights. 8-bit samples use the nearest table entry (at most 1/2048 px off, under 0.2
+/// LSB on a full-scale edge); 16-bit samples interpolate between entries (error well under one
+/// 16-bit LSB).
+#[inline(always)]
+fn locate<T: Sample>(lut: &[[f32; 6]], p: i64) -> (i32, bool, [f32; 6]) {
+    if T::PRECISE {
+        let f = (p & ((1 << POS_BITS) - 1)) as usize;
+        let i = f >> (POS_BITS as usize - 10);
+        let t = (f & ((1 << (POS_BITS - 10)) - 1)) as f32 * (1.0 / (1 << (POS_BITS - 10)) as f32);
+        let (a, b) = (&lut[i], &lut[i + 1]);
+        let w = std::array::from_fn(|k| a[k] + t * (b[k] - a[k]));
+        (((p >> POS_BITS) - 1) as i32, f == 0, w)
+    } else {
+        let q = (p + (1 << (POS_BITS - 11))) >> (POS_BITS - 10);
+        let i = (q & (LUT_N as i64 - 1)) as usize;
+        (((q >> 10) - 1) as i32, i == 0, lut[i])
+    }
 }
 
 /// One source image (or one pyramid level of it) with the matrix that maps output pixel centres
@@ -146,14 +173,15 @@ fn warp_band<T: Sample, const C: usize, const N: usize>(
     let (sw, sh) = (view.w, view.h);
     let m = &view.m;
     let (x_hi, y_hi) = (sw as f64 - 0.5, sh as f64 - 0.5);
-    // Per row: source position of every output pixel as 1/1024-pixel fixed point of `x + 1`
-    // (rounded to the nearest step), or -1 for "outside the source". Computed in f64 so 100 MP
+    // Per row: source position of every output pixel as 1/65536-pixel fixed point of `x + 1`
+    // (so it is never negative), or -1 for "outside the source". Computed in f64 so 100 MP
     // sources keep sub-0.001 px accuracy; the loop has no data-dependent branches.
-    let mut tx = vec![-1i32; dw];
-    let mut ty = vec![-1i32; dw];
-    // Round to the nearest 1/1024 and read the integer out of the mantissa: a plain `as i32`
+    let mut tx = vec![-1i64; dw];
+    let mut ty = vec![-1i64; dw];
+    // Round to the nearest 1/65536 and read the integer out of the mantissa: a plain `as i64`
     // is a saturating conversion (several instructions); this one vectorises.
-    let fixed = |t: f64| -> i32 { (t * LUT_N as f64 + MAGIC).to_bits() as i32 };
+    let fixed =
+        |t: f64| -> i64 { (t * (1u64 << POS_BITS) as f64 + MAGIC).to_bits() as i64 - MAGIC_BITS };
     for (r, row) in chunk.chunks_exact_mut(dw * C).enumerate() {
         let v = (v0 + r) as f64;
         let (nx0, ny0, d0) = (m[1] * v + m[2], m[4] * v + m[5], m[7] * v + m[8]);
@@ -172,15 +200,12 @@ fn warp_band<T: Sample, const C: usize, const N: usize>(
             if px < 0 {
                 continue;
             }
-            // `px >> 10` is x0 + 1 (x0 = floor of the rounded position), the low bits are the
-            // weight-table index; a position rounded up to a whole pixel has index 0.
-            let (x0, y0) = ((px >> 10) - 1, (py >> 10) - 1);
-            let mask = LUT_N as i32 - 1;
-            let (wxi, wyi) = ((px & mask) as usize, (py & mask) as usize);
+            let (x0, xwhole, wx) = locate::<T>(lut, px);
+            let (y0, ywhole, wy) = locate::<T>(lut, py);
             let o = &mut row[u * C..u * C + C];
 
             // Whole-pixel position: copy (exact, and much cheaper).
-            if (wxi | wyi) == 0 {
+            if xwhole && ywhole {
                 let ix = x0.clamp(0, sw as i32 - 1) as usize;
                 let iy = y0.clamp(0, sh as i32 - 1) as usize;
                 let s = (iy * sw + ix) * C;
@@ -188,7 +213,6 @@ fn warp_band<T: Sample, const C: usize, const N: usize>(
                 continue;
             }
 
-            let (wx, wy) = (&lut[wxi], &lut[wyi]);
             let acc: [f32; C] = if x0 >= 2
                 && y0 >= 2
                 && (x0 - 2) as usize * C + N <= sw * C
@@ -199,9 +223,9 @@ fn warp_band<T: Sample, const C: usize, const N: usize>(
                     let s = ((y0 - 2 + k) * sw + (x0 - 2)) * C;
                     <&[T; N]>::try_from(&view.data[s..s + N]).expect("window of N samples")
                 };
-                convolve::<T, C, N>([tap(0), tap(1), tap(2), tap(3), tap(4), tap(5)], wx, wy)
+                convolve::<T, C, N>([tap(0), tap(1), tap(2), tap(3), tap(4), tap(5)], &wx, &wy)
             } else {
-                convolve_edge::<T, C, N>(view, x0, y0, wx, wy)
+                convolve_edge::<T, C, N>(view, x0, y0, &wx, &wy)
             };
             for c in 0..C {
                 o[c] = T::from_f32_round(acc[c]);

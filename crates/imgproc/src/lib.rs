@@ -6,6 +6,8 @@
 pub mod cancel;
 pub mod detect;
 pub mod geometry;
+pub mod homography;
+pub mod minify;
 pub mod pixels;
 pub mod render;
 pub mod scale;
