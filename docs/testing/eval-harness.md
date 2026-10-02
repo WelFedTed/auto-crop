@@ -13,6 +13,16 @@ cargo xtask eval run --manifest target/synth/smoke/manifest.jsonl --predictor de
 cargo xtask eval compare --base base.json --head head.json   # exit 1 = regression gate failed
 ```
 
+**Validating a detector change on more than one seed.** The stand-in generator takes `--seed`, `--count` and `--max-edge`, so a change can be developed on one seed and checked on others it never saw (and at other image sizes) before it is trusted even as a regression signal:
+
+```
+cargo xtask synth --suite full --count 1728 --seed 1234567 --out target/synth/mid-b   # balanced: 1,728 = 2^6 * 27, every tag value exactly even
+cargo xtask synth --suite smoke --seed 31415926 --out target/synth/smoke-d
+cargo xtask synth --suite smoke --max-edge 1024 --out target/synth/smoke-1024
+```
+
+Keep one seed back until the constants are frozen and run it once. Compare base and head with `eval compare` on each set, not only on the default smoke set; `docs/perf/detector-baseline.md` records the protocol and its limits.
+
 ## Commands
 
 | Command | What it does |
