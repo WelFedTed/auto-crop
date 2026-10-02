@@ -29,7 +29,7 @@ use rayon::prelude::*;
 use std::sync::OnceLock;
 
 /// Output rows per rayon task, and the cancellation granularity (PLAN 2.8).
-pub const BAND_ROWS: usize = 64;
+pub const BAND_ROWS: usize = auto_crop_core::BAND_ROWS as usize;
 const LUT_N: usize = 1024;
 /// 1.5 * 2^52: adding it to a value below 2^51 leaves the rounded integer in the low mantissa bits.
 const MAGIC: f64 = 6_755_399_441_055_744.0;

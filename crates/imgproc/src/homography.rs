@@ -9,8 +9,8 @@
 //! complete pivoting. Complete pivoting is backward stable and exposes rank deficiency directly:
 //! a pivot below `1e-10` of the largest one means duplicate points, three collinear points, or a
 //! configuration with no unique homography, and the solver returns
-//! [`HomographyError::Degenerate`] instead of a garbage matrix. (`auto-crop-core` has no
-//! `ErrKind` yet; the engine maps this error onto `ErrKind::Degenerate` when it lands.)
+//! [`HomographyError::Degenerate`] instead of a garbage matrix, which converts into core's
+//! `ErrKind::Degenerate`.
 //!
 //! Convention: a [`Homography`] maps `(x, y)` to `((h0 x + h1 y + h2) / w, (h3 x + h4 y + h5) / w)`
 //! with `w = h6 x + h7 y + h8`, row-major, normalised so that `h8 == 1` when `|h8|` is not tiny.
@@ -33,6 +33,12 @@ impl std::fmt::Display for HomographyError {
 }
 
 impl std::error::Error for HomographyError {}
+
+impl From<HomographyError> for auto_crop_core::ErrKind {
+    fn from(_: HomographyError) -> Self {
+        auto_crop_core::ErrKind::Degenerate
+    }
+}
 
 /// A 3 x 3 projective transform, row-major.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -321,6 +327,16 @@ mod tests {
         // Third point 1e-6 relative off the line: legal, barely.
         let near = [(0.0, 0.0), (5.0, 1e-5), (10.0, 0.0), (0.0, 10.0)];
         assert!(Homography::from_quads(near, SQ).is_ok());
+    }
+
+    #[test]
+    fn the_degenerate_error_maps_onto_core_err_kind() {
+        let flat = [(0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (3.0, 0.0)];
+        let e = Homography::from_quads(SQ, flat).unwrap_err();
+        assert_eq!(
+            auto_crop_core::ErrKind::from(e),
+            auto_crop_core::ErrKind::Degenerate
+        );
     }
 
     #[test]

@@ -10,9 +10,10 @@
 //!
 //! * The scale is the largest singular value of the map's Jacobian (source pixels per output
 //!   pixel along the worst axis), the maximum over a 5 x 3 grid of sample points in the band.
-//! * A level of reduction `f = 2^l` is the exact area average of `f x f` source blocks
-//!   (rounded; blocks clipped at the right and bottom border), built directly from the source.
-//!   Levels are built only if some band needs them, and kept only for the duration of the call.
+//! * Level `l` is the area average of `2^l x 2^l` source blocks, built by cascaded 2 x 2 halving
+//!   ([`reduce_half`], rounding offset alternating 1, 2 so the cascade is unbiased); the last
+//!   column and row of an odd size average what exists. Only levels some band needs are kept, and
+//!   only for the duration of the call. ([`reduce_box`] is the exact one-pass reference.)
 //! * Bands choose their level independently, so a perspective map may switch levels between
 //!   bands; on content the lower level can represent, the switch is invisible (<= 2 LSB, tested).
 //!
@@ -81,10 +82,7 @@ fn band_level(
 }
 
 /// Exact area average of `f x f` blocks (clipped at the border), rounded to nearest.
-pub fn reduce_box<T: Sample + Into<u32> + TryFrom<u32>>(
-    src: ImageRef<'_, T>,
-    f: usize,
-) -> Image<T> {
+pub fn reduce_box<T: Sample>(src: ImageRef<'_, T>, f: usize) -> Image<T> {
     assert!(f >= 1);
     let (sw, sh, c) = (
         src.width as usize,
@@ -108,7 +106,7 @@ pub fn reduce_box<T: Sample + Into<u32> + TryFrom<u32>>(
                     let acc = &mut sums[ox * c..ox * c + c];
                     for px in block.chunks_exact(c) {
                         for (a, v) in acc.iter_mut().zip(px) {
-                            *a += u64::from((*v).into());
+                            *a += u64::from((*v).to_u32());
                         }
                     }
                 }
@@ -117,7 +115,77 @@ pub fn reduce_box<T: Sample + Into<u32> + TryFrom<u32>>(
                 let n = ((y1 - y0) * ((ox + 1) * f).min(sw).saturating_sub(ox * f)) as u64;
                 for (k, v) in o.iter_mut().enumerate() {
                     let avg = (sums[ox * c + k] + n / 2) / n;
-                    *v = T::try_from(avg as u32).ok().unwrap_or_default();
+                    *v = T::from_u32(avg as u32);
+                }
+            }
+        });
+    out
+}
+
+/// Halves both dimensions with a 2 x 2 box average (rounded, unbiased on average; the last column or row of an odd
+/// size averages what exists). The fast path of the pyramid: parallel over output rows, with the
+/// channel count as a const so the inner loop is straight-line.
+pub fn reduce_half<T: Sample>(src: ImageRef<'_, T>) -> Image<T> {
+    match src.channels {
+        1 => reduce_half_c::<T, 1>(src),
+        2 => reduce_half_c::<T, 2>(src),
+        3 => reduce_half_c::<T, 3>(src),
+        _ => reduce_half_c::<T, 4>(src),
+    }
+}
+
+fn reduce_half_c<T: Sample, const C: usize>(src: ImageRef<'_, T>) -> Image<T> {
+    let (sw, sh) = (src.width as usize, src.height as usize);
+    let (ow, oh) = (sw.div_ceil(2).max(1), sh.div_ceil(2).max(1));
+    let mut out = Image::<T>::new(ow as u32, oh as u32, src.channels);
+    if sw == 0 || sh == 0 {
+        return out;
+    }
+    let full = sw / 2; // output columns that cover two source columns
+    out.data
+        .par_chunks_mut(ow * C)
+        .enumerate()
+        .for_each(|(oy, row)| {
+            let y0 = oy * 2;
+            let r0 = &src.data[y0 * sw * C..(y0 + 1) * sw * C];
+            if y0 + 1 < sh {
+                let r1 = &src.data[(y0 + 1) * sw * C..(y0 + 2) * sw * C];
+                let (head, tail) = row.split_at_mut(full * C);
+                // Rounding offset alternates 1, 2 in a checkerboard: "round half up" alone biases
+                // every stage by +0.125 and a four-level cascade would drift half a level.
+                for (ox, ((o, a), b)) in head
+                    .chunks_exact_mut(C)
+                    .zip(r0.chunks_exact(2 * C))
+                    .zip(r1.chunks_exact(2 * C))
+                    .enumerate()
+                {
+                    let round = 1 + ((ox + oy) & 1) as u32;
+                    for c in 0..C {
+                        let s =
+                            a[c].to_u32() + a[C + c].to_u32() + b[c].to_u32() + b[C + c].to_u32();
+                        o[c] = T::from_u32((s + round) >> 2);
+                    }
+                }
+                if sw % 2 == 1 {
+                    for c in 0..C {
+                        let s = r0[(sw - 1) * C + c].to_u32() + r1[(sw - 1) * C + c].to_u32();
+                        tail[c] = T::from_u32((s + 1) >> 1);
+                    }
+                }
+            } else {
+                // Last row of an odd height: average horizontal pairs only.
+                let (head, tail) = row.split_at_mut(full * C);
+                for ((o, a), _) in head
+                    .chunks_exact_mut(C)
+                    .zip(r0.chunks_exact(2 * C))
+                    .zip(0..)
+                {
+                    for c in 0..C {
+                        o[c] = T::from_u32((a[c].to_u32() + a[C + c].to_u32() + 1) >> 1);
+                    }
+                }
+                if sw % 2 == 1 {
+                    tail[..C].copy_from_slice(&r0[(sw - 1) * C..sw * C]);
                 }
             }
         });
@@ -137,7 +205,7 @@ fn level_matrix(m: &[f64; 9], f: f64) -> [f64; 9] {
 
 /// Like [`crate::warp::warp_perspective_image`], with the minification guard at
 /// [`MAX_LOCAL_SCALE`].
-pub fn warp_perspective_guarded<T: Sample + Into<u32> + TryFrom<u32>>(
+pub fn warp_perspective_guarded<T: Sample>(
     src: ImageRef<'_, T>,
     dst_to_src: &[f64; 9],
     out_w: u32,
@@ -148,7 +216,7 @@ pub fn warp_perspective_guarded<T: Sample + Into<u32> + TryFrom<u32>>(
 }
 
 /// The guard with an explicit threshold (for calibration; the engine uses [`MAX_LOCAL_SCALE`]).
-pub fn warp_perspective_guarded_with<T: Sample + Into<u32> + TryFrom<u32>>(
+pub fn warp_perspective_guarded_with<T: Sample>(
     src: ImageRef<'_, T>,
     dst_to_src: &[f64; 9],
     out_w: u32,
@@ -180,16 +248,25 @@ pub fn warp_perspective_guarded_with<T: Sample + Into<u32> + TryFrom<u32>>(
             )
         })
         .collect();
-    // Build each needed level once (level 0 is the source itself).
-    let mut needed: Vec<u32> = levels.iter().copied().filter(|l| *l > 0).collect();
-    needed.sort_unstable();
-    needed.dedup();
+    // Build the needed levels by cascaded 2 x 2 halving (each level reads the one before it, so
+    // the whole pyramid costs about 1.3 passes over the source). Levels nobody uses are dropped
+    // as soon as the next one exists.
+    let max_level = levels.iter().copied().max().unwrap_or(0);
     let mut built: Vec<(u32, Image<T>)> = Vec::new();
-    for l in needed {
+    for l in 1..=max_level {
         if cancel.is_cancelled() {
             return Err(Cancelled);
         }
-        built.push((l, reduce_box(src, 1usize << l)));
+        let next = match built.last() {
+            Some((_, prev)) => reduce_half(prev.as_ref()),
+            None => reduce_half(src),
+        };
+        if let Some((pl, _)) = built.last()
+            && !levels.contains(pl)
+        {
+            built.pop();
+        }
+        built.push((l, next));
     }
     let view_for_band = |band: usize| -> View<'_, T> {
         let l = levels[band];
@@ -276,6 +353,34 @@ mod tests {
         // Bottom row (row 2 only), first block: 100 and 110 -> 105.
         assert_eq!(r.data[3], 105);
         assert_eq!(reduce_box(img.as_ref(), 1), img);
+    }
+
+    #[test]
+    fn halving_matches_the_2x2_box_reduction_within_rounding_including_odd_sizes() {
+        for (w, h, c) in [
+            (10u32, 8u32, 3u8),
+            (11, 9, 3),
+            (7, 1, 1),
+            (1, 6, 4),
+            (1, 1, 3),
+            (9, 10, 2),
+        ] {
+            let mut img = Image::<u8>::new(w, h, c);
+            for (i, v) in img.data.iter_mut().enumerate() {
+                *v = (i.wrapping_mul(2_654_435_761) >> 13) as u8;
+            }
+            let (a, b) = (reduce_half(img.as_ref()), reduce_box(img.as_ref(), 2));
+            assert_eq!((a.width, a.height), (b.width, b.height));
+            // Same blocks; only the rounding of exact halves differs (checkerboard offset).
+            let worst = a
+                .data
+                .iter()
+                .zip(&b.data)
+                .map(|(x, y)| x.abs_diff(*y))
+                .max()
+                .unwrap();
+            assert!(worst <= 1, "{w}x{h}x{c}: {worst}");
+        }
     }
 
     #[test]

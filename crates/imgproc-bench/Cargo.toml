@@ -17,6 +17,8 @@ fast_image_resize = { version = "6", features = ["rayon"] }
 image = { version = "0.25", default-features = false }
 
 [dev-dependencies]
+image-compare = { version = "0.5", default-features = false }
+serde_json.workspace = true
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 
 [lints.rust]

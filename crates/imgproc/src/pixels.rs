@@ -12,6 +12,9 @@ pub trait Sample: Copy + Default + Send + Sync + 'static {
     /// nearest entry (8-bit).
     const PRECISE: bool;
     fn to_f32(self) -> f32;
+    fn to_u32(self) -> u32;
+    /// Truncating conversion (the caller guarantees the value fits).
+    fn from_u32(v: u32) -> Self;
     /// Rounds to nearest and clamps into range (NaN maps to 0).
     fn from_f32_round(v: f32) -> Self;
 }
@@ -22,6 +25,14 @@ impl Sample for u8 {
     #[inline(always)]
     fn to_f32(self) -> f32 {
         f32::from(self)
+    }
+    #[inline(always)]
+    fn to_u32(self) -> u32 {
+        u32::from(self)
+    }
+    #[inline(always)]
+    fn from_u32(v: u32) -> Self {
+        v as u8
     }
     #[inline(always)]
     fn from_f32_round(v: f32) -> Self {
@@ -35,6 +46,14 @@ impl Sample for u16 {
     #[inline(always)]
     fn to_f32(self) -> f32 {
         f32::from(self)
+    }
+    #[inline(always)]
+    fn to_u32(self) -> u32 {
+        u32::from(self)
+    }
+    #[inline(always)]
+    fn from_u32(v: u32) -> Self {
+        v as u16
     }
     #[inline(always)]
     fn from_f32_round(v: f32) -> Self {
