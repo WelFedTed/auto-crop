@@ -8,10 +8,12 @@ pub mod commit;
 mod engine;
 pub mod enumerate;
 pub mod error;
+pub mod memory;
 pub mod migrate;
 pub mod paths;
 pub mod samples;
 pub mod settings;
+pub mod source;
 pub mod store;
 pub mod util;
 

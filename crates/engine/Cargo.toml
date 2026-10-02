@@ -19,6 +19,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 blake3 = { version = "1", features = ["pure"] }
 toml = "0.9"
+sysinfo = { version = "0.37", default-features = false, features = ["system"] }
 
 [dev-dependencies]
 tempfile = "3"
