@@ -10,12 +10,28 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+# Generators for synthetic and hostile test files (ROADMAP M1.12, M1.69). Never enabled in a shipped
+# build; `xtask` turns it on for `make-hostile`. The dev-dependencies below make it available to tests.
+fixtures = ["dep:jpeg-encoder", "dep:tiff", "dep:fax", "dep:flate2"]
+
 [dependencies]
 auto-crop-imgproc = { path = "../imgproc" }
-# Pure-Rust JPEG and PNG only for now. HEIC, TIFF, WebP and the libjpeg-turbo path arrive in M6/M11
-# (ADR-0004/0005); this is the stand-in that makes the first GUI testable.
+# Pure-Rust decoders only (zune-jpeg 0.5.15, png, tiff, image-webp). HEIC and the libjpeg-turbo path
+# arrive in M6 and M1.18/M1.19 (ADR-0004/0005).
 thiserror.workspace = true
-image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff", "webp"] }
+jpeg-encoder = { version = "0.7", optional = true }
+tiff = { version = "0.11", optional = true }
+fax = { version = "0.2", optional = true }
+flate2 = { version = "1", optional = true }
+
+[dev-dependencies]
+rayon = "1"
+jpeg-encoder = "0.7"
+tiff = "0.11"
+fax = "0.2"
+flate2 = "1"
 
 [lints.rust]
 unsafe_code = "forbid"

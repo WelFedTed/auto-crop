@@ -12,11 +12,16 @@ pub use auto_crop_core::ErrKind;
 pub fn codec_err(e: auto_crop_codecs::CodecError) -> ErrKind {
     use auto_crop_codecs::CodecError as C;
     match e {
-        C::Unsupported => ErrKind::UnsupportedFormat,
+        // The UI has copy for a handful of codes only (`ui/src/lib/types.ts`); the codec's finer
+        // distinctions (UnsupportedFeature, DecodeTimeout, InternalPanic) fold into the codes it
+        // can show until that copy exists. Flip these arms when it does.
+        C::Unsupported | C::NotDecodable(_) | C::UnsupportedFeature(_) => {
+            ErrKind::UnsupportedFormat
+        }
         C::Corrupt(_) => ErrKind::Corrupt,
-        C::TooLarge(_) => ErrKind::TooLarge,
+        C::TooLarge(_) | C::LimitExceeded { .. } => ErrKind::TooLarge,
         // The early slice reported these as Internal and the UI has copy for that code only.
-        C::Encode(_) => ErrKind::Internal,
+        C::Encode(_) | C::InternalPanic(_) | C::DecodeTimeout => ErrKind::Internal,
     }
 }
 
