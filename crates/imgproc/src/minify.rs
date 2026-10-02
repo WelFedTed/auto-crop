@@ -134,6 +134,8 @@ pub fn reduce_half<T: Sample>(src: ImageRef<'_, T>) -> Image<T> {
     }
 }
 
+// `as_chunks::<{ 2 * C }>` needs generic const expressions, which are unstable.
+#[allow(clippy::chunks_exact_to_as_chunks)]
 fn reduce_half_c<T: Sample, const C: usize>(src: ImageRef<'_, T>) -> Image<T> {
     let (sw, sh) = (src.width as usize, src.height as usize);
     let (ow, oh) = (sw.div_ceil(2).max(1), sh.div_ceil(2).max(1));
