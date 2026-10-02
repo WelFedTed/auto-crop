@@ -23,7 +23,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 |---|---|---|---|---|---|
 | P | Planning | none | documents | - | 4 / 5 (80%) |
 | M0 | Foundations and week-1 spikes | none | CI only (Windows, macOS, Linux) | XL | 49 / 94 (52%) |
-| M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 24 / 94 (25%) |
+| M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 28 / 94 (29%) |
 | M2 | Classical pipeline, safe writes and CLI | v0.1.0 | Windows 10/11 x64 | L | 0 / 93 (0%) |
 | M3 | GUI alpha: single-image editor | v0.2.0 | Windows 10/11 x64 | XL | 0 / 94 (0%) |
 | M4 | ML detection, orientation and calibrated confidence | v0.3.0 | Windows 10/11 x64 | XL | 0 / 90 (0%) |
@@ -39,7 +39,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | X | Continuous and cross-cutting | - | - | - | 0 / 42 (0%) |
 | X | Post-1.0 backlog (1.x) | - | - | - | 0 / 43 (0%) |
 | X | Spikes and open decisions | - | - | - | 0 / 28 (0%) |
-| **Total** | | | | | **77 / 1407 (5%)** |
+| **Total** | | | | | **81 / 1407 (5%)** |
 <!-- progress:end -->
 
 ## Why this order
@@ -224,12 +224,12 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [ ] **M1.21 Baseline encoders** - `Encoder` impls for JPEG (turbojpeg q90 and `jpeg-encoder` with IJG attribution; default picked from M1.57) and PNG (`png`, 8/16-bit, dpi) for the harness and stage-sum only, not the M2 write path. Tests: JPEG round trip >= 40 dB at q90; 16-bit PNG bit-exact.
 
 ### Imaging kernels
-- [ ] **M1.22 Proxy pyramid and tiles** - `imgproc::pyramid`: one decode to 256 px thumbnail, 1024 px detection proxy, ~1.5 MP analysis proxy (long edge <= 3072 px), 2-4 MP display proxy, never upscaling; `tiles(level, 512)`. Tests: tiles rebuild a level bit-exactly; same bytes at 1/8 threads.
-- [ ] **M1.23 Homography solver** - `imgproc::homography`: normalised (Hartley) DLT in f64, inverse, point mapping, degeneracy check (duplicate or collinear corners give `ErrKind::Degenerate`). Tests: proptest round trip < 1e-9; matches `cv2.getPerspectiveTransform` fixtures within 1e-6.
-- [ ] **M1.24 Strip-wise Lanczos3 warp** - `imgproc::warp` per the M0.38 ADR: Lanczos3 (Rgb8, Gray8, 16-bit), rayon over 64-row bands, no full-image f32 copy, `CancelToken` per band. Tests: cancel within 2 band-times; 100 MP extra heap <= output + 16 MB + bands; same bytes at 1 and 8 threads.
-- [ ] **M1.25 Warp oracles** - Identity and 90-degree turns exact; sub-pixel shifts within 1 LSB of a NumPy Lanczos3 reference; PSNR >= 45 dB vs `cv2.warpPerspective` (fixtures checked in; PROVISIONAL); SSIM references via `image-compare` (>= 0.99 same OS, >= 0.98 across; never `dssim-core`).
-- [ ] **M1.26 Warp minification guard** - Above local scale 1.5 (PROVISIONAL) warp from the nearest pre-reduced pyramid level, as a 6x6 Lanczos footprint aliases. Tests: a zone plate at 2x and 4x stays within 3 dB alias energy of an area average (PROVISIONAL); no level-switch seam (<= 2 LSB).
-- [ ] **M1.27 Threshold kernels** - `imgproc::threshold`: Otsu, Sauvola, NICK with u64 strip integrals, memory O(width x window) not ~192 MB at 12 MP. Tests: equals naive versions; constant-255 images above the u32 limits do not overflow; within 0.5 F-measure of Doxa on 3 DIBCO images.
+- [x] **M1.22 Proxy pyramid and tiles** - `imgproc::pyramid`: one decode to 256 px thumbnail, 1024 px detection proxy, ~1.5 MP analysis proxy (long edge <= 3072 px), 2-4 MP display proxy, never upscaling; `tiles(level, 512)`. Tests: tiles rebuild a level bit-exactly; same bytes at 1/8 threads.
+- [x] **M1.23 Homography solver** - `imgproc::homography`: normalised (Hartley) DLT in f64, inverse, point mapping, degeneracy check (duplicate or collinear corners give `ErrKind::Degenerate`). Tests: proptest round trip < 1e-9; matches `cv2.getPerspectiveTransform` fixtures within 1e-6.
+- [x] **M1.24 Strip-wise Lanczos3 warp** - `imgproc::warp` per the M0.38 ADR: Lanczos3 (Rgb8, Gray8, 16-bit), rayon over 64-row bands, no full-image f32 copy, `CancelToken` per band. Tests: cancel within 2 band-times; 100 MP extra heap <= output + 16 MB + bands; same bytes at 1 and 8 threads. Result: kernel about 4-5x faster than the spike; extra heap = output + 0.3 MB at 100 MP; `docs/perf/kernels.md`. The M2.15 90 ms gate is NOT claimed (123 ms measured on a loaded machine).
+- [ ] **M1.25 Warp oracles** - Identity and 90-degree turns exact; sub-pixel shifts within 1 LSB of a NumPy Lanczos3 reference; PSNR >= 45 dB vs `cv2.warpPerspective` (fixtures checked in; PROVISIONAL); SSIM references via `image-compare` (>= 0.99 same OS, >= 0.98 across; never `dssim-core`). Status: bit-exact turns/shifts, 1 LSB vs NumPy, MSSIM >= 0.99 done; PSNR vs cv2 is 52 dB on photo-like content but 41.8 dB on hard one-pixel edges (below 45), and cross-OS SSIM is unmeasured, so this stays open.
+- [x] **M1.26 Warp minification guard** - Above local scale 1.5 (PROVISIONAL) warp from the nearest pre-reduced pyramid level, as a 6x6 Lanczos footprint aliases. Tests: a zone plate at 2x and 4x stays within 3 dB alias energy of an area average (PROVISIONAL); no level-switch seam (<= 2 LSB). Finding: the 1.5 threshold leaves +7.3 dB alias energy at 3x scale; a threshold of 1.0 keeps every tested scale <= 0 dB (open for M2).
+- [ ] **M1.27 Threshold kernels** - `imgproc::threshold`: Otsu, Sauvola, NICK with u64 strip integrals, memory O(width x window) not ~192 MB at 12 MP. Tests: equals naive versions; constant-255 images above the u32 limits do not overflow; within 0.5 F-measure of Doxa on 3 DIBCO images. Status: kernels, equality, overflow and memory tests done; the Doxa/DIBCO F-measure clause is unmeasured (no DIBCO images offline), so this stays open.
 
 ### Detection
 - [ ] **M1.28 LSD decision: port or EDLines** - 3-day ADR (`docs/adr/NNNN-lsd.md`): port the OpenCV `lsd.cpp` only from OpenCV >= 4.5.4 with recorded provenance (never the original LSD source) or EDLines; compare recall, false segments, ms, effort on 1024 px proxies. Decision only; code is M2.11.
@@ -269,8 +269,8 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [ ] **M1.53 Perf corpus builder** - `xtask make-bench-images`: real 12, 24, 48, 100 MP JPEGs (q85-95, 4:2:0/4:4:4, baseline and progressive) developed from CC0 raw.pixls.us RAWs or own captures; sizes with no CC0 source are recorded gaps (M0.48's public JPEGs bridge); SHA-256 recorded.
 - [ ] **M1.54 Stage spans and skeleton** - `engine::skeleton` (`auto-crop dev-pipeline`) chains read_probe, decode, proxy, analyse (stand-in), rectify, enhance (prototype), encode with budget-table spans and `stage_done{stage, ms, px}` (`--timings`). Tests: span order; same bytes at 1/8 threads.
 - [ ] **M1.55 Analysis stand-ins** - Time equivalent work labelled STAND-IN until M2/M4: (a) a public 256x256 MobileNetV3-class net (random weights) via the M0.35 ADR runtime; (b) Canny and contours on the 1024 px proxy with `imageproc`; the budget table shows a separate stand-in column.
-- [ ] **M1.56 Decode and resize benchmarks** - criterion 0.8: turbojpeg (full, scaled) vs zune-jpeg, plus PNG/TIFF/WebP; `fast_image_resize` vs `image::imageops::resize` and `pic-scale`, with PSNR/SSIM. ADR `docs/adr/NNNN-codec-kernel-choices.md` picks the decoder, resizer and linear-light rule.
-- [ ] **M1.57 Kernel and encode benchmarks** - criterion: warp from 12/48/100 MP to 2480x3508 and to a heavy-minification output (M2.15 gate: <= 90 ms at 8 threads); Otsu, Sauvola, NICK at windows 31/51/101; JPEG q90 (turbojpeg vs `jpeg-encoder`) and PNG encode; 1 and N threads.
+- [ ] **M1.56 Decode and resize benchmarks** - criterion 0.8: turbojpeg (full, scaled) vs zune-jpeg, plus PNG/TIFF/WebP; `fast_image_resize` vs `image::imageops::resize` and `pic-scale`, with PSNR/SSIM. ADR `docs/adr/NNNN-codec-kernel-choices.md` picks the decoder, resizer and linear-light rule. Status: benches exist in `crates/imgproc-bench`; the codec-kernel-choices ADR is not written, and turbojpeg/pic-scale are not benchmarked.
+- [ ] **M1.57 Kernel and encode benchmarks** - criterion: warp from 12/48/100 MP to 2480x3508 and to a heavy-minification output (M2.15 gate: <= 90 ms at 8 threads); Otsu, Sauvola, NICK at windows 31/51/101; JPEG q90 (turbojpeg vs `jpeg-encoder`) and PNG encode; 1 and N threads. Status: warp, threshold and encode benches exist (`docs/perf/kernels.md`); the 90 ms gate needs an idle-machine run.
 - [ ] **M1.58 gungraun gate** - gungraun 0.20 (Valgrind, Linux only) on small fixed inputs for decode, resize, warp, threshold kernels per SIMD level (scalar, SSE4.1, AVX2); `main` and PR head in one job; > 5% worse blocks, 2% warns. Acceptance: an injected 10% regression fails. _(gate: > 5%)_
 - [ ] **M1.59 Nightly wall-clock** - hyperfine (`--warmup 3 --runs 20`) on the dev-pipeline for 12/48/100 MP on the Tier-M laptop as the private repo's self-hosted runner (AC power; binary built on a hosted runner); an issue opens when p50 or peak RSS regresses > 10%; never gates a PR.
 - [ ] **M1.60 Memory profile and batch throughput** - DHAT or heaptrack peak heap at 12/48/100 MP vs 3x decoded RGB8 + 64 MB (175 MB, 500 MB, 1.0 GB; PROVISIONAL); 200 x 12 MP batch on cores - 1 workers under `MemoryBudget` at 1-8 workers: images/s, scaling efficiency (70% checked), peak RSS.
