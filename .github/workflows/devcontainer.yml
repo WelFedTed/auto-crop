@@ -1,28 +1,56 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
 # SPDX-FileCopyrightText: 2026 Auto Crop contributors
 
-# Weekly proof that a fresh devcontainer builds with no manual steps (ROADMAP M0.12).
+# Weekly proof that a fresh devcontainer builds with no manual steps (ROADMAP M0.12) and runs the
+# workspace smoke test and nextest (M1.79).
 name: Devcontainer
 
 on:
   schedule:
     - cron: "23 5 * * 1"
   workflow_dispatch:
+  # No path filter here (M1.80): a check that a path filter can skip never reports. The filter is a
+  # step inside the job; on a pull request that touches nothing the container depends on, the
+  # build is skipped and the job still reports green.
   pull_request:
-    paths: [".devcontainer/**", ".github/workflows/devcontainer.yml"]
 
 permissions:
   contents: read
 
+concurrency:
+  group: devcontainer-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build:
+    name: devcontainer build
     runs-on: ubuntu-22.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Build the container and the workspace inside it
+          fetch-depth: 0
+      - name: Did anything the container depends on change?
+        id: changes
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" != "pull_request" ] || git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -Eq '^(\.devcontainer/|\.github/workflows/devcontainer\.yml$|xtask/src/doctor\.rs$|rust-toolchain\.toml$)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing the devcontainer depends on changed: build skipped." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Build the container, then doctor, build, smoke test and nextest inside it
+        if: steps.changes.outputs.relevant == 'true'
         uses: devcontainers/ci@513af61f4de4f75d37e4438f184ba4358f0fc1ca # v0.3.1900000450
         with:
           push: never
-          runCmd: cargo xtask doctor && cargo build --workspace
+          runCmd: |
+            cargo xtask doctor
+            cargo build --workspace
+            cargo xtask eval self-check
+            cargo nextest run --workspace

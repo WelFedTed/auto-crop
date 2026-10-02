@@ -77,18 +77,27 @@ jobs:
           "$PY" -m pip install --quiet numpy
       - name: Fetch the ONNX Runtime we load (Linux)
         if: matrix.ort_mode == 'dyn'
+        env:
+          ORT_URL: ${{ matrix.ort_url }}
+          ORT_SHA256: ${{ matrix.ort_sha256 }}
         run: |
-          curl -sSL -o ort.tgz "${{ matrix.ort_url }}"
+          curl -sSL -o ort.tgz "$ORT_URL"
           SHA=$(sha256sum ort.tgz | cut -d' ' -f1)
           echo "ort.tgz sha256 $SHA"
-          if [ -n "${{ matrix.ort_sha256 }}" ] && [ "$SHA" != "${{ matrix.ort_sha256 }}" ]; then echo "SHA-256 mismatch"; exit 1; fi
+          if [ -z "$ORT_SHA256" ]; then
+            echo "::warning::no pinned SHA-256 for this runtime (best-effort arm64 cell); pin $SHA before relying on it"
+          elif [ "$SHA" != "$ORT_SHA256" ]; then
+            echo "SHA-256 mismatch"; exit 1
+          fi
           mkdir ort && tar -xzf ort.tgz -C ort --strip-components=1
           LIB=$(ls "$PWD"/ort/lib/libonnxruntime.so.* | head -1)
           echo "ORT_DYLIB_PATH=$LIB" >> "$GITHUB_ENV"
           ls -la ort/lib
       - name: Build the harness (release)
+        env:
+          ORT_MODE: ${{ matrix.ort_mode }}
         run: |
-          case "${{ matrix.ort_mode }}" in
+          case "$ORT_MODE" in
             dl) F=ort-b,rten-b,tract-b ;;
             dyn) F=ort-dyn,rten-b,tract-b ;;
             none) F=rten-b,tract-b ;;
@@ -96,13 +105,16 @@ jobs:
           echo "FEATURES=$F" >> "$GITHUB_ENV"
           cargo build --release --no-default-features --features "$F"
       - name: Run the matrix
+        env:
+          ORT_MODE: ${{ matrix.ort_mode }}
+          RUNNER_LABEL: ${{ matrix.os }}
         run: |
           PY=$(command -v python3 || command -v python)
           EXE=target/release/infer
           [ -f "$EXE.exe" ] && EXE="$EXE.exe"
-          if [ "${{ matrix.ort_mode }}" = none ]; then export BACKENDS=rten,tract; fi
+          if [ "$ORT_MODE" = none ]; then export BACKENDS=rten,tract; fi
           "$PY" run.py "$EXE" 30 | tee table.md
-          { echo "### ${{ matrix.os }}"; echo; cat table.md; } >> "$GITHUB_STEP_SUMMARY"
+          { echo "### $RUNNER_LABEL"; echo; cat table.md; } >> "$GITHUB_STEP_SUMMARY"
       - name: Binary sizes per backend
         run: |
           for f in $(echo "$FEATURES" | tr ',' ' '); do

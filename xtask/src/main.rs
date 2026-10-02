@@ -5,6 +5,7 @@
 
 mod alloc_count;
 mod check_native;
+mod ci_guards;
 mod dco;
 mod deny_selftest;
 mod deps;
@@ -58,6 +59,11 @@ Commands:
         fail while the clean control passes.
   check-profiles
         Fail on panic = \"abort\" and require panic = \"unwind\" in release.
+  ci-guards [--selftest]
+        CI policy guards: `unsafe` only in ffi/ and simd/ module directories with // SAFETY:
+        comments, no HTTP/TLS/socket crates in the shipped build (B18, C4), and workflow hygiene
+        (SHA pins, least privilege, no pull_request_target, no path-filtered PR triggers, no
+        release machinery). --selftest runs the planted violations, which must all be detected.
   make-hostile [--out <dir>] [--only <substring>] [--no-run]
         Generate the hostile-file corpus (60000x60000 and 100 MP headers, zlib bombs, IFD
         floods, truncations, cyclic EXIF) and decode each file in a subprocess; fails on a
@@ -90,6 +96,7 @@ fn main() -> ExitCode {
         "check-dco" => dco::run(&rest),
         "deny-selftest" => deny_selftest::run(&rest),
         "check-profiles" => profiles::run(&rest),
+        "ci-guards" => ci_guards::run(&rest),
         "make-hostile" => hostile::run(&rest),
         "hostile-run" => hostile::run_child(&rest),
         "synth" => eval::run_synth(&rest),

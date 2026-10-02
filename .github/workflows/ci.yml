@@ -13,7 +13,9 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Cancel superseded pull-request runs only: every push to main keeps its own result, so a red
+  # commit inside a burst of pushes is never hidden by a cancelled run.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -74,6 +76,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo xtask check-identity
       - run: cargo xtask provenance
+      - name: CI policy guards (unsafe placement, no network crates, workflow hygiene)
+        run: cargo xtask ci-guards
+      - name: CI policy guards self-test (every planted violation must be detected)
+        run: cargo xtask ci-guards --selftest
       - name: Toolchain report (informational)
         run: cargo xtask doctor || true
 
@@ -84,7 +90,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - run: pipx run zizmor .github/workflows
+      # Pinned version; the token switches on the online audits (stale pins, impostor commits,
+      # known-vulnerable actions).
+      - run: pipx run zizmor==1.30.1 .github/workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   reuse:
     name: reuse lint
@@ -93,7 +103,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - run: pipx run "reuse[charset-normalizer]" lint
+      - run: pipx run "reuse[charset-normalizer]==6.2.0" lint
 
   dco:
     name: DCO sign-off
