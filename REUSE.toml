@@ -29,6 +29,8 @@ path = [
     "ui/**/*.json",
     "**/.gitignore",
     "spikes/gui-tauri/icons/**",
+    "crates/engine/fixtures/**",
+    "crates/*/src/snapshots/*.snap",
     ".devcontainer/devcontainer.json",
 ]
 precedence = "aggregate"

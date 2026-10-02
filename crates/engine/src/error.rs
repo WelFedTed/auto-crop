@@ -1,67 +1,22 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // SPDX-FileCopyrightText: 2026 Auto Crop contributors
 
-//! Typed error codes (PLAN 2.10 `ErrKind`). The engine returns codes, never English: the UI owns
-//! the wording.
+//! Typed error codes (PLAN 2.10 `ErrKind`). The enum lives in `auto-crop-core` (M1.09) so every
+//! crate shares it; this module re-exports it and holds the conversions that need engine-side
+//! types. The engine returns codes, never English: the UI owns the wording.
 
-use serde::{Deserialize, Serialize};
+pub use auto_crop_core::ErrKind;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum ErrKind {
-    #[error("corrupt or unreadable image")]
-    Corrupt,
-    #[error("unsupported format")]
-    UnsupportedFormat,
-    #[error("image too large")]
-    TooLarge,
-    #[error("file could not be read")]
-    Unreadable,
-    #[error("the file changed while Auto Crop was working")]
-    SourceChanged,
-    #[error("the file is in use by another program")]
-    FileInUse,
-    #[error("the disk is full")]
-    DiskFull,
-    #[error("the file or folder is read-only")]
-    ReadOnly,
-    #[error("the new file could not be verified")]
-    VerifyFailed,
-    #[error("the original could not be backed up")]
-    BackupFailed,
-    #[error("the backup of the original has expired")]
-    OriginalExpired,
-    #[error("there is no crop to apply")]
-    NoCrop,
-    #[error("internal error")]
-    Internal,
-}
-
-impl ErrKind {
-    /// Maps an I/O error from a write or replace to the closest code.
-    pub fn from_io(e: &std::io::Error) -> Self {
-        use std::io::ErrorKind as K;
-        match (e.raw_os_error(), e.kind()) {
-            // ERROR_DISK_FULL, ERROR_HANDLE_DISK_FULL, ENOSPC
-            (Some(112 | 39 | 28), _) | (_, K::StorageFull) => ErrKind::DiskFull,
-            // ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION
-            (Some(32 | 33), _) => ErrKind::FileInUse,
-            (_, K::PermissionDenied) => ErrKind::ReadOnly,
-            (_, K::ReadOnlyFilesystem) => ErrKind::ReadOnly,
-            _ => ErrKind::Unreadable,
-        }
-    }
-}
-
-impl From<auto_crop_codecs::CodecError> for ErrKind {
-    fn from(e: auto_crop_codecs::CodecError) -> Self {
-        use auto_crop_codecs::CodecError as C;
-        match e {
-            C::Unsupported => ErrKind::UnsupportedFormat,
-            C::Corrupt(_) => ErrKind::Corrupt,
-            C::TooLarge(_) => ErrKind::TooLarge,
-            C::Encode(_) => ErrKind::Internal,
-        }
+/// Maps a codec failure to the closest code. (A free function rather than `From`: both types are
+/// foreign to this crate.)
+pub fn codec_err(e: auto_crop_codecs::CodecError) -> ErrKind {
+    use auto_crop_codecs::CodecError as C;
+    match e {
+        C::Unsupported => ErrKind::UnsupportedFormat,
+        C::Corrupt(_) => ErrKind::Corrupt,
+        C::TooLarge(_) => ErrKind::TooLarge,
+        // The early slice reported these as Internal and the UI has copy for that code only.
+        C::Encode(_) => ErrKind::Internal,
     }
 }
 

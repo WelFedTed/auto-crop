@@ -3,19 +3,22 @@
 
 [package]
 name = "auto-crop-core"
-description = "UI-agnostic core data model (EditState, history, errors)"
+description = "UI-agnostic core data model and ports (EditState, history, errors, cancellation)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+# Normal dependencies are limited to serde and thiserror (M1.01); `xtask check-deps` enforces it.
 [dependencies]
-serde.workspace = true
+# `rc` only for `Arc<GridWarp>` in `Geometry::Grid`; it adds no crate.
+serde = { workspace = true, features = ["rc"] }
 thiserror.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+proptest = { version = "1", default-features = false, features = ["std"] }
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -51,6 +51,7 @@ pub struct Manifest {
     pub pinned: bool,
     pub purge_after: Option<i64>,
     pub engine_version: String,
+    #[serde(deserialize_with = "crate::migrate::deserialize_optional")]
     pub edit: Option<EditState>,
     pub restored_at: Option<i64>,
 }

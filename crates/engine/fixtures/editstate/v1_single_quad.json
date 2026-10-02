@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "orientation": {
+    "quarterTurns": 0,
+    "mirror": false
+  },
+  "items": [
+    {
+      "id": 1,
+      "include": true,
+      "geometry": {
+        "type": "quad",
+        "corners": [
+          {
+            "x": 0.08,
+            "y": 0.06
+          },
+          {
+            "x": 0.93,
+            "y": 0.1
+          },
+          {
+            "x": 0.9,
+            "y": 0.95
+          },
+          {
+            "x": 0.05,
+            "y": 0.9
+          }
+        ],
+        "quarterTurns": 1,
+        "mirror": false,
+        "fineDeg": -2.5
+      },
+      "enhanceOverride": null,
+      "origin": {
+        "kind": "auto",
+        "pipelineVer": 1
+      },
+      "confidence": {
+        "score": 0.75,
+        "forced": null,
+        "reasons": []
+      }
+    }
+  ],
+  "margin": {
+    "kind": "paperEdge",
+    "margin": 0.0
+  },
+  "enhance": {
+    "mode": "original"
+  }
+}

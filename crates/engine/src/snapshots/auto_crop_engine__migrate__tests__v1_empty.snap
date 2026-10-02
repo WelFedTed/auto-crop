@@ -1,0 +1,19 @@
+---
+source: crates/engine/src/migrate.rs
+expression: state
+---
+{
+  "version": 1,
+  "orientation": {
+    "quarterTurns": 0,
+    "mirror": false
+  },
+  "items": [],
+  "margin": {
+    "kind": "paperEdge",
+    "margin": 0.0
+  },
+  "enhance": {
+    "mode": "original"
+  }
+}

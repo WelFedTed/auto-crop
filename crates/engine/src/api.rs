@@ -31,22 +31,20 @@ impl From<&QuadWarp> for Edit {
 impl Edit {
     /// Validated, clamped geometry; the engine never trusts the webview's numbers.
     pub fn to_state(&self) -> EditState {
-        EditState {
-            geometry: Some(
-                QuadWarp {
-                    corners: self.quad,
-                    quarter_turns: self.quarter_turns,
-                    fine_deg: self.fine_deg,
-                }
-                .sanitised(),
-            ),
-            ..EditState::default()
-        }
+        EditState::single(
+            QuadWarp {
+                corners: self.quad,
+                quarter_turns: self.quarter_turns,
+                mirror: false,
+                fine_deg: self.fine_deg,
+            }
+            .sanitised(),
+        )
     }
 }
 
 pub fn edit_of(state: &EditState) -> Option<Edit> {
-    state.geometry.as_ref().map(Edit::from)
+    state.quad().map(Edit::from)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -237,7 +235,7 @@ mod tests {
             fine_deg: 500.0,
         };
         let s = edit.to_state();
-        let g = s.geometry.unwrap();
+        let g = s.quad().unwrap().clone();
         assert_eq!(g.corners[0], Pt::new(0.0, 1.0));
         assert_eq!(g.quarter_turns, 1);
         assert_eq!(g.fine_deg, 45.0);

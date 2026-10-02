@@ -1,0 +1,161 @@
+{
+  "version": 1,
+  "orientation": {
+    "quarterTurns": 2,
+    "mirror": true
+  },
+  "items": [
+    {
+      "id": 1,
+      "include": true,
+      "geometry": {
+        "type": "quad",
+        "corners": [
+          {
+            "x": 0.02,
+            "y": 0.03
+          },
+          {
+            "x": 0.48,
+            "y": 0.02
+          },
+          {
+            "x": 0.47,
+            "y": 0.97
+          },
+          {
+            "x": 0.03,
+            "y": 0.98
+          }
+        ],
+        "quarterTurns": 0,
+        "mirror": false,
+        "fineDeg": 0.0
+      },
+      "enhanceOverride": null,
+      "origin": {
+        "kind": "autoThenEdited"
+      },
+      "confidence": null
+    },
+    {
+      "id": 2,
+      "include": false,
+      "geometry": {
+        "type": "quad",
+        "corners": [
+          {
+            "x": -0.02,
+            "y": 0.1
+          },
+          {
+            "x": 1.03,
+            "y": 0.12
+          },
+          {
+            "x": 1.0,
+            "y": 0.9
+          },
+          {
+            "x": 0.0,
+            "y": 0.92
+          }
+        ],
+        "quarterTurns": 3,
+        "mirror": true,
+        "fineDeg": 12.5
+      },
+      "enhanceOverride": {
+        "mode": "original"
+      },
+      "origin": {
+        "kind": "manual"
+      },
+      "confidence": {
+        "score": 0.5,
+        "forced": "check",
+        "reasons": [
+          {
+            "code": "WEAK_EDGE",
+            "side": "top"
+          },
+          {
+            "code": "PARTIAL_FRAME"
+          }
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "include": true,
+      "geometry": {
+        "type": "identity"
+      },
+      "enhanceOverride": null,
+      "origin": {
+        "kind": "manual"
+      },
+      "confidence": null
+    },
+    {
+      "id": 4,
+      "include": true,
+      "geometry": {
+        "type": "grid",
+        "outline": [
+          {
+            "x": 0.0,
+            "y": 0.0
+          },
+          {
+            "x": 1.0,
+            "y": 0.0
+          },
+          {
+            "x": 1.0,
+            "y": 1.0
+          },
+          {
+            "x": 0.0,
+            "y": 1.0
+          }
+        ],
+        "cols": 2,
+        "rows": 2,
+        "nodes": [
+          {
+            "x": 0.0,
+            "y": 0.0
+          },
+          {
+            "x": 1.0,
+            "y": 0.0
+          },
+          {
+            "x": 0.0,
+            "y": 1.0
+          },
+          {
+            "x": 1.0,
+            "y": 1.0
+          }
+        ],
+        "model": "test-grid-1",
+        "quarterTurns": 0,
+        "mirror": false
+      },
+      "enhanceOverride": null,
+      "origin": {
+        "kind": "manual"
+      },
+      "confidence": null
+    }
+  ],
+  "margin": {
+    "kind": "paperEdge",
+    "margin": 0.0625
+  },
+  "enhance": {
+    "mode": "original"
+  }
+}

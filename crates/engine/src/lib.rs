@@ -8,6 +8,7 @@ pub mod commit;
 mod engine;
 pub mod enumerate;
 pub mod error;
+pub mod migrate;
 pub mod paths;
 pub mod samples;
 pub mod settings;

@@ -8,13 +8,13 @@
 use crate::api::*;
 use crate::commit::{free_name, swap, verify_temp, write_temp};
 use crate::enumerate;
-use crate::error::{ErrKind, Result};
+use crate::error::{ErrKind, Result, codec_err};
 use crate::paths::AppPaths;
 use crate::settings::Settings;
 use crate::store::{BackupState, Manifest, NewBackup, OutputRec, Store};
 use crate::util::{blake3_hex, display_name, new_id, now_secs, rfc3339, unix_ms};
 use auto_crop_codecs::{Format, MAX_PIXELS, decode, encode, probe};
-use auto_crop_core::{Confidence, EditState, Forced, History, QuadWarp};
+use auto_crop_core::{Confidence, EditState, Forced, History, Origin, QuadWarp};
 use auto_crop_imgproc::Raster;
 use auto_crop_imgproc::detect::detect;
 use auto_crop_imgproc::render::{Limits, render_quad};
@@ -134,7 +134,7 @@ impl Item {
     fn geometry(&self) -> Option<QuadWarp> {
         self.history
             .as_ref()
-            .and_then(|h| h.current().geometry.clone())
+            .and_then(|h| h.current().quad().cloned())
     }
 }
 
@@ -245,7 +245,7 @@ fn stat_of(path: &Path) -> Option<(u64, i64)> {
 }
 
 fn jpeg(r: &Raster, quality: u8) -> Result<Vec<u8>> {
-    encode(r, Format::Jpeg, quality, None).map_err(ErrKind::from)
+    encode(r, Format::Jpeg, quality, None).map_err(codec_err)
 }
 
 impl Engine {
@@ -411,7 +411,7 @@ impl Engine {
                     it.icc = a.icc.map(Arc::new);
                     it.confidence = Some(a.confidence);
                     it.auto = Some(a.state.clone());
-                    it.history = Some(History::new(a.state));
+                    it.history = Some(History::for_edit(a.state));
                     it.status = ItemStatus::Ready;
                     it.error = None;
                     it.generation = 1;
@@ -432,17 +432,19 @@ impl Engine {
 
     fn analyse_inner(&self, path: &Path) -> Result<Analysis> {
         let (snapshot, bytes) = snapshot_of(path)?;
-        let probe = probe(&bytes)?;
+        let probe = probe(&bytes).map_err(codec_err)?;
         if u64::from(probe.width) * u64::from(probe.height) > MAX_PIXELS {
             return Err(ErrKind::TooLarge);
         }
-        let decoded = decode(&bytes)?;
+        let decoded = decode(&bytes).map_err(codec_err)?;
         let raster = decoded.raster;
         let detection = detect(&raster);
-        let state = EditState {
-            geometry: detection.quad.map(QuadWarp::new),
-            ..EditState::default()
-        };
+        let state = detection
+            .quad
+            .map(QuadWarp::new)
+            .map_or_else(EditState::default, |q| {
+                EditState::single_with(q, Origin::Auto { pipeline_ver: 1 }, None)
+            });
         Ok(Analysis {
             format: decoded.format,
             snapshot,
@@ -520,10 +522,7 @@ impl Engine {
     /// For items with no crop: an editable quad inset about 5% from the frame.
     pub fn draw_crop(&self, id: u32) -> Result<ItemView> {
         self.with_history(id, |it| {
-            let state = EditState {
-                geometry: Some(QuadWarp::inset_frame(0.05)),
-                ..EditState::default()
-            };
+            let state = EditState::single(QuadWarp::inset_frame(0.05));
             if it
                 .history
                 .as_mut()
@@ -551,7 +550,7 @@ impl Engine {
                 ErrKind::from_io(&e)
             }
         })?;
-        let decoded = decode(&bytes)?;
+        let decoded = decode(&bytes).map_err(codec_err)?;
         let p = Arc::new(resize_to_fit(&decoded.raster, DISPLAY_EDGE));
         lock(&self.inner.proxies).put(id, p.clone());
         Ok(p)
@@ -683,7 +682,7 @@ impl Engine {
                 .ok_or(ErrKind::Internal)?
                 .current()
                 .clone();
-            if state.geometry.is_none() {
+            if state.quad().is_none() {
                 return Err(ErrKind::NoCrop);
             }
             (
@@ -697,7 +696,7 @@ impl Engine {
                 it.icc.clone(),
             )
         };
-        let geometry = state.geometry.clone().ok_or(ErrKind::NoCrop)?;
+        let geometry = state.quad().cloned().ok_or(ErrKind::NoCrop)?;
 
         // Read the pixels' source: the file before the first save, the backup afterwards.
         let bytes = fs::read(&original_path).map_err(|e| {
@@ -715,13 +714,14 @@ impl Engine {
         if original_path == path && blake3_hex(&bytes) != snap.blake3 {
             return Err(ErrKind::SourceChanged);
         }
-        let decoded = decode(&bytes)?;
+        let decoded = decode(&bytes).map_err(codec_err)?;
         drop(bytes);
         let out = render_quad(&decoded.raster, &geometry, Limits::pixels(MAX_PIXELS))
             .map_err(|_| ErrKind::NoCrop)?;
         drop(decoded);
         let quality = JPEG_SAVE_QUALITY;
-        let encoded = encode(&out, fmt, quality, icc.as_deref().map(|v| v.as_slice()))?;
+        let encoded =
+            encode(&out, fmt, quality, icc.as_deref().map(|v| v.as_slice())).map_err(codec_err)?;
         let dims = (out.width, out.height);
         drop(out);
         let mtime = UNIX_EPOCH + Duration::from_millis(orig_mtime_ms.max(0) as u64);
