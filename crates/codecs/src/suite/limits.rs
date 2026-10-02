@@ -221,14 +221,23 @@ fn max_est_bytes_caps_the_decode_memory_estimate() {
 
 #[test]
 fn max_decode_ms_returns_a_timeout_through_decode_guarded() {
-    // The soft timeout itself is exercised with a slow closure in `guard`; here the field is wired
-    // through `decode_guarded` and a generous value does not trigger.
+    // A decode of a 15 MB raster cannot finish within a millisecond: the guard returns the typed
+    // timeout at once while the worker thread runs on (the thread's end is tested in `guard`).
+    let big: std::sync::Arc<[u8]> = png_rgb(2500, 2000).into();
     let l = DecodeLimits {
-        max_decode_ms: Some(30_000),
+        max_decode_ms: Some(1),
         ..DecodeLimits::default()
     };
-    let png: std::sync::Arc<[u8]> = png_rgb(16, 16).into();
-    assert!(crate::decode_guarded(png, &l).is_ok());
+    assert_eq!(
+        crate::decode_guarded(big.clone(), &l).err(),
+        Some(CodecError::DecodeTimeout)
+    );
+    // The same file decodes when the limit is generous.
+    let l = DecodeLimits {
+        max_decode_ms: Some(60_000),
+        ..DecodeLimits::default()
+    };
+    assert!(crate::decode_guarded(big, &l).is_ok());
 }
 
 #[test]
