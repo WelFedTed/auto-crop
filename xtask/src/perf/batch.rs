@@ -12,7 +12,7 @@
 //! under `target/perf/` and never committed. They are synthetic stand-ins, not a real corpus.
 
 use super::host::{Host, Monitor, idle_check};
-use super::{Flags, write_atomic, write_json};
+use super::{Flags, percentile, sorted, write_atomic, write_json};
 use auto_crop_core::CancelToken;
 use auto_crop_engine::memory::{MIB, MemoryBudget};
 use auto_crop_engine::skeleton::bench_images::{dims_for_megapixels, jpeg};
@@ -98,6 +98,8 @@ pub struct Pass {
     pub failures: usize,
     pub wall_s: f64,
     pub peak_rss: u64,
+    /// Mean CPU share of all other processes during this pass (percent of all CPUs).
+    pub other_load_pct: f32,
     pub budget_peak_in_use: u64,
     /// Mean sum of the stage times per image, in ms (the CPU cost of one image on one thread).
     pub cpu_ms_per_image: f64,
@@ -176,6 +178,7 @@ pub fn run_pass(files: &[PathBuf], workers: usize, budget: &MemoryBudget) -> Res
         failures: total.failures,
         wall_s,
         peak_rss,
+        other_load_pct: 0.0,
         budget_peak_in_use: after.peak,
         cpu_ms_per_image: total.stage_ms.iter().sum::<f64>() / n,
         stage_means: Stage::ALL
@@ -267,20 +270,32 @@ pub fn run(f: &Flags) -> Result<(), String> {
     let pre = idle_check();
     println!("Load before: {}\n", pre.label());
 
+    let per_pass: usize = f.num("--pass-images", files.len())?;
+    let rounds: usize = f.num("--rounds", 1)?;
+    if per_pass == 0 || rounds == 0 {
+        return Err("--pass-images and --rounds need numbers of at least 1".into());
+    }
+    let used = &files[..per_pass.min(files.len())];
     let monitor = Monitor::start();
     let mut passes: Vec<Pass> = Vec::new();
-    for w in workers {
-        let p = run_pass(&files, w, &budget)?;
-        eprintln!(
-            "{w} worker(s): {:.2} images/s, {:.1} s, peak RSS {} MB",
-            p.images_per_s(),
-            p.wall_s,
-            p.peak_rss / 1_000_000
-        );
-        passes.push(p);
+    for round in 1..=rounds {
+        for &w in &workers {
+            let pass_monitor = Monitor::start();
+            // A fresh budget per pass, so its peak is this pass's own.
+            let mut p = run_pass(used, w, &MemoryBudget::new(budget.cap()))?;
+            p.other_load_pct = pass_monitor.finish().mean_other_pct;
+            eprintln!(
+                "round {round}, {w} worker(s): {:.2} images/s, {:.1} s, peak RSS {} MB, other CPU {:.0}%",
+                p.images_per_s(),
+                p.wall_s,
+                p.peak_rss / 1_000_000,
+                p.other_load_pct
+            );
+            passes.push(p);
+        }
     }
     let during = monitor.finish();
-    println!("{}", markdown(&passes, files.len()));
+    println!("{}", markdown(&passes, used.len()));
     println!("Load during: {}", during.label());
     if during.noisy() || pre.noisy() {
         println!(
@@ -291,11 +306,11 @@ pub fn run(f: &Flags) -> Result<(), String> {
         write_json(
             out,
             &json!({"host": host.json(), "load_before": pre.json(), "load_during": during.json(),
-                "megapixels": mp, "images": files.len(), "memory_cap_bytes": budget.cap(),
+                "megapixels": mp, "images": used.len(), "rounds": rounds, "memory_cap_bytes": budget.cap(),
                 "passes": passes.iter().map(|p| json!({
                     "workers": p.workers, "images": p.images, "failures": p.failures,
                     "wall_s": p.wall_s, "images_per_s": p.images_per_s(),
-                    "peak_rss_bytes": p.peak_rss, "budget_peak_in_use_bytes": p.budget_peak_in_use,
+                    "peak_rss_bytes": p.peak_rss, "other_load_pct": p.other_load_pct, "budget_peak_in_use_bytes": p.budget_peak_in_use,
                     "cpu_ms_per_image": p.cpu_ms_per_image,
                     "stage_mean_ms": p.stage_means.iter().map(|(s, m)| json!({"stage": s.name(), "ms": m})).collect::<Vec<_>>(),
                     "digest": format!("{:016x}", p.digest)})).collect::<Vec<_>>()}),
@@ -310,35 +325,89 @@ pub fn run(f: &Flags) -> Result<(), String> {
     Ok(())
 }
 
+/// One row of the batch table: every pass at one worker count, over all rounds.
+#[derive(Debug, Clone)]
+pub struct Summary {
+    pub workers: usize,
+    pub rounds: usize,
+    pub ips_median: f64,
+    pub ips_best: f64,
+    pub peak_rss: u64,
+    pub budget_peak_in_use: u64,
+    /// CPU ms per image of the best pass.
+    pub cpu_ms_best: f64,
+    /// Mean other-process load over the passes of this row.
+    pub load_mean: f32,
+}
+
+/// Groups passes by worker count, in order of first appearance.
+pub fn summarise(passes: &[Pass]) -> Vec<Summary> {
+    let mut order: Vec<usize> = Vec::new();
+    for p in passes {
+        if !order.contains(&p.workers) {
+            order.push(p.workers);
+        }
+    }
+    order
+        .into_iter()
+        .map(|w| {
+            let of: Vec<&Pass> = passes.iter().filter(|p| p.workers == w).collect();
+            let ips = sorted(of.iter().map(|p| p.images_per_s()).collect());
+            let best = of
+                .iter()
+                .max_by(|a, b| a.images_per_s().total_cmp(&b.images_per_s()))
+                .expect("a group is never empty");
+            Summary {
+                workers: w,
+                rounds: of.len(),
+                ips_median: percentile(&ips, 0.5),
+                ips_best: best.images_per_s(),
+                peak_rss: of.iter().map(|p| p.peak_rss).max().unwrap_or(0),
+                budget_peak_in_use: of.iter().map(|p| p.budget_peak_in_use).max().unwrap_or(0),
+                cpu_ms_best: best.cpu_ms_per_image,
+                load_mean: of.iter().map(|p| p.other_load_pct).sum::<f32>() / of.len() as f32,
+            }
+        })
+        .collect()
+}
+
 pub fn markdown(passes: &[Pass], images: usize) -> String {
     use std::fmt::Write as _;
-    let base = passes
-        .iter()
-        .find(|p| p.workers == 1)
-        .map(Pass::images_per_s);
+    let rows = summarise(passes);
+    let one = rows.iter().find(|r| r.workers == 1);
     let mut s = format!(
-        "{images} images per pass.\n\n| workers | wall s | images/s | efficiency vs 1 worker | >= 70%? | peak RSS MB | budget peak in use MB | CPU ms/image |\n|---:|---:|---:|---:|---|---:|---:|---:|\n"
+        "{images} images per pass, {} round(s) per worker count (rounds are interleaved so a drifting background load hits every row alike; `best` is the least-disturbed pass, noise only ever slows a run).\n\n| workers | images/s median | images/s best | efficiency (median) | efficiency (best) | >= 70% (best)? | peak RSS MB | budget peak in use MB | CPU ms/image (best) | other CPU % (mean) |\n|---:|---:|---:|---:|---:|---|---:|---:|---:|---:|\n",
+        rows.first().map_or(0, |r| r.rounds)
     );
-    for p in passes {
-        let (eff, ok) = match base {
-            Some(b) => {
-                let e = efficiency(p.images_per_s(), p.workers, b);
+    for r in &rows {
+        let (em, eb, ok) = match one {
+            Some(o) => {
+                let eb = efficiency(r.ips_best, r.workers, o.ips_best);
                 (
-                    format!("{:.0}%", e * 100.0),
-                    if e >= ASSUMED_EFFICIENCY { "yes" } else { "no" },
+                    format!(
+                        "{:.0}%",
+                        100.0 * efficiency(r.ips_median, r.workers, o.ips_median)
+                    ),
+                    format!("{:.0}%", 100.0 * eb),
+                    if eb >= ASSUMED_EFFICIENCY {
+                        "yes"
+                    } else {
+                        "no"
+                    },
                 )
             }
-            None => ("n/a (no 1-worker pass)".into(), "-"),
+            None => ("n/a".into(), "n/a".into(), "-"),
         };
         let _ = writeln!(
             s,
-            "| {} | {:.1} | {:.2} | {eff} | {ok} | {:.0} | {:.0} | {:.0} |",
-            p.workers,
-            p.wall_s,
-            p.images_per_s(),
-            p.peak_rss as f64 / 1e6,
-            p.budget_peak_in_use as f64 / 1e6,
-            p.cpu_ms_per_image
+            "| {} | {:.2} | {:.2} | {em} | {eb} | {ok} | {:.0} | {:.0} | {:.0} | {:.0} |",
+            r.workers,
+            r.ips_median,
+            r.ips_best,
+            r.peak_rss as f64 / 1e6,
+            r.budget_peak_in_use as f64 / 1e6,
+            r.cpu_ms_best,
+            r.load_mean
         );
     }
     if let Some(first) = passes.first() {
@@ -356,7 +425,7 @@ pub fn markdown(passes: &[Pass], images: usize) -> String {
     let same = passes.windows(2).all(|w| w[0].digest == w[1].digest);
     let _ = write!(
         s,
-        "\nOutputs identical across worker counts: {}.",
+        "\nOutputs identical across worker counts and rounds: {}.",
         if same { "yes" } else { "NO" }
     );
     s
@@ -377,6 +446,56 @@ mod tests {
     fn efficiency_is_throughput_over_workers_times_one_worker() {
         assert!((efficiency(8.0, 4, 2.0) - 1.0).abs() < 1e-12);
         assert!((efficiency(5.6, 4, 2.0) - 0.7).abs() < 1e-12);
+    }
+
+    fn pass(workers: usize, wall_s: f64, load: f32) -> Pass {
+        Pass {
+            workers,
+            images: 100,
+            failures: 0,
+            wall_s,
+            peak_rss: 1_000_000 * workers as u64,
+            other_load_pct: load,
+            budget_peak_in_use: 175_000_000 * workers as u64,
+            cpu_ms_per_image: 1000.0,
+            stage_means: Stage::ALL.iter().map(|s| (*s, 10.0)).collect(),
+            digest: 7,
+        }
+    }
+
+    #[test]
+    fn rounds_are_grouped_with_median_best_and_efficiency_against_one_worker() {
+        // 1 worker: 10, 12 and 20 images/s (a disturbed round, a normal one, the best);
+        // 4 workers: 32 and 36 (nearest-rank median of two is the lower one).
+        let passes = [
+            pass(1, 10.0, 90.0),
+            pass(4, 100.0 / 32.0, 90.0),
+            pass(1, 100.0 / 12.0, 80.0),
+            pass(4, 100.0 / 36.0, 80.0),
+            pass(1, 5.0, 10.0),
+        ];
+        let rows = summarise(&passes);
+        assert_eq!(
+            rows.iter().map(|r| r.workers).collect::<Vec<_>>(),
+            [1, 4],
+            "order of first appearance"
+        );
+        assert_eq!((rows[0].rounds, rows[1].rounds), (3, 2));
+        assert!((rows[0].ips_median - 12.0).abs() < 1e-9);
+        assert!((rows[0].ips_best - 20.0).abs() < 1e-9);
+        assert!((rows[1].ips_best - 36.0).abs() < 1e-9);
+        assert!((rows[0].load_mean - 60.0).abs() < 1e-4);
+        assert_eq!(rows[1].peak_rss, 4_000_000);
+        let md = markdown(&passes, 100);
+        // Best-of: 36 / (4 x 20) = 45%, below the 70% line; median: 32 / (4 x 12) = 67%.
+        assert!(
+            md.contains("| 4 | 32.00 | 36.00 | 67% | 45% | no |"),
+            "{md}"
+        );
+        assert!(
+            md.contains("| 1 | 12.00 | 20.00 | 100% | 100% | yes |"),
+            "{md}"
+        );
     }
 
     #[test]

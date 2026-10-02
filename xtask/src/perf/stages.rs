@@ -30,6 +30,7 @@ const REDESIGN_RATIO: f64 = 1.5;
 pub struct Row {
     pub stage: Stage,
     pub px_median: u64,
+    pub min: f64,
     pub p50: f64,
     pub p95: f64,
 }
@@ -47,6 +48,8 @@ pub struct Measured {
     pub glue_median: f64,
     pub glue_max: f64,
     pub sum_p50: f64,
+    /// Another process was using the CPU while this ran: every verdict carries a NOISY tag.
+    pub noisy: bool,
 }
 
 /// Runs `warmup + runs` times and reduces the reports.
@@ -86,6 +89,7 @@ pub fn reduce(megapixels: f64, file_bytes: u64, reports: &[Report]) -> Measured 
         rows.push(Row {
             stage,
             px_median: px[px.len() / 2],
+            min: ms[0],
             p50: percentile(&ms, 0.5),
             p95: percentile(&ms, 0.95),
         });
@@ -111,6 +115,7 @@ pub fn reduce(megapixels: f64, file_bytes: u64, reports: &[Report]) -> Measured 
         glue_median: percentile(&glue, 0.5),
         glue_max: percentile(&glue, 1.0),
         sum_p50: percentile(&sums, 0.5),
+        noisy: false,
     }
 }
 
@@ -122,6 +127,15 @@ pub fn verdict(ratio: f64) -> &'static str {
         "over budget (<= 1.5x)"
     } else {
         "OVER 1.5x: REDESIGN"
+    }
+}
+
+/// [`verdict`] with a NOISY tag when the run shared the machine.
+fn tagged(m: &Measured, ratio: f64) -> String {
+    if m.noisy {
+        format!("{} [NOISY: re-measure idle]", verdict(ratio))
+    } else {
+        verdict(ratio).to_owned()
     }
 }
 
@@ -142,7 +156,7 @@ fn markdown(m: &Measured, label: &str) -> String {
     let at_12 = m.megapixels as u32 == 12;
     let _ = writeln!(
         s,
-        "| stage | px | p50 ms | p95 ms | budget ms (PROVISIONAL, 12 MP) | p50 / budget | verdict |\n|---|---:|---:|---:|---:|---:|---|"
+        "| stage | px | min ms | p50 ms | p95 ms | budget ms (PROVISIONAL, 12 MP) | p50 / budget | verdict |\n|---|---:|---:|---:|---:|---:|---:|---|"
     );
     for r in &m.rows {
         let b = r.stage.budget_ms();
@@ -150,7 +164,7 @@ fn markdown(m: &Measured, label: &str) -> String {
             (
                 format!("{b:.0}"),
                 format!("{:.2}", r.p50 / b),
-                verdict(r.p50 / b).to_owned(),
+                tagged(m, r.p50 / b),
             )
         } else {
             (
@@ -166,16 +180,17 @@ fn markdown(m: &Measured, label: &str) -> String {
         };
         let _ = writeln!(
             s,
-            "| {}{note} | {} | {:.1} | {:.1} | {bs} | {ratio} | {v} |",
+            "| {}{note} | {} | {:.1} | {:.1} | {:.1} | {bs} | {ratio} | {v} |",
             r.stage.name(),
             r.px_median,
+            r.min,
             r.p50,
             r.p95
         );
     }
     let _ = writeln!(
         s,
-        "| **sum of stages** | | {:.1} | | {} | | |",
+        "| **sum of stages** | | | {:.1} | | {} | | |",
         m.sum_p50,
         if at_12 {
             format!("{:.0}", chained_budget_ms())
@@ -185,7 +200,7 @@ fn markdown(m: &Measured, label: &str) -> String {
     );
     let _ = writeln!(
         s,
-        "| **total (wall)** | | {:.1} | {:.1} | | | |",
+        "| **total (wall)** | | | {:.1} | {:.1} | | | |",
         m.total_p50, m.total_p95
     );
     if let Some(b) = table_b_total_ms(m.megapixels) {
@@ -194,7 +209,7 @@ fn markdown(m: &Measured, label: &str) -> String {
             "\nTable B full-process p50 budget at this size: {b:.0} ms (also holds `refine`, `commit` and slack, not chained here), measured chained p50 {:.0} ms = {:.2}x of it ({}).",
             m.total_p50,
             m.total_p50 / b,
-            verdict(m.total_p50 / b)
+            tagged(m, m.total_p50 / b)
         );
     }
     let glue_pct = 100.0 * m.glue_median / m.total_p50;
@@ -214,7 +229,7 @@ fn markdown(m: &Measured, label: &str) -> String {
             s,
             "Analysis ceiling: p95 {:.1} ms against 40 ms (STAND-IN detector): {}.",
             a.p95,
-            verdict(a.p95 / 40.0)
+            tagged(m, a.p95 / 40.0)
         );
     }
     s
@@ -225,7 +240,7 @@ fn json_of(m: &Measured, label: &str) -> Value {
         "megapixels": m.megapixels, "label": label, "source": [m.source.0, m.source.1],
         "output": [m.output.0, m.output.1], "file_bytes": m.file_bytes, "runs": m.runs,
         "stages": m.rows.iter().map(|r| json!({
-            "stage": r.stage.name(), "px": r.px_median, "p50_ms": r.p50, "p95_ms": r.p95,
+            "stage": r.stage.name(), "px": r.px_median, "min_ms": r.min, "p50_ms": r.p50, "p95_ms": r.p95,
             "budget_ms": r.stage.budget_ms()})).collect::<Vec<_>>(),
         "total_p50_ms": m.total_p50, "total_p95_ms": m.total_p95, "sum_p50_ms": m.sum_p50,
         "glue_median_ms": m.glue_median, "glue_max_ms": m.glue_max,
@@ -273,11 +288,13 @@ pub fn run(f: &Flags) -> Result<(), String> {
             Some(p) => p.into(),
             None => ensure_image(&f.dir(), mp, 1, f.has("--fill"))?,
         };
-        let m = measure(&path, mp, &opts, warmup, runs)?;
-        println!("{}", markdown(&m, &label));
-        results.push(m);
+        results.push(measure(&path, mp, &opts, warmup, runs)?);
     }
     let during = monitor.finish();
+    for m in &mut results {
+        m.noisy = pre.noisy() || during.noisy();
+        println!("{}", markdown(m, &label));
+    }
     println!("Load during: {}", during.label());
     if during.noisy() || pre.noisy() {
         println!(
@@ -343,7 +360,10 @@ mod tests {
         assert!(md.contains("STAND-IN") && md.contains("PROTOTYPE"));
         // p95 of decode is 1.9x its budget but p50 is within: only p50 decides the verdict.
         assert!(md.contains("| decode |"));
-        let slow = reduce(12.0, 1, &[report(2.0)]);
+        let mut slow = reduce(12.0, 1, &[report(2.0)]);
         assert!(markdown(&slow, "t").contains("REDESIGN"));
+        assert!(!markdown(&slow, "t").contains("NOISY"));
+        slow.noisy = true;
+        assert!(markdown(&slow, "t").contains("REDESIGN [NOISY"));
     }
 }
