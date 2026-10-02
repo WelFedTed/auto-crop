@@ -198,8 +198,8 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let mut failures = 0usize;
     let mut ran = 0usize;
     println!(
-        "{:<44} {:>10} {:<16} {:>7} {:>8}",
-        "case", "bytes", "outcome", "ms", "peak MiB"
+        "{:<44} {:>10} {:<16} {:>7} {:>8} {:>10}",
+        "case", "bytes", "outcome", "ms", "peak MiB", "probe KiB"
     );
     for case in &corpus {
         if only
@@ -222,12 +222,13 @@ pub fn run(args: &[String]) -> Result<(), String> {
             Ok(o) => {
                 let bad = check(case.expect, &o);
                 println!(
-                    "{:<44} {:>10} {:<16} {:>7} {:>8.1}{}",
+                    "{:<44} {:>10} {:<16} {:>7} {:>8.1} {:>10}{}",
                     case.name,
                     case.bytes.len(),
                     o.code,
                     o.decode_ms,
                     o.decode_peak as f64 / MIB as f64,
+                    o.probe_peak / 1024,
                     if bad.is_empty() { "" } else { "  FAIL" }
                 );
                 for b in &bad {

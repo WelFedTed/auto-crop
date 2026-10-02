@@ -46,6 +46,8 @@ pub(crate) struct Header {
     pub animated: bool,
     /// The file ends inside the image data.
     pub truncated: bool,
+    /// TIFF compression tag (1 = none); 0 for other formats.
+    pub compression: u16,
     /// Why the decoder cannot read this file even though the container is fine.
     pub unsupported: Option<String>,
 }
@@ -65,6 +67,7 @@ impl Header {
             icc_len: None,
             animated: false,
             truncated: false,
+            compression: 0,
             unsupported: None,
         }
     }

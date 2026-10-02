@@ -14,6 +14,7 @@ use std::collections::HashSet;
 const TAG_WIDTH: u16 = 256;
 const TAG_HEIGHT: u16 = 257;
 const TAG_BITS: u16 = 258;
+const TAG_COMPRESSION: u16 = 259;
 const TAG_ORIENTATION: u16 = 274;
 const TAG_SAMPLES: u16 = 277;
 const TAG_ICC: u16 = 34675;
@@ -204,6 +205,9 @@ pub(crate) fn parse(b: &[u8], limits: &DecodeLimits) -> Result<Header, CodecErro
                     TAG_HEIGHT => height = t.first_uint(&e),
                     TAG_BITS => {
                         h.bit_depth = t.first_uint(&e).unwrap_or(1).min(255) as u8;
+                    }
+                    TAG_COMPRESSION => {
+                        h.compression = t.first_uint(&e).unwrap_or(0).min(65535) as u16;
                     }
                     TAG_SAMPLES => {
                         h.channels = t.first_uint(&e).unwrap_or(1).min(255) as u8;

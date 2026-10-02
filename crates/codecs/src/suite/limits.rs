@@ -242,3 +242,52 @@ fn image_dimensions_larger_than_the_probe_claim_are_not_trusted() {
     b[29..33].copy_from_slice(&crc.to_be_bytes());
     assert!(matches!(decode(&b), Err(CodecError::Corrupt(_))));
 }
+
+#[test]
+fn a_declared_size_far_beyond_the_data_is_corrupt_without_allocating_it() {
+    // At the 100 MP cap, so the pixel limit does not apply: it is the plausibility checks that
+    // refuse these tiny files before the decoder reserves its buffers.
+    let png = png_claiming(10_000, 10_000);
+    assert!(matches!(decode(&png), Err(CodecError::Corrupt(_))));
+    let jpeg = jpeg_patch_sof(&jpeg_baseline(16, 16), None, Some((10_000, 10_000)), None);
+    assert!(matches!(decode(&jpeg), Err(CodecError::Corrupt(_))));
+    let tiff = tiff_classic(
+        true,
+        &[
+            (256, 4, 1, 10_000),
+            (257, 4, 1, 10_000),
+            (258, 3, 1, 8),
+            (259, 3, 1, 1),
+            (262, 3, 1, 1),
+            (273, 4, 1, 0),
+            (277, 3, 1, 1),
+            (278, 4, 1, 10_000),
+            (279, 4, 1, 64),
+        ],
+        0,
+        &[0; 64],
+        Some(5),
+    );
+    assert!(matches!(decode(&tiff), Err(CodecError::Corrupt(_))));
+}
+
+#[test]
+fn a_maximally_compressed_png_still_passes_the_plausibility_check() {
+    // 3000 x 3000 gray zeros at the best deflate level is about 1030:1, right at the 1100:1 line.
+    let (w, h) = (3000u32, 3000u32);
+    let raw = vec![0u8; ((w + 1) * h) as usize];
+    let mut enc = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+    std::io::Write::write_all(&mut enc, &raw).unwrap();
+    let idat = enc.finish().unwrap();
+    let mut png = crate::fixtures::PNG_SIG.to_vec();
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&w.to_be_bytes());
+    ihdr.extend_from_slice(&h.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 0, 0, 0, 0]);
+    png.extend(png_chunk(b"IHDR", &ihdr));
+    png.extend(png_chunk(b"IDAT", &idat));
+    png.extend(png_chunk(b"IEND", &[]));
+    eprintln!("ratio {}:1", raw.len() / png.len());
+    let d = decode(&png).unwrap();
+    assert_eq!((d.raster.width, d.raster.height), (w, h));
+}

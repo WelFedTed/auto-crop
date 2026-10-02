@@ -127,6 +127,28 @@ fn decode_inner(bytes: &[u8], limits: &DecodeLimits) -> Result<Decoded, CodecErr
             ));
         }
     }
+    if format == Format::Png {
+        // Deflate cannot shrink data by more than about 1032:1, so a PNG much smaller than its
+        // unpacked size divided by that cannot hold the image it declares. Refusing it here keeps
+        // a 140-byte file from making the decoder reserve the whole declared buffer.
+        let bits_row = u64::from(h.width) * u64::from(h.bit_depth) * u64::from(h.channels);
+        let raw = u64::from(h.height).saturating_mul(1 + bits_row.div_ceil(8));
+        if (bytes.len() as u64) < raw / 1100 {
+            return Err(CodecError::corrupt(
+                "PNG data is too short for the dimensions in its header",
+            ));
+        }
+    }
+    if format == Format::Tiff && h.compression == 1 {
+        // Uncompressed pixel data must be present in full.
+        let bits_row = u64::from(h.width) * u64::from(h.bit_depth) * u64::from(h.channels);
+        let raw = u64::from(h.height).saturating_mul(bits_row.div_ceil(8));
+        if (bytes.len() as u64) < raw {
+            return Err(CodecError::corrupt(
+                "uncompressed TIFF is smaller than its declared pixel data",
+            ));
+        }
+    }
     if h.truncated && format == Format::Jpeg {
         // A partial JPEG decodes "successfully" with grey fill; overwriting an original with that
         // would be silent data loss (B3, B4), so it is refused.
