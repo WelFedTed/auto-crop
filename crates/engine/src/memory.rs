@@ -271,9 +271,10 @@ mod tests {
         let hold = b.acquire(100, &never()).unwrap();
         let order = Arc::new(Mutex::new(Vec::new()));
         let mut handles = Vec::new();
-        // Queue 60, 60, 10 in that order. After the hold is released the second 60 must be
-        // admitted before the 10, although the 10 would fit alongside the first 60.
-        for (name, w) in [("a60", 60u64), ("b60", 60), ("c10", 10)] {
+        // Queue 50, 60, 50 in that order. After the hold is released the 60 must be admitted before
+        // the second 50, although that 50 would fit alongside the first 50. The 60 and the second 50
+        // never fit together (110 > 100), so the admission order is observable without a race.
+        for (name, w) in [("a50", 50u64), ("b60", 60), ("c50", 50)] {
             let (bb, order) = (b.clone(), order.clone());
             handles.push(thread::spawn(move || {
                 let p = bb.acquire(w, &CancelToken::never()).unwrap();
@@ -293,7 +294,7 @@ mod tests {
         for h in handles {
             h.join().unwrap();
         }
-        assert_eq!(*order.lock().unwrap(), ["a60", "b60", "c10"]);
+        assert_eq!(*order.lock().unwrap(), ["a50", "b60", "c50"]);
     }
 
     #[test]

@@ -23,7 +23,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 |---|---|---|---|---|---|
 | P | Planning | none | documents | - | 4 / 5 (80%) |
 | M0 | Foundations and week-1 spikes | none | CI only (Windows, macOS, Linux) | XL | 49 / 94 (52%) |
-| M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 33 / 94 (35%) |
+| M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 34 / 94 (36%) |
 | M2 | Classical pipeline, safe writes and CLI | v0.1.0 | Windows 10/11 x64 | L | 0 / 93 (0%) |
 | M3 | GUI alpha: single-image editor | v0.2.0 | Windows 10/11 x64 | XL | 0 / 94 (0%) |
 | M4 | ML detection, orientation and calibrated confidence | v0.3.0 | Windows 10/11 x64 | XL | 0 / 90 (0%) |
@@ -39,7 +39,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | X | Continuous and cross-cutting | - | - | - | 0 / 42 (0%) |
 | X | Post-1.0 backlog (1.x) | - | - | - | 0 / 43 (0%) |
 | X | Spikes and open decisions | - | - | - | 0 / 28 (0%) |
-| **Total** | | | | | **86 / 1407 (6%)** |
+| **Total** | | | | | **87 / 1407 (6%)** |
 <!-- progress:end -->
 
 ## Why this order
@@ -242,9 +242,9 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [ ] **M1.33 Backgrounds and degradations** - CC0 or procedural backgrounds only (DTD excluded; licence in the manifest); clutter, shadows, colour casts, blur, noise, JPEG q40-95, thermal fade; lighting and clutter tags. Acceptance: tag histogram meets quotas; 100-image contact sheet reviewed.
 - [ ] **M1.34 Format, EXIF and ICC variants** - JPEG, PNG, TIFF, WebP outputs; orientation 1-8 variants with pre-rotated pixels so ground truth stays valid; sRGB and Display P3 variants. Acceptance: the M1 decoders reproduce the upright reference for every variant (feeds M1.17).
 - [ ] **M1.35 Synthetic suites and splits** - `xtask synth --suite smoke|full`: full >= 5,000 images, every slice cell >= 200 (rare slices 150-500; PROVISIONAL), never committed; smoke = 200 images, <= 5 MB archive, no Git LFS; `xtask check-splits` fails when a `scene_id` spans two splits.
-- [ ] **M1.36 fetch-corpus framework** - `xtask fetch-corpus [--sample] <name>`: `corpus.lock.toml` records URL, size, SHA-256, SPDX licence, attribution; verified before use, refused on mismatch; cache outside the repo, never vendored. Test: a local HTTP fixture serving bad downloads.
-- [ ] **M1.37 SmartDoc and CORD adapters** - SmartDoc 2015 Ch.1 (CC BY 4.0; cite, email the organisers; 21 MB sample first) with every Nth frame per clip and clip-level `scene_id`; CORD (CC BY 4.0) transcripts for CER. Acceptance: manifests validate; 20 quads checked on a contact sheet.
-- [ ] **M1.38 MIDV, DIBCO, raw.pixls.us adapters** - MIDV-500 quads (licence checked per release); DIBCO fetch-only with binary ground truth for threshold tests; raw.pixls.us filtered to CC0-only. Acceptance: manifests validate; a mixed-licence fixture tests the CC0 filter.
+- [x] **M1.36 fetch-corpus framework** - `xtask fetch-corpus [--sample] <name>`: `corpus.lock.toml` records URL, size, SHA-256, SPDX licence, attribution; verified before use, refused on mismatch; cache outside the repo, never vendored. Test: a local HTTP fixture serving bad downloads. Verified against a loopback HTTP fixture (tampered, truncated, wrong-size, redirect and hostile-archive cases); real dataset pins are `TODO-first-fetch`, so the first real fetch needs the owner's OK. Docs: `docs/testing/corpora.md`.
+- [ ] **M1.37 SmartDoc and CORD adapters** - SmartDoc 2015 Ch.1 (CC BY 4.0; cite, email the organisers; 21 MB sample first) with every Nth frame per clip and clip-level `scene_id`; CORD (CC BY 4.0) transcripts for CER. Acceptance: manifests validate; 20 quads checked on a contact sheet. Status: adapters and manifests built and fixture-tested; UNVERIFIED against the real dataset layouts (no download made), so this stays open.
+- [ ] **M1.38 MIDV, DIBCO, raw.pixls.us adapters** - MIDV-500 quads (licence checked per release); DIBCO fetch-only with binary ground truth for threshold tests; raw.pixls.us filtered to CC0-only. Acceptance: manifests validate; a mixed-licence fixture tests the CC0 filter. Status: same as M1.37; MIDV-500 is blocked until its licence is cleared.
 - [ ] **M1.39 Golden v0 capture plan** - Capture >= 150 images, >= 25 per M0.51 slice (long receipts, thermal-fade, partial-frame, touching, phone photos, flatbed single/multi, EXIF photos, negatives; tags overlap), incl. >= 40 receipts. Acceptance: `xtask golden-status` prints quota counts.
 - [ ] **M1.40 Label schema and validator** - `xtask check-labels` validates `labels/<image_id>.json` against the M0.51 schema (quad, top edge, flags, slice tags); rejects non-finite quads and missing tags; labels live in the private repo, images on the runner disk. Tests: valid/invalid fixtures.
 - [ ] **M1.41 Blank-quad labeller** - Label Studio (local) or a minimal `tools/labeler/` (lockfile, `npm ci --ignore-scripts`, licence allow-list; not `ui/`) on 127.0.0.1 with a per-run token, no-store, private profile; blank quad, never a model suggestion. Acceptance: 10 images at median <= 60 s.
