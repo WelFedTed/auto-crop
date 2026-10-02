@@ -34,6 +34,7 @@ path = [
     ".devcontainer/devcontainer.json",
     "crates/imgproc/tests/fixtures/**",
     "tools/imgproc-oracles/requirements.txt",
+    "tools/imgproc-oracles/requirements.lock",
     "**/*.proptest-regressions",
 ]
 precedence = "aggregate"

@@ -50,7 +50,7 @@ jobs:
         with:
           push: never
           runCmd: |
-            cargo xtask doctor
+            cargo xtask doctor --strict
             cargo build --workspace
             cargo xtask eval self-check
             cargo nextest run --workspace

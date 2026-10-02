@@ -38,9 +38,11 @@ Commands:
   check-native [--prefix <dir>]
         Inspect the built native libraries: no x265/x264 symbols, dependencies on the
         allow-list, libjpeg-turbo >= 3.1.4, no embedded-libheif.
-  doctor
+  doctor [--strict]
         Check the native build toolchain (git, CMake, Ninja, NASM, Node, C/C++) and print
-        install commands for what is missing.
+        install commands for what is missing, never install. Also checks the M1 dev tools
+        (Valgrind on Linux, Python 3.12+, Tesseract 5.x, ImageMagick, unpaper); with --strict a
+        missing dev tool fails too (the devcontainer uses that).
   provenance [--render]
         Validate the provenance log; --render regenerates the CSV/MD views (otherwise they
         must be up to date).
