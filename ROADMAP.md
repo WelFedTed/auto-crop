@@ -23,7 +23,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 |---|---|---|---|---|---|
 | P | Planning | none | documents | - | 4 / 5 (80%) |
 | M0 | Foundations and week-1 spikes | none | CI only (Windows, macOS, Linux) | XL | 49 / 94 (52%) |
-| M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 11 / 94 (11%) |
+| M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 17 / 94 (18%) |
 | M2 | Classical pipeline, safe writes and CLI | v0.1.0 | Windows 10/11 x64 | L | 0 / 93 (0%) |
 | M3 | GUI alpha: single-image editor | v0.2.0 | Windows 10/11 x64 | XL | 0 / 94 (0%) |
 | M4 | ML detection, orientation and calibrated confidence | v0.3.0 | Windows 10/11 x64 | XL | 0 / 90 (0%) |
@@ -39,7 +39,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | X | Continuous and cross-cutting | - | - | - | 0 / 42 (0%) |
 | X | Post-1.0 backlog (1.x) | - | - | - | 0 / 43 (0%) |
 | X | Spikes and open decisions | - | - | - | 0 / 28 (0%) |
-| **Total** | | | | | **64 / 1407 (4%)** |
+| **Total** | | | | | **70 / 1407 (4%)** |
 <!-- progress:end -->
 
 ## Why this order
@@ -254,12 +254,12 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [ ] **M1.85 Golden storage, backup and restore** - Images live only on the maintainer's encrypted disk (A-8), outside AI-tool-readable folders, with an encrypted backup of images and labels on a second disk (no cloud). Acceptance: a restore test matches every SHA-256 in `splits.lock.json`.
 
 ### Quality/Perf: accuracy harness
-- [ ] **M1.45 eval crate and Predictor** - `crates/eval` (bin `auto-crop-eval`: `run`, `compare`, `noise-floor`; wrapped by `xtask eval`): `Predictor` trait with a JSON-lines adapter, `FullFrame`; missing or crashed predictions count as failures. Acceptance: runs the 200-image smoke set.
-- [ ] **M1.46 Geometry and skew metrics** - IoU after canonical warp (own homography and clipper, independent of `imgproc`); corner error in % of diagonal; skew p50/p95/p99; failure at IoU < 0.90, success at >= 0.95/0.98; orientation confusion. Tests: analytic cases, shapely to 1e-6.
-- [ ] **M1.47 Slices and statistics** - Slices (lighting, clutter, tilt, aspect, format) with worst-slice gating; n < 30 never public, n < 80 advisory; one-sided 95% Clopper-Pearson silent-failure bound (PLAN 7.4), bootstrap CI for mean IoU; `eval compare`. Tests: SciPy fixtures to 1e-6.
-- [ ] **M1.48 Risk-coverage curve and ECE stub** - Risk-coverage curve, reliability diagram (10 equal-mass bins), ECE, Brier, AUROC vs failure; reported, not gated until M4. Tests: a calibrated predictor gives ECE near 0; an overconfident one matches the analytic ECE.
-- [ ] **M1.49 Determinism and self-validation** - Results byte-identical across runs and at 1 and 8 threads; header records commit and host. Every-PR self-check: oracle IoU 1.0, 0 failures; jittered oracle on the analytic curve; `FullFrame` = area fraction; crashes counted.
-- [ ] **M1.50 Per-PR smoke gate** - `eval compare` on the 200-image smoke set against `main` fails a PR at -0.3 pt mean IoU or +0.5 pt failure rate; an `accuracy-waiver` label overrides; Linux, forks too, no secrets. Mutation test: jittered fails, identical passes. _(gate: smoke)_
+- [x] **M1.45 eval crate and Predictor** - `crates/eval` (bin `auto-crop-eval`: `run`, `compare`, `noise-floor`; wrapped by `xtask eval`): `Predictor` trait with a JSON-lines adapter, `FullFrame`; missing or crashed predictions count as failures. Acceptance: runs the 200-image smoke set. Result: `docs/perf/detector-baseline.md` (synthetic stand-in data only: mean IoU 0.724, failure 29% on the 200-image smoke set; reproduced locally).
+- [x] **M1.46 Geometry and skew metrics** - IoU after canonical warp (own homography and clipper, independent of `imgproc`); corner error in % of diagonal; skew p50/p95/p99; failure at IoU < 0.90, success at >= 0.95/0.98; orientation confusion. Tests: analytic cases, shapely to 1e-6.
+- [x] **M1.47 Slices and statistics** - Slices (lighting, clutter, tilt, aspect, format) with worst-slice gating; n < 30 never public, n < 80 advisory; one-sided 95% Clopper-Pearson silent-failure bound (PLAN 7.4), bootstrap CI for mean IoU; `eval compare`. Tests: SciPy fixtures to 1e-6.
+- [x] **M1.48 Risk-coverage curve and ECE stub** - Risk-coverage curve, reliability diagram (10 equal-mass bins), ECE, Brier, AUROC vs failure; reported, not gated until M4. Tests: a calibrated predictor gives ECE near 0; an overconfident one matches the analytic ECE.
+- [x] **M1.49 Determinism and self-validation** - Results byte-identical across runs and at 1 and 8 threads; header records commit and host. Every-PR self-check: oracle IoU 1.0, 0 failures; jittered oracle on the analytic curve; `FullFrame` = area fraction; crashes counted.
+- [x] **M1.50 Per-PR smoke gate** - `eval compare` on the 200-image smoke set against `main` fails a PR at -0.3 pt mean IoU or +0.5 pt failure rate; an `accuracy-waiver` label overrides; Linux, forks too, no secrets. Mutation test: jittered fails, identical passes. _(gate: smoke)_ Verified: `accuracy-smoke.yml` ran green on the Dependabot PRs; CLI tests show jittered fails and identical passes. Not yet a required check (the owner pushes to main).
 - [ ] **M1.51 Private golden workflow** - Private repo `auto-crop-golden` (no images) with a self-hosted runner attached to it only; it evaluates the dev and locked sets and a reviewed publisher pushes allow-listed aggregates to `metrics`. Acceptance: one dispatched run publishes v0 aggregates.
 - [ ] **M1.83 Golden run isolation** - A hosted runner builds the public SHA (no data, no token); only the built `auto-crop-eval` runs beside the images, in a network-less container, set read-only, no third-party actions. Acceptance: a planted `build.rs` reading the set or opening a socket fails.
 - [ ] **M1.84 Golden triggers and token** - Nightly (dev tier), `workflow_dispatch` (locked set, once per RC; a non-main SHA after a recorded diff review) and release `repository_dispatch`; never push, PR or fork. Dispatch token: fine-grained, private repo only, used from main or tag workflows.
