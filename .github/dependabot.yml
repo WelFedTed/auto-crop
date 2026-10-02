@@ -1,9 +1,13 @@
 version: 2
+# Weekly and grouped; the cooldown keeps brand-new releases out of the first week. No auto-merge:
+# Tauri, ort, libheif and libde265 bumps need a human changelog read (PLAN 8.2.3).
 updates:
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
     groups:
       cargo-minor-patch:
         update-types: ["minor", "patch"]
@@ -12,7 +16,26 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
     groups:
       actions:
         patterns: ["*"]
     open-pull-requests-limit: 5
+  - package-ecosystem: "npm"
+    directory: "/ui"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    groups:
+      npm-minor-patch:
+        update-types: ["minor", "patch"]
+    open-pull-requests-limit: 5
+  - package-ecosystem: "devcontainers"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 2

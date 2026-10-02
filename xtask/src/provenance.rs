@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // SPDX-FileCopyrightText: 2026 Auto Crop contributors
 
-//! `cargo xtask provenance [--render]` (ROADMAP M0.25).
+//! `cargo xtask provenance [--render]` (ROADMAP M0.25, M1.74).
 //!
 //! Validates `docs/policy/provenance/provenance.jsonl` (the source of truth) and
 //! generates `provenance.csv` and `provenance.md` from it. Without `--render` the
 //! generated views must already be up to date (so a hand edit or a stale view
-//! fails CI).
+//! fails CI). It also checks that the human-written register `docs/provenance.md` covers every
+//! native library, pinned Python tool, font package and provenance-log entry (see `register`).
 
 use std::fs;
 
@@ -140,7 +141,18 @@ pub fn run(args: &[String]) -> Result<(), String> {
                 .to_owned(),
         );
     }
-    println!("provenance: {} rows valid, views up to date", rows.len());
+    let ids: Vec<String> = rows.iter().map(|r| r[0].clone()).collect();
+    let register = crate::register::check_repo(&ids)?;
+    if !register.is_empty() {
+        return Err(register.join(
+            "
+",
+        ));
+    }
+    println!(
+        "provenance: {} rows valid, views up to date, docs/provenance.md register complete",
+        rows.len()
+    );
     Ok(())
 }
 

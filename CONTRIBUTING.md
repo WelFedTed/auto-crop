@@ -16,7 +16,15 @@ This file describes the rules that will apply once development starts.
 
 ## Building
 
-Not yet applicable. A `cargo xtask doctor` command and a devcontainer will list and install the native toolchain (CMake, NASM, Ninja, Node) in milestone M0. Note that "no C toolchain needed" is false for this project.
+Not yet applicable. `cargo xtask doctor` lists what is missing from the native toolchain (CMake, NASM, Ninja, Node) and from the dev tools used by the oracles and profiling (Python 3.12, Tesseract 5, ImageMagick, unpaper, Valgrind on Linux) and prints the install command for each; `doctor --strict` also fails on missing dev tools, which is what the devcontainer runs. It never installs anything. The CI policy guards (`cargo xtask ci-guards`) are described in [docs/policy/ci-guards.md](docs/policy/ci-guards.md). Note that "no C toolchain needed" is false for this project.
+
+## Test data and personal images (B21)
+
+- **No real personal photos or documents** in this repository: not in commits, fixtures, pull requests, issues, screenshots, logs or CI output. That includes your own receipts, IDs, letters and phone photos, even redacted.
+- Tests use **synthetic data** (generated from a seed, see `cargo xtask synth`) or **public datasets with a permissive licence** that have a row in the [provenance register](docs/provenance.md) and, for datasets and weights, in the [provenance log](docs/policy/provenance/README.md). Fetch datasets by pinned SHA-256; never commit them and never use LFS.
+- **Aggregate-only metrics.** Accuracy results are published as counts, means, percentiles and per-slice numbers for slices with enough images, never per-image rows, paths, thumbnails or OCR text. A detection failure you want reported goes into an issue as a description or a synthetic reproduction, not as the image.
+- The **real hand-labelled golden set stays private** on the maintainer's machine and runs only in a private, secret-gated workflow, never on fork pull requests. See the [golden-set policy](docs/testing/golden-set.md). Golden images are never used for training or tuning.
+- A new tool, font, fixture, dataset or weight needs its row in [docs/provenance.md](docs/provenance.md) in the same pull request (`cargo xtask provenance` checks the native libraries, pinned Python tools and fonts).
 
 ## Ticking the ROADMAP
 

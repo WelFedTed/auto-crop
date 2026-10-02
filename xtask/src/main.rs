@@ -18,6 +18,7 @@ mod native;
 mod native_watch;
 mod profiles;
 mod provenance;
+mod register;
 mod roadmap;
 
 use std::process::ExitCode;
