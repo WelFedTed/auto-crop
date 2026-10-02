@@ -108,8 +108,13 @@ pub struct Summary {
     pub failure_rate: Option<f64>,
     pub success_95: Option<f64>,
     pub success_98: Option<f64>,
+    /// Corner error and skew over all images, with the worst-case penalties for unanswered ones.
     pub corner_err_pct: Dist,
     pub skew_deg: Dist,
+    /// The same distributions over scorable predictions only (`n_ok` images): the geometry
+    /// quality of the answers actually given, without the penalty values.
+    pub corner_err_pct_scored: Dist,
+    pub skew_deg_scored: Dist,
     pub orientation: OrientationCounts,
     pub accepted: Accepted,
 }
@@ -280,6 +285,8 @@ pub fn summarise(rows: &[&ImageResult], with_ci: bool) -> Summary {
         success_98: rate(at_least(SUCCESS_IOU_98), n),
         corner_err_pct: dist(corner),
         skew_deg: dist(skew),
+        corner_err_pct_scored: dist(rows.iter().filter_map(|r| r.corner_err_pct).collect()),
+        skew_deg_scored: dist(rows.iter().filter_map(|r| r.skew_deg).collect()),
         orientation,
         accepted,
     }
@@ -401,6 +408,16 @@ pub fn summary_text(r: &Results) -> String {
         num(s.skew_deg.p50, 3),
         num(s.skew_deg.p95, 3),
         num(s.skew_deg.p99, 3)
+    ));
+    o.push_str(&format!(
+        "answered only ({}): corner p50 {} p95 {} p99 {} | skew p50 {} p95 {} p99 {}\n",
+        s.n_ok,
+        num(s.corner_err_pct_scored.p50, 3),
+        num(s.corner_err_pct_scored.p95, 3),
+        num(s.corner_err_pct_scored.p99, 3),
+        num(s.skew_deg_scored.p50, 3),
+        num(s.skew_deg_scored.p95, 3),
+        num(s.skew_deg_scored.p99, 3)
     ));
     let a = &s.accepted;
     o.push_str(&format!(
@@ -532,6 +549,9 @@ mod tests {
         // 2 of 42 are worst-case, so p99 is the penalty while p50 stays near zero.
         assert_eq!(s.corner_err_pct.p99, Some(MISSING_CORNER_ERR_PCT));
         assert_eq!(s.skew_deg.p99, Some(MISSING_SKEW_DEG));
+        // The answered-only view has no penalty values in it.
+        assert!(s.corner_err_pct_scored.p99.expect("40 answered") < 1e-9);
+        assert!(s.skew_deg_scored.p99.expect("40 answered") < 1e-9);
         assert!(s.corner_err_pct.p50.expect("n > 0") < 1e-9);
         // The two non-answers are flagged, not silent; 40 accepted, all fine.
         assert_eq!(s.accepted.n, 40);

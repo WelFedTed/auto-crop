@@ -1,0 +1,113 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+# Per-PR accuracy smoke gate (ROADMAP M1.50, PLAN 7.8).
+#
+# Generates the 200-image STAND-IN smoke suite from its seed (nothing is stored or committed),
+# runs the classical detector built from the PR head and from the PR's base commit over the same
+# images, and fails the PR when the mean IoU falls by 0.3 points or the failure rate rises by 0.5
+# points. The `accuracy-waiver` label overrides a failure (the reasons stay in the log).
+#
+# Safety: `pull_request` only (never `pull_request_target`), read-only token, no secrets, Linux
+# only. It runs on fork PRs too, which is safe because it has nothing to steal. Synthetic data
+# detects regressions; it says nothing about real-world accuracy.
+#
+# The job always reports (a required check must), so the path filter lives inside it.
+
+name: Accuracy smoke
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: accuracy-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  smoke:
+    name: accuracy smoke (200 images)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Did anything that can change accuracy change?
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -Eq '^(crates/|Cargo\.toml$|Cargo\.lock$|rust-toolchain\.toml$|\.github/workflows/accuracy-smoke\.yml$)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "No crate, lockfile, toolchain or workflow change: accuracy cannot have moved." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Does the base commit have the harness?
+        id: base
+        if: steps.changes.outputs.relevant == 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if git cat-file -e "$BASE_SHA:crates/eval/Cargo.toml" 2>/dev/null; then
+            echo "has_eval=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_eval=false" >> "$GITHUB_OUTPUT"
+            echo "The base commit predates the accuracy harness: no baseline to compare against yet." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.base.outputs.has_eval == 'true'
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base-src
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: steps.base.outputs.has_eval == 'true'
+        with:
+          workspaces: |
+            . -> target
+            base-src -> target
+      - name: Build the harness at the PR head and at the base
+        if: steps.base.outputs.has_eval == 'true'
+        run: |
+          cargo build --release -p auto-crop-eval
+          cargo build --release --manifest-path base-src/Cargo.toml -p auto-crop-eval
+      - name: Generate the smoke suite from its seed
+        if: steps.base.outputs.has_eval == 'true'
+        run: ./target/release/auto-crop-eval synth --suite smoke --out smoke-suite
+      - name: Self-check the harness
+        if: steps.base.outputs.has_eval == 'true'
+        run: ./target/release/auto-crop-eval self-check
+      - name: Run the detector at the base and at the head over the same images
+        if: steps.base.outputs.has_eval == 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          common=(--manifest smoke-suite/manifest.jsonl --predictor detector --suite smoke --threads 2)
+          ./base-src/target/release/auto-crop-eval run "${common[@]}" --commit "$BASE_SHA" --out base.json
+          ./target/release/auto-crop-eval run "${common[@]}" --commit "$HEAD_SHA" --out head.json
+      - name: Compare (fails at -0.3 pt mean IoU or +0.5 pt failure rate)
+        if: steps.base.outputs.has_eval == 'true'
+        env:
+          WAIVER_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'accuracy-waiver') }}
+        run: |
+          args=()
+          if [ "$WAIVER_LABEL" = "true" ]; then args+=(--waiver); fi
+          status=0
+          ./target/release/auto-crop-eval compare --base base.json --head head.json "${args[@]}" | tee compare.txt || status=$?
+          {
+            echo '```'
+            cat compare.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
