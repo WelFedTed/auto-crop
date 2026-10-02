@@ -9,9 +9,11 @@ pub mod geometry;
 pub mod homography;
 pub mod minify;
 pub mod pixels;
+pub mod pyramid;
 pub mod render;
 pub mod scale;
 pub mod synth;
+pub mod threshold;
 pub mod warp;
 
 /// Pixel dimensions of an image.
