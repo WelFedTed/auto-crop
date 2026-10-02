@@ -23,7 +23,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 |---|---|---|---|---|---|
 | P | Planning | none | documents | - | 4 / 5 (80%) |
 | M0 | Foundations and week-1 spikes | none | CI only (Windows, macOS, Linux) | XL | 49 / 94 (52%) |
-| M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 34 / 94 (36%) |
+| M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 35 / 94 (37%) |
 | M2 | Classical pipeline, safe writes and CLI | v0.1.0 | Windows 10/11 x64 | L | 0 / 93 (0%) |
 | M3 | GUI alpha: single-image editor | v0.2.0 | Windows 10/11 x64 | XL | 0 / 94 (0%) |
 | M4 | ML detection, orientation and calibrated confidence | v0.3.0 | Windows 10/11 x64 | XL | 0 / 90 (0%) |
@@ -39,7 +39,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | X | Continuous and cross-cutting | - | - | - | 0 / 42 (0%) |
 | X | Post-1.0 backlog (1.x) | - | - | - | 0 / 43 (0%) |
 | X | Spikes and open decisions | - | - | - | 0 / 28 (0%) |
-| **Total** | | | | | **87 / 1407 (6%)** |
+| **Total** | | | | | **88 / 1407 (6%)** |
 <!-- progress:end -->
 
 ## Why this order
@@ -267,16 +267,16 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 
 ### Quality/Perf: benchmarks
 - [ ] **M1.53 Perf corpus builder** - `xtask make-bench-images`: real 12, 24, 48, 100 MP JPEGs (q85-95, 4:2:0/4:4:4, baseline and progressive) developed from CC0 raw.pixls.us RAWs or own captures; sizes with no CC0 source are recorded gaps (M0.48's public JPEGs bridge); SHA-256 recorded.
-- [ ] **M1.54 Stage spans and skeleton** - `engine::skeleton` (`auto-crop dev-pipeline`) chains read_probe, decode, proxy, analyse (stand-in), rectify, enhance (prototype), encode with budget-table spans and `stage_done{stage, ms, px}` (`--timings`). Tests: span order; same bytes at 1/8 threads.
+- [x] **M1.54 Stage spans and skeleton** - `engine::skeleton` (`auto-crop dev-pipeline`) chains read_probe, decode, proxy, analyse (stand-in), rectify, enhance (prototype), encode with budget-table spans and `stage_done{stage, ms, px}` (`--timings`). Tests: span order; same bytes at 1/8 threads. Verified: span order, per-stage events, spans sum to the total within 0.7%, identical bytes at 1/3/8 threads, cancellation and error paths; 3-OS CI green.
 - [ ] **M1.55 Analysis stand-ins** - Time equivalent work labelled STAND-IN until M2/M4: (a) a public 256x256 MobileNetV3-class net (random weights) via the M0.35 ADR runtime; (b) Canny and contours on the 1024 px proxy with `imageproc`; the budget table shows a separate stand-in column.
 - [ ] **M1.56 Decode and resize benchmarks** - criterion 0.8: turbojpeg (full, scaled) vs zune-jpeg, plus PNG/TIFF/WebP; `fast_image_resize` vs `image::imageops::resize` and `pic-scale`, with PSNR/SSIM. ADR `docs/adr/NNNN-codec-kernel-choices.md` picks the decoder, resizer and linear-light rule. Status: benches exist in `crates/imgproc-bench`; the codec-kernel-choices ADR is not written, and turbojpeg/pic-scale are not benchmarked.
 - [ ] **M1.57 Kernel and encode benchmarks** - criterion: warp from 12/48/100 MP to 2480x3508 and to a heavy-minification output (M2.15 gate: <= 90 ms at 8 threads); Otsu, Sauvola, NICK at windows 31/51/101; JPEG q90 (turbojpeg vs `jpeg-encoder`) and PNG encode; 1 and N threads. Status: warp, threshold and encode benches exist (`docs/perf/kernels.md`); the 90 ms gate needs an idle-machine run.
 - [ ] **M1.58 gungraun gate** - gungraun 0.20 (Valgrind, Linux only) on small fixed inputs for decode, resize, warp, threshold kernels per SIMD level (scalar, SSE4.1, AVX2); `main` and PR head in one job; > 5% worse blocks, 2% warns. Acceptance: an injected 10% regression fails. _(gate: > 5%)_
 - [ ] **M1.59 Nightly wall-clock** - hyperfine (`--warmup 3 --runs 20`) on the dev-pipeline for 12/48/100 MP on the Tier-M laptop as the private repo's self-hosted runner (AC power; binary built on a hosted runner); an issue opens when p50 or peak RSS regresses > 10%; never gates a PR.
-- [ ] **M1.60 Memory profile and batch throughput** - DHAT or heaptrack peak heap at 12/48/100 MP vs 3x decoded RGB8 + 64 MB (175 MB, 500 MB, 1.0 GB; PROVISIONAL); 200 x 12 MP batch on cores - 1 workers under `MemoryBudget` at 1-8 workers: images/s, scaling efficiency (70% checked), peak RSS.
+- [ ] **M1.60 Memory profile and batch throughput** - DHAT or heaptrack peak heap at 12/48/100 MP vs 3x decoded RGB8 + 64 MB (175 MB, 500 MB, 1.0 GB; PROVISIONAL); 200 x 12 MP batch on cores - 1 workers under `MemoryBudget` at 1-8 workers: images/s, scaling efficiency (70% checked), peak RSS. Status: peak heap measured (0.34-0.58 of the bound; 67 MB at 12 MP) and asserted in a test; batch throughput numbers are NOISY (loaded host), so scaling efficiency is not established. Re-run on an idle machine.
 - [ ] **M1.61 Tier-M x86 baseline** - Full matrix (decode, resize, warp, threshold, encode, dev-pipeline, batch) on the Windows Tier-M machine (6C/12T AVX2, 16 GB, NVMe, AC; record the model) with a host fingerprint JSON; published as `host.tier = M` on `metrics`.
 - [ ] **M1.62 Baseline on Apple silicon** - The same matrix on an M-series Mac (macOS arm64, NEON paths); if only the shared `macos-latest` runner (3 vCPU M1, 7 GB) is available, the result is indicative, flagged noisy and never a gate.
-- [ ] **M1.63 Measured budget table** - `docs/perf/budgets.md`: measured stage p50/p95 vs PROVISIONAL budgets (700 ms p50 and analysis <= 40 ms p95 on T1 exits, >= 4 img/s on 6 cores, overlay <= 150 ms) plus stage-sum check; > 1.5x over budget needs a redesign; unmeasured rows stay PROVISIONAL.
+- [ ] **M1.63 Measured budget table** - `docs/perf/budgets.md`: measured stage p50/p95 vs PROVISIONAL budgets (700 ms p50 and analysis <= 40 ms p95 on T1 exits, >= 4 img/s on 6 cores, overlay <= 150 ms) plus stage-sum check; > 1.5x over budget needs a redesign; unmeasured rows stay PROVISIONAL. Status: `docs/perf/budgets.md` written, all numbers NOISY; flags encode 2.1x and batch CPU/image 1.7-1.9x over budget. Re-run on an idle machine.
 - [ ] **M1.64 Metrics branch and dashboard** - Orphan `metrics` branch (`auto-crop-metrics/1`) and a uPlot Pages site: per-slice trends, latency vs failure Pareto, stage times vs budget, gate table; built by the single `pages.yml` created here (M9.19, M13.77 extend it); aggregates only.
 
 ### Enhancement
