@@ -3,8 +3,10 @@
 
 //! Pure image-processing kernels. Must not depend on any codec or I/O crate.
 
+pub mod cancel;
 pub mod detect;
 pub mod geometry;
+pub mod pixels;
 pub mod render;
 pub mod scale;
 pub mod synth;

@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+[package]
+name = "auto-crop-imgproc-bench"
+description = "Criterion benchmarks and cross-library comparisons for the imgproc kernels (not shipped)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+auto-crop-imgproc = { path = "../imgproc" }
+rayon = "1"
+
+[dev-dependencies]
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+fast_image_resize = "6"
+image = { version = "0.25", default-features = false }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[[bench]]
+name = "warp"
+harness = false
