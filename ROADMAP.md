@@ -23,7 +23,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 |---|---|---|---|---|---|
 | P | Planning | none | documents | - | 4 / 5 (80%) |
 | M0 | Foundations and week-1 spikes | none | CI only (Windows, macOS, Linux) | XL | 49 / 94 (52%) |
-| M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 28 / 94 (29%) |
+| M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 33 / 94 (35%) |
 | M2 | Classical pipeline, safe writes and CLI | v0.1.0 | Windows 10/11 x64 | L | 0 / 93 (0%) |
 | M3 | GUI alpha: single-image editor | v0.2.0 | Windows 10/11 x64 | XL | 0 / 94 (0%) |
 | M4 | ML detection, orientation and calibrated confidence | v0.3.0 | Windows 10/11 x64 | XL | 0 / 90 (0%) |
@@ -39,7 +39,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | X | Continuous and cross-cutting | - | - | - | 0 / 42 (0%) |
 | X | Post-1.0 backlog (1.x) | - | - | - | 0 / 43 (0%) |
 | X | Spikes and open decisions | - | - | - | 0 / 28 (0%) |
-| **Total** | | | | | **81 / 1407 (5%)** |
+| **Total** | | | | | **86 / 1407 (6%)** |
 <!-- progress:end -->
 
 ## Why this order
@@ -289,9 +289,9 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [x] **M1.69 Hostile-file corpus** - `xtask make-hostile` writes bombs and corruptions (60000x60000 and 100 MP headers, zlib bomb, IFD floods, truncations, cyclic EXIF); each runs in a subprocess and returns an `ErrKind` or bounded decode, 3 OSes per PR. _(gate: 0 panics, aborts, hangs)_ Result: 89 hostile files, 0 panics, aborts or hangs on windows-2025, macos-latest, ubuntu-22.04 (`xtask/tests/hostile.rs`).
 - [ ] **M1.70 cargo-fuzz targets** - `fuzz/` (cargo-fuzz 0.13, nightly, Linux only): `probe`, `limits`, `metadata` (EXIF, ICC), `editstate_json` (parse and migrate never panic); seeds from fixtures and hostile files; ASan on turbojpeg targets. Acceptance: 5 minutes per target without a crash.
 - [ ] **M1.71 Fuzz CI and crash replay** - 60 s smoke per target on PRs touching `codecs`, `core` or `fuzz/` (path filter inside the job) and 1 h per target nightly (counts toward >= 72 h per target before 1.0); crashers become plain `#[test]` inputs on 3 OSes. _(gate: fuzz smoke green)_
-- [ ] **M1.72 CI policy guards** - Extends M0.31 (its `check-profiles` owns the `panic = "abort"` ban): `xtask ci-guards` adds `unsafe` only inside `ffi/` and `simd/` with `// SAFETY:` comments and no HTTP, TLS or socket crates in shipped crates (B18, C4). Acceptance: each guard has a red test.
-- [ ] **M1.73 Licence gates for M1 deps** - `cargo deny check` green for the M1 crates (`image`, `fast_image_resize`, `turbojpeg`, `blake3`, `image-compare`, bench/test tools); bans confirmed (`dssim-core`, `heic`, `jpegxl-rs`, x264/x265, `purecv`, `opencv`); IJG notices in THIRD_PARTY_NOTICES.
-- [ ] **M1.74 Provenance register and data policy** - `docs/provenance.md` lists every tool, font, dataset and weight in use with SPDX licence, use and source (datasets, weights: models-repo log) plus an excluded list; CONTRIBUTING gains the B21 rule: no real photos in PRs, aggregate-only metrics.
+- [x] **M1.72 CI policy guards** - Extends M0.31 (its `check-profiles` owns the `panic = "abort"` ban): `xtask ci-guards` adds `unsafe` only inside `ffi/` and `simd/` with `// SAFETY:` comments and no HTTP, TLS or socket crates in shipped crates (B18, C4). Acceptance: each guard has a red test.
+- [x] **M1.73 Licence gates for M1 deps** - `cargo deny check` green for the M1 crates (`image`, `fast_image_resize`, `turbojpeg`, `blake3`, `image-compare`, bench/test tools); bans confirmed (`dssim-core`, `heic`, `jpegxl-rs`, x264/x265, `purecv`, `opencv`); IJG notices in THIRD_PARTY_NOTICES.
+- [x] **M1.74 Provenance register and data policy** - `docs/provenance.md` lists every tool, font, dataset and weight in use with SPDX licence, use and source (datasets, weights: models-repo log) plus an excluded list; CONTRIBUTING gains the B21 rule: no real photos in PRs, aggregate-only metrics.
 
 ### Model supply (bootstrap)
 - [ ] **M1.75 Training repo bootstrap** - Create `WelFedTed/auto-crop-models` (MIT OR Apache-2.0 code, OSI-only weights, `provenance/`, `manifests/`, manifest CI; no app code, no golden data). The training-vs-golden overlap check runs in the private `auto-crop-golden`, red on a planted id.
@@ -300,8 +300,8 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 
 ### CI/Release
 - [ ] **M1.78 Cross-OS lanes** - windows-2025, macos-latest (arm64), ubuntu-22.04 run nextest for all M1 crates; numeric thresholds enforced on Linux, parity on the others (<= 0.2 pt mean IoU); ARM64 (Windows, Linux) and Intel-Mac lanes best-effort until 1.0; lane <= 15 min (PROVISIONAL).
-- [ ] **M1.79 Dev toolchain** - Extends M0.11/M0.39: `doctor` also checks Valgrind, Python 3 (hashed `requirements.lock`), Tesseract 5.x, ImageMagick, unpaper and prints install commands without installing; `.devcontainer/` gains them. Acceptance: a fresh devcontainer runs smoke and nextest.
-- [ ] **M1.80 Workflow hardening** - New workflows use SHA-pinned actions, least-privilege `permissions`, no `pull_request_target`, zizmor clean; required jobs always report (path filter in the job); crates `0.0.0`, no release workflow. Acceptance: docs-only PR green; a test tag creates nothing.
+- [x] **M1.79 Dev toolchain** - Extends M0.11/M0.39: `doctor` also checks Valgrind, Python 3 (hashed `requirements.lock`), Tesseract 5.x, ImageMagick, unpaper and prints install commands without installing; `.devcontainer/` gains them. Acceptance: a fresh devcontainer runs smoke and nextest. Verified in CI only (devcontainer workflow, `doctor --strict`); no local Docker. Tesseract 5 comes from a PPA on Ubuntu 22.04.
+- [x] **M1.80 Workflow hardening** - New workflows use SHA-pinned actions, least-privilege `permissions`, no `pull_request_target`, zizmor clean; required jobs always report (path filter in the job); crates `0.0.0`, no release workflow. Acceptance: docs-only PR green; a test tag creates nothing. Note: crates are `0.0.1` since the owner-directed pre-release (97af4ca), not `0.0.0`; no docs-only PR or test tag was run, the guards enforce both.
 - [ ] **M1.81 Nightly public suites** - Linux nightly runs `eval` on the >= 5,000-image synthetic suite and the SmartDoc, CORD, MIDV samples, publishes to `metrics`, opens an issue on a regression past the smoke thresholds; non-blocking. Acceptance: two nightlies give identical synthetic numbers.
 
 ### Docs
