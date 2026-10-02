@@ -64,35 +64,43 @@ fn to_gray(r: &Raster) -> Gray {
 }
 
 fn gaussian_blur(g: &Gray, sigma: f32) -> Gray {
-    let radius = (sigma * 3.0).ceil() as i64;
-    let mut k: Vec<f32> = (-radius..=radius)
-        .map(|i| (-(i * i) as f32 / (2.0 * sigma * sigma)).exp())
+    let radius = (sigma * 3.0).ceil() as usize;
+    let mut k: Vec<f32> = (0..=2 * radius)
+        .map(|i| {
+            let d = i as f32 - radius as f32;
+            (-(d * d) / (2.0 * sigma * sigma)).exp()
+        })
         .collect();
     let s: f32 = k.iter().sum();
     for v in &mut k {
         *v /= s;
     }
     let (w, h) = (g.w, g.h);
+    // Horizontal pass on an edge-replicated copy of each row. Looping over the taps on the outside
+    // and the pixels on the inside keeps the inner loop a plain multiply-add over contiguous
+    // memory, which the compiler vectorises.
     let mut tmp = vec![0.0f32; w * h];
+    let mut pad = vec![0.0f32; w + 2 * radius];
     for y in 0..h {
-        for x in 0..w {
-            let mut acc = 0.0;
-            for (j, kv) in k.iter().enumerate() {
-                let xx = (x as i64 + j as i64 - radius).clamp(0, w as i64 - 1) as usize;
-                acc += kv * g.v[y * w + xx];
+        let row = &g.v[y * w..(y + 1) * w];
+        pad[..radius].fill(row[0]);
+        pad[radius..radius + w].copy_from_slice(row);
+        pad[radius + w..].fill(row[w - 1]);
+        let out = &mut tmp[y * w..(y + 1) * w];
+        for (j, kv) in k.iter().enumerate() {
+            for (o, v) in out.iter_mut().zip(&pad[j..j + w]) {
+                *o += kv * v;
             }
-            tmp[y * w + x] = acc;
         }
     }
     let mut out = vec![0.0f32; w * h];
     for y in 0..h {
-        for x in 0..w {
-            let mut acc = 0.0;
-            for (j, kv) in k.iter().enumerate() {
-                let yy = (y as i64 + j as i64 - radius).clamp(0, h as i64 - 1) as usize;
-                acc += kv * tmp[yy * w + x];
+        let dst = &mut out[y * w..(y + 1) * w];
+        for (j, kv) in k.iter().enumerate() {
+            let yy = (y + j).saturating_sub(radius).min(h - 1);
+            for (o, v) in dst.iter_mut().zip(&tmp[yy * w..(yy + 1) * w]) {
+                *o += kv * v;
             }
-            out[y * w + x] = acc;
         }
     }
     Gray { w, h, v: out }
@@ -132,25 +140,30 @@ fn otsu(g: &Gray) -> f32 {
 
 /// 3x3 erosion (`erode = true`) or dilation of a binary mask; outside the frame counts as the
 /// value that does not change the result (so a page touching the frame stays attached to it).
+/// The square window is applied as a row pass and a column pass.
 fn morph(m: &[bool], w: usize, h: usize, erode: bool) -> Vec<bool> {
-    let mut out = vec![false; w * h];
+    let combine = |a: bool, b: bool| if erode { a & b } else { a | b };
+    let mut rows = m.to_vec();
     for y in 0..h {
-        for x in 0..w {
-            let mut all = true;
-            let mut any = false;
-            for dy in -1i64..=1 {
-                for dx in -1i64..=1 {
-                    let (xx, yy) = (x as i64 + dx, y as i64 + dy);
-                    let v = if xx < 0 || yy < 0 || xx >= w as i64 || yy >= h as i64 {
-                        m[y * w + x]
-                    } else {
-                        m[yy as usize * w + xx as usize]
-                    };
-                    all &= v;
-                    any |= v;
-                }
+        let src = &m[y * w..(y + 1) * w];
+        let dst = &mut rows[y * w..(y + 1) * w];
+        for x in 1..w {
+            dst[x] = combine(dst[x], src[x - 1]);
+        }
+        for x in 0..w.saturating_sub(1) {
+            dst[x] = combine(dst[x], src[x + 1]);
+        }
+    }
+    let mut out = rows.clone();
+    for y in 0..h {
+        for ny in [y.wrapping_sub(1), y + 1] {
+            if ny >= h {
+                continue;
             }
-            out[y * w + x] = if erode { all } else { any };
+            let (dst, src) = (&mut out[y * w..(y + 1) * w], &rows[ny * w..(ny + 1) * w]);
+            for (d, s) in dst.iter_mut().zip(src) {
+                *d = combine(*d, *s);
+            }
         }
     }
     out
@@ -733,5 +746,90 @@ mod tests {
     #[test]
     fn tiny_images_do_not_panic() {
         assert!(detect(&Raster::new(4, 4)).quad.is_none());
+    }
+
+    /// The straightforward implementation the vectorised blur replaced.
+    fn blur_reference(g: &Gray, sigma: f32) -> Gray {
+        let radius = (sigma * 3.0).ceil() as i64;
+        let mut k: Vec<f32> = (-radius..=radius)
+            .map(|i| (-(i * i) as f32 / (2.0 * sigma * sigma)).exp())
+            .collect();
+        let s: f32 = k.iter().sum();
+        for v in &mut k {
+            *v /= s;
+        }
+        let (w, h) = (g.w, g.h);
+        let mut tmp = vec![0.0f32; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                let mut acc = 0.0;
+                for (j, kv) in k.iter().enumerate() {
+                    let xx = (x as i64 + j as i64 - radius).clamp(0, w as i64 - 1) as usize;
+                    acc += kv * g.v[y * w + xx];
+                }
+                tmp[y * w + x] = acc;
+            }
+        }
+        let mut out = vec![0.0f32; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                let mut acc = 0.0;
+                for (j, kv) in k.iter().enumerate() {
+                    let yy = (y as i64 + j as i64 - radius).clamp(0, h as i64 - 1) as usize;
+                    acc += kv * tmp[yy * w + x];
+                }
+                out[y * w + x] = acc;
+            }
+        }
+        Gray { w, h, v: out }
+    }
+
+    #[test]
+    fn the_blur_matches_the_plain_implementation_including_borders() {
+        let mut rng = crate::synth::Rng::new(9);
+        for (w, h, sigma) in [
+            (37usize, 23usize, 1.2f32),
+            (5, 40, 2.0),
+            (3, 3, 2.0),
+            (64, 1, 1.2),
+        ] {
+            let g = Gray {
+                w,
+                h,
+                v: (0..w * h).map(|_| rng.unit() * 255.0).collect(),
+            };
+            let (a, b) = (gaussian_blur(&g, sigma), blur_reference(&g, sigma));
+            for (x, y) in a.v.iter().zip(&b.v) {
+                assert!((x - y).abs() < 1e-3, "{x} vs {y} at {w}x{h}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_morphology_matches_the_plain_3x3_window() {
+        let mut rng = crate::synth::Rng::new(4);
+        let (w, h) = (23usize, 17usize);
+        let m: Vec<bool> = (0..w * h).map(|_| rng.unit() < 0.6).collect();
+        for erode in [true, false] {
+            let fast = morph(&m, w, h, erode);
+            for y in 0..h {
+                for x in 0..w {
+                    let (mut all, mut any) = (true, false);
+                    for dy in -1i64..=1 {
+                        for dx in -1i64..=1 {
+                            let (xx, yy) = (x as i64 + dx, y as i64 + dy);
+                            let v = if xx < 0 || yy < 0 || xx >= w as i64 || yy >= h as i64 {
+                                m[y * w + x]
+                            } else {
+                                m[yy as usize * w + xx as usize]
+                            };
+                            all &= v;
+                            any |= v;
+                        }
+                    }
+                    assert_eq!(fast[y * w + x], if erode { all } else { any }, "{x},{y}");
+                }
+            }
+        }
     }
 }
