@@ -7,7 +7,7 @@ Roadmap items: M1.54 (pipeline skeleton, `auto-crop dev-pipeline`), M1.60 (memor
 | | |
 |---|---|
 | Host | **LUNCHBOX, desktop, indicative** ([hardware.md](hardware.md)): Intel Core i7-8700K (6 cores / 12 threads, AVX2), 31.9 GB, Windows 11 Pro 10.0.26200, no battery (mains), power plan *Ultimate Performance* |
-| Build | `cargo build --release` profile of this repository at `74a7dce` plus the follow-up harness commit; rustc 1.98.1; **LTO off, 16 codegen units, no `target-cpu`** (the "shipped release profile" of PLAN 7.2 is not defined yet) |
+| Build | `cargo build --release` profile of this repository; the tables below were measured at `74a7dce` (the earlier classical detector), the addendum after Table A at `bc93fba` (the faster line-based detector of `3937492` and `15fd429`); rustc 1.98.1; **LTO off, 16 codegen units, no `target-cpu`** (the "shipped release profile" of PLAN 7.2 is not defined yet) |
 | Load | **Not idle for the whole session.** An unrelated `ffmpeg` (libx265, `-preset slow`, about 9 of the 12 threads) plus one Python process kept the machine at 98-100% CPU before every run (the harness prints the global counter; the Windows `Processor(_Total)` counter agreed). During the runs the other processes used 45-90% of all CPU, and the share fell as the number of benchmark threads grew (the scheduler gives more to more threads), so every multi-thread number below is pessimistic by an unknown and *varying* factor. Same binary, same image, 12 MP, all threads, minutes apart: total p50 **579 ms** in the final run and **1069 ms** in the first |
 | What to trust | Single-thread columns (p50 within 5% of the minimum, but still sharing cores with the SMT siblings of a busy machine), heap peaks (exact, load-independent), the stage-sum check (a ratio), ratios between stages of the same run. Not the absolute milliseconds, not the scaling efficiency, not the img/s |
 | Label | Every verdict is printed with `[NOISY: re-measure idle]` by the harness. Nothing here claims a hardware-tier gate (**M1.61 is not claimed**: it needs an idle Tier-M run) or the 90 ms warp gate (M2.15) |
@@ -49,6 +49,10 @@ cargo run --release -p auto-crop-cli -- dev-pipeline photo.jpg --timings    # on
 - **Stage-sum check: PASS.** Total minus the sum of the stage spans is 2.8-4.7 ms at the median at 12 MP (and 9 and 19 ms at 48 and 100 MP; 0.2-0.7% of the total in every configuration, 36 ms worst), so the spans account for the run and nothing hides between them.
 - **Table A projected, not measured:** 579 ms measured for the seven stages plus the 185 ms of unmeasured budget (`refine`, `commit`, slack) is about 764 ms against 700 ms (1.09x). That is arithmetic, not a measurement, and the Table A total stays PROVISIONAL.
 - **Single thread (batch mode: one image per worker)**, same run protocol: `read_probe` 2.3, `decode` 105.4, `proxy` **210.6**, `analyse` 120.4, `rectify` **616.4**, `enhance` 29.1, `encode` 215.8; sum 1299 ms, total p50 1302 ms, p95 1321 ms. These have no Table A budget (Table A is the all-thread case); they are the CPU cost of one image, compared with the plan's batch breakdown below.
+
+### Addendum: `analyse` after the detector rewrite (`bc93fba`, same host, NOISY)
+
+The upstream detector commits vectorised the blur and morphology and added a line-based page finder, which changes the stand-in row. Re-measured, 30 runs: lone job (all threads) `analyse` min 45.0, **p50 53.4**, p95 58.2 ms, **1.34x** the 40 ms budget (within 1.5x, no redesign flag; the p95 ceiling of 40 ms is still missed at 1.46x); single thread p50 64.4 ms (1.61x). The other stages did not move (decode 101, proxy 24, rectify 72, encode 214 ms all threads; total p50 **478 ms**, p95 503 ms against the 515 ms chained budget, 0.93x; single-thread total 1217 ms). The tables above and below (Table A, the CPU table, Table B, the batch run) were all taken with the earlier detector, so their `analyse` and total figures are about 60 ms too high; nothing else in them depends on it.
 
 ### CPU per image against the plan's batch breakdown (single thread, NOISY)
 
@@ -119,7 +123,7 @@ A second protocol is less sensitive to drift: 40 images per pass, 5 rounds inter
 
 | Finding | Evidence | Status |
 |---|---|---|
-| `analyse` 2.8x over its 40 ms budget (p95 122 ms) | classical detector stand-in, NOISY | **REDESIGN flagged** (stand-in; the M2/M4 analysis lines are unmeasured) |
+| `analyse` 2.8x over its 40 ms budget at `74a7dce` (p95 122 ms); 1.34x (p95 58 ms) at `bc93fba` | classical detector stand-in, NOISY | was **REDESIGN flagged**, now within 1.5x; still a stand-in (the M2/M4 analysis lines are unmeasured) |
 | `encode` 2.1x over 110 ms | `image` JPEG encoder, single-threaded, NOISY | **REDESIGN flagged** (turbojpeg encoder, M1.21/M1.57) |
 | Batch CPU per image 1.7-1.9x of 760 ms (proxies 5x, warp 3x) | single-thread stage sums, SMT-inflated | **REDESIGN or budget change flagged** (owner) |
 | `proxy` 1.07x with all threads, 8x single-threaded | own area resize (kernels.md) | within 1.5x only because of 12 threads; SIMD resize recommended |
