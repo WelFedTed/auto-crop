@@ -16,6 +16,7 @@ serde_json.workspace = true
 sha2 = "0.10"
 toml = "0.9"
 goblin = "0.10"
+auto-crop-codecs = { path = "../crates/codecs", features = ["fixtures"] }
 
 [lints]
 workspace = true

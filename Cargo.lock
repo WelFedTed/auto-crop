@@ -101,6 +101,7 @@ dependencies = [
  "rayon",
  "thiserror 2.0.21",
  "tiff",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -5039,6 +5040,7 @@ dependencies = [
 name = "xtask"
 version = "0.0.1"
 dependencies = [
+ "auto-crop-codecs",
  "goblin",
  "serde",
  "serde_json",

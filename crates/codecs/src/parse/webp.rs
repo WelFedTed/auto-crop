@@ -35,7 +35,7 @@ pub(crate) fn parse(b: &[u8], limits: &DecodeLimits) -> Result<Header, CodecErro
         let data_end = data.saturating_add(len);
         let in_file = data_end <= end;
         match kind {
-            b"VP8X" if len >= 10 => {
+            b"VP8X" if len >= 10 && in_file => {
                 let flags = b[data];
                 let w = le24(b, data + 4).unwrap_or(0) + 1;
                 let ht = le24(b, data + 7).unwrap_or(0) + 1;
@@ -45,7 +45,7 @@ pub(crate) fn parse(b: &[u8], limits: &DecodeLimits) -> Result<Header, CodecErro
                 h.animated = flags & 0x02 != 0;
                 h.channels = if flags & 0x10 != 0 { 4 } else { 3 };
             }
-            b"VP8 " if !have_dims && len >= 10 => {
+            b"VP8 " if !have_dims && len >= 10 && in_file => {
                 // Frame tag (3 bytes), start code 9D 01 2A, then 14-bit width and height.
                 if b.get(data + 3..data + 6) != Some(&[0x9D, 0x01, 0x2A]) {
                     return Err(CodecError::corrupt("bad VP8 start code"));
@@ -55,7 +55,7 @@ pub(crate) fn parse(b: &[u8], limits: &DecodeLimits) -> Result<Header, CodecErro
                 have_dims = true;
                 h.channels = 3;
             }
-            b"VP8L" if !have_dims && len >= 5 => {
+            b"VP8L" if !have_dims && len >= 5 && in_file => {
                 if b.get(data) != Some(&0x2F) {
                     return Err(CodecError::corrupt("bad VP8L signature"));
                 }

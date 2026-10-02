@@ -32,6 +32,10 @@ fn case(name: &'static str, bytes: Vec<u8>, format: Format, size: (u32, u32)) ->
     }
 }
 
+pub(super) fn all_fixture_bytes() -> Vec<(&'static str, Vec<u8>)> {
+    cases().into_iter().map(|c| (c.name, c.bytes)).collect()
+}
+
 fn cases() -> Vec<Case> {
     let t = TiffOpts::default();
     let tc = |c| TiffOpts {

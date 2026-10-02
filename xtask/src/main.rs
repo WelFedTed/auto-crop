@@ -3,12 +3,14 @@
 
 //! Repository automation. Run as `cargo xtask <command>`.
 
+mod alloc_count;
 mod check_native;
 mod dco;
 mod deny_selftest;
 mod deps;
 mod doctor;
 mod eval;
+mod hostile;
 mod identity;
 mod licenses;
 mod native;
@@ -56,6 +58,10 @@ Commands:
         fail while the clean control passes.
   check-profiles
         Fail on panic = \"abort\" and require panic = \"unwind\" in release.
+  make-hostile [--out <dir>] [--only <substring>] [--no-run]
+        Generate the hostile-file corpus (60000x60000 and 100 MP headers, zlib bombs, IFD
+        floods, truncations, cyclic EXIF) and decode each file in a subprocess; fails on a
+        panic, abort, hang, or a time or heap budget miss. Files go to target/hostile.
   synth --suite smoke|full [--out DIR] [--seed N] [--count N] [--max-edge N]
         Write a STAND-IN synthetic suite (images + manifest.jsonl) under target/synth/<suite> by
         default. Never committed. Wraps `auto-crop-eval synth`.
@@ -63,6 +69,9 @@ Commands:
         Run the accuracy harness (run, compare, noise-floor, publish, validate-manifest,
         self-check). Example: cargo xtask eval self-check
 ";
+
+#[global_allocator]
+static ALLOC: alloc_count::Counting = alloc_count::Counting;
 
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
@@ -81,6 +90,8 @@ fn main() -> ExitCode {
         "check-dco" => dco::run(&rest),
         "deny-selftest" => deny_selftest::run(&rest),
         "check-profiles" => profiles::run(&rest),
+        "make-hostile" => hostile::run(&rest),
+        "hostile-run" => hostile::run_child(&rest),
         "synth" => eval::run_synth(&rest),
         "eval" => eval::run_eval(&rest),
         "" | "help" | "--help" | "-h" => {

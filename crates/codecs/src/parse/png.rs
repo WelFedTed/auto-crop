@@ -66,6 +66,12 @@ pub(crate) fn parse(b: &[u8], limits: &DecodeLimits) -> Result<Header, CodecErro
             b"iCCP" => {
                 check_metadata(len as u64, limits)?;
                 if h.icc == IccLoc::None {
+                    // The profile is zlib-compressed, so the stored size says nothing about the
+                    // expanded size: inflate it here under the metadata cap, so a decompression
+                    // bomb in this chunk is refused before the PNG decoder ever expands it.
+                    if let Some(chunk) = b.get(data..data.saturating_add(len)) {
+                        check_iccp_inflation(chunk, limits)?;
+                    }
                     h.icc = IccLoc::PngCompressed;
                     h.icc_len = u32::try_from(len).ok();
                 }
@@ -82,4 +88,36 @@ pub(crate) fn parse(b: &[u8], limits: &DecodeLimits) -> Result<Header, CodecErro
         h.truncated = true;
     }
     Ok(h)
+}
+
+/// Inflates an `iCCP` chunk (profile name, NUL, method byte, zlib stream) and fails with
+/// `LimitExceeded(MetadataBytes)` as soon as the profile would exceed the cap. A damaged stream is
+/// not an error here: the decoder reports it, and the profile is simply dropped.
+fn check_iccp_inflation(chunk: &[u8], limits: &DecodeLimits) -> Result<(), CodecError> {
+    use std::io::Read;
+    let Some(nul) = chunk.iter().take(80).position(|&b| b == 0) else {
+        return Ok(());
+    };
+    let Some(stream) = chunk.get(nul + 2..) else {
+        return Ok(());
+    };
+    let cap = limits.max_metadata_bytes;
+    let mut out = 0u64;
+    let mut buf = [0u8; 16 * 1024];
+    let mut dec = flate2::read::ZlibDecoder::new(stream);
+    loop {
+        match dec.read(&mut buf) {
+            Ok(0) | Err(_) => return Ok(()),
+            Ok(n) => {
+                out += n as u64;
+                if out > cap {
+                    return Err(CodecError::LimitExceeded {
+                        limit: Limit::MetadataBytes,
+                        actual: out,
+                        cap,
+                    });
+                }
+            }
+        }
+    }
 }

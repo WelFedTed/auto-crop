@@ -116,6 +116,17 @@ fn decode_inner(bytes: &[u8], limits: &DecodeLimits) -> Result<Decoded, CodecErr
     if let Some(reason) = &h.unsupported {
         return Err(CodecError::UnsupportedFeature(reason.clone()));
     }
+    if format == Format::Jpeg {
+        // Plausibility: every 8x8 luma block costs at least one bit of entropy-coded data, so a
+        // file far smaller than that cannot hold the image its header claims (a bomb header over
+        // a tiny scan, or a truncated file). The decoder would "succeed" with grey fill instead.
+        let blocks = u64::from(h.width.div_ceil(8)) * u64::from(h.height.div_ceil(8));
+        if (bytes.len() as u64) < blocks / 8 {
+            return Err(CodecError::corrupt(
+                "JPEG data is too short for the dimensions in its header",
+            ));
+        }
+    }
     if h.truncated && format == Format::Jpeg {
         // A partial JPEG decodes "successfully" with grey fill; overwriting an original with that
         // would be silent data loss (B3, B4), so it is refused.
@@ -126,7 +137,9 @@ fn decode_inner(bytes: &[u8], limits: &DecodeLimits) -> Result<Decoded, CodecErr
 
     let mut reader = ImageReader::with_format(Cursor::new(bytes), image_format(format));
     reader.limits(limits.image_limits(h.width, h.height));
-    let mut decoder = reader.into_decoder().map_err(map_image_err)?;
+    let pixels = u64::from(h.width) * u64::from(h.height);
+    let to_err = |e| map_image_err(e, pixels, limits);
+    let mut decoder = reader.into_decoder().map_err(to_err)?;
     // The decoder's own idea of the size must also be inside the caps and must agree with ours.
     let (dw, dh) = decoder.dimensions();
     check_size(dw, dh, limits)?;
@@ -143,7 +156,7 @@ fn decode_inner(bytes: &[u8], limits: &DecodeLimits) -> Result<Decoded, CodecErr
         None
     };
 
-    let img = DynamicImage::from_decoder(decoder).map_err(map_image_err)?;
+    let img = DynamicImage::from_decoder(decoder).map_err(to_err)?;
     if h.frames > 1 {
         notices.push(if format == Format::Tiff {
             "tiff.multi_page"
@@ -226,17 +239,19 @@ fn assemble_jpeg_icc(bytes: &[u8], chunks: &[(u8, u8, std::ops::Range<usize>)]) 
     Some(out)
 }
 
-fn map_image_err(e: image::ImageError) -> CodecError {
+/// Maps an `image` failure to a typed codec error. `pixels` is the declared size, for the limit
+/// variants.
+fn map_image_err(e: image::ImageError, pixels: u64, limits: &DecodeLimits) -> CodecError {
     use image::ImageError as E;
     use image::error::{LimitErrorKind, UnsupportedErrorKind};
     match e {
         E::Limits(l) => match l.kind() {
-            LimitErrorKind::DimensionError => CodecError::TooLarge(0),
-            _ => CodecError::LimitExceeded {
-                limit: Limit::EstBytes,
-                actual: 0,
-                cap: 0,
-            },
+            LimitErrorKind::DimensionError => CodecError::TooLarge(pixels),
+            _ => limit_err(
+                Limit::EstBytes,
+                est_bytes_for_pixels(pixels),
+                limits.max_est_bytes,
+            ),
         },
         E::Unsupported(u) => match u.kind() {
             UnsupportedErrorKind::Format(_) => CodecError::Unsupported,

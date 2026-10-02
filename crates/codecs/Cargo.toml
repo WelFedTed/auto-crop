@@ -13,7 +13,7 @@ publish.workspace = true
 [features]
 # Generators for synthetic and hostile test files (ROADMAP M1.12, M1.69). Never enabled in a shipped
 # build; `xtask` turns it on for `make-hostile`. The dev-dependencies below make it available to tests.
-fixtures = ["dep:jpeg-encoder", "dep:tiff", "dep:fax", "dep:flate2"]
+fixtures = ["dep:jpeg-encoder", "dep:tiff", "dep:fax"]
 
 [dependencies]
 auto-crop-imgproc = { path = "../imgproc" }
@@ -21,17 +21,20 @@ auto-crop-imgproc = { path = "../imgproc" }
 # arrive in M6 and M1.18/M1.19 (ADR-0004/0005).
 thiserror.workspace = true
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff", "webp"] }
+# Pin: zune-jpeg 0.5.15 is the release we measured (ROADMAP M1.15); the 0.5.16 release candidate is not
+# adopted. `image` resolves to this exact version anyway; the pin keeps a lockfile refresh from moving it.
+zune-jpeg = "=0.5.15"
 jpeg-encoder = { version = "0.7", optional = true }
 tiff = { version = "0.11", optional = true }
 fax = { version = "0.2", optional = true }
-flate2 = { version = "1", optional = true }
+# Bounded inflate of the PNG iCCP chunk before the PNG decoder sees it (already in the tree via `png`).
+flate2 = "1"
 
 [dev-dependencies]
 rayon = "1"
 jpeg-encoder = "0.7"
 tiff = "0.11"
 fax = "0.2"
-flate2 = "1"
 
 [lints.rust]
 unsafe_code = "forbid"

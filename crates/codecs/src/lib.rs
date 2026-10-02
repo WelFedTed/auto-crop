@@ -26,6 +26,8 @@ mod exif;
 pub mod fixtures;
 mod format;
 pub mod guard;
+#[cfg(any(test, feature = "fixtures"))]
+pub mod hostile;
 mod limits;
 mod parse;
 #[cfg(test)]
@@ -74,8 +76,18 @@ pub struct Probe {
     pub icc_len: Option<u32>,
 }
 
-/// Encodes RGB8. `quality` (1..=100) applies to JPEG only; PNG is lossless.
+/// Encodes RGB8. `quality` (1..=100) applies to JPEG only; PNG is lossless. A panic inside an
+/// encoder becomes [`CodecError::InternalPanic`] (ROADMAP M1.14).
 pub fn encode(
+    raster: &Raster,
+    format: Format,
+    quality: u8,
+    icc: Option<&[u8]>,
+) -> Result<Vec<u8>, CodecError> {
+    guard_item(|| encode_inner(raster, format, quality, icc))
+}
+
+fn encode_inner(
     raster: &Raster,
     format: Format,
     quality: u8,
