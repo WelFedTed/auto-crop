@@ -23,7 +23,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 |---|---|---|---|---|---|
 | P | Planning | none | documents | - | 4 / 5 (80%) |
 | M0 | Foundations and week-1 spikes | none | CI only (Windows, macOS, Linux) | XL | 49 / 94 (52%) |
-| M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 0 / 94 (0%) |
+| M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 11 / 94 (11%) |
 | M2 | Classical pipeline, safe writes and CLI | v0.1.0 | Windows 10/11 x64 | L | 0 / 93 (0%) |
 | M3 | GUI alpha: single-image editor | v0.2.0 | Windows 10/11 x64 | XL | 0 / 94 (0%) |
 | M4 | ML detection, orientation and calibrated confidence | v0.3.0 | Windows 10/11 x64 | XL | 0 / 90 (0%) |
@@ -39,7 +39,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | X | Continuous and cross-cutting | - | - | - | 0 / 42 (0%) |
 | X | Post-1.0 backlog (1.x) | - | - | - | 0 / 43 (0%) |
 | X | Spikes and open decisions | - | - | - | 0 / 28 (0%) |
-| **Total** | | | | | **53 / 1407 (3%)** |
+| **Total** | | | | | **64 / 1407 (4%)** |
 <!-- progress:end -->
 
 ## Why this order
@@ -199,17 +199,17 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - Two time-boxed spikes: LSD port versus EDLines (M1.28) and enhancement feasibility on golden receipts (M1.65-M1.68, n <= 40, so the "no receipt benchmark" risk is only partly retired).
 
 ### Core
-- [ ] **M1.01 Core crate boundary** - Extends M0.30: `crates/core` is model and ports only (`serde`, `thiserror`; no I/O, threads, `rayon`, OS APIs) with `#![forbid(unsafe_code)]`; the M0.30 `check-deps` guard enforces it.
-- [ ] **M1.02 SourceRef and SourceId** - `SourceId` = blake3 of the whole file (PLAN 2.3), streamed and computed lazily, inside `SourceRef` (path, size, mtime, dims, orientation, icc). Tests: stable across rename and mtime change; same-size files differing in the middle get different ids.
-- [ ] **M1.03 Geometry model** - `Geometry::{Identity, Quad(QuadWarp), Grid(Arc<GridWarp>)}`; `QuadWarp` holds four f32 corners (0..1 EXIF-oriented, may exceed) plus the item's turns and mirror; `GridWarp` is an opaque serde payload (M12.27). Tests: 1e-4 px round trip at 12k px; EXIF 1-8; serde.
-- [ ] **M1.04 EditState v1** - `EditState {orientation (Identity/convert-only), items, margin = PaperEdge (B14), enhance = Original (B13)}`, `Item {id, include, geometry, enhance_override, origin, confidence}`; `render_hash()` skips provenance. Tests: corner change alters it, provenance does not.
-- [ ] **M1.05 Schema migrations and snapshots** - `migrate(serde_json::Value) -> Result<EditState, ErrKind>` as pure `v(n) -> v(n+1)` fns; a newer schema gives `SchemaTooNew`, never data loss; `fixtures/editstate/v1_*.json`, a test-only v2 shim, `insta` snapshots. Acceptance: fixtures round-trip.
-- [ ] **M1.06 OutputSpec** - PLAN 2.3 type outside `EditState`: `colour Srgb|PreserveWideGamut` (sRGB default only for HEIC to JPG and enhanced output), `collision Rename|Skip|Replace`, `verify Full|Fast`, target InPlace or Copy; no backup switch. Property test: no value skips backup or verify.
-- [ ] **M1.07 History and SessionCmd** - `commit()` replaces the top entry on a matching `GestureId`, else truncates redo and pushes; unchanged `render_hash` dropped; cap 200 per image; `SessionCmd` command/memento. Tests: proptest `undo(redo(x)) == x`, bounds, cap. _(gate: proptest green)_
-- [ ] **M1.08 Core ports** - In `core`: `Raster`/`RasterView` (Gray8, Rgb8, Gray16, Rgb16; `est_bytes()`), `Probe`, `Want`, `DecodeLimits`; traits `Decoder` (bytes, never paths), `Encoder`, `Renderer`, `InferenceBackend`, `HeicBackend` with stubs. Acceptance: mocks, object-safety compile test.
-- [ ] **M1.09 ErrKind and CancelToken** - `ErrKind` via `thiserror` (names per PLAN 2.10; M2.05 extends) with `user_message_key()` (B20); hierarchical `CancelToken` (batch, job, stage) with generation, deadline, `check_band(row)`. Tests: every variant has a string; parent cancels children only.
-- [ ] **M1.10 MemoryBudget** - `engine` skeleton: weighted semaphore, cap min(25% RAM, 4 GiB, 50% free RAM), job weight pixels x 9 + 64 MiB, `acquire(bytes, &CancelToken)`, FIFO; an oversize job runs alone. Tests: oversize completes in 5 s; 8-thread stress stays under the cap. M2.03 wires it.
-- [ ] **M1.11 Local logging** - `tracing` with a daily `tracing-appender` file in the OS data dir (7 days, 20 MB; PROVISIONAL); paths redacted above `debug` to `blake3(path)[..8]` plus extension; no network sink (B18, C4). Tests: info-level decode log has no raw path; rotation under a fake clock.
+- [x] **M1.01 Core crate boundary** - Extends M0.30: `crates/core` is model and ports only (`serde`, `thiserror`; no I/O, threads, `rayon`, OS APIs) with `#![forbid(unsafe_code)]`; the M0.30 `check-deps` guard enforces it.
+- [x] **M1.02 SourceRef and SourceId** - `SourceId` = blake3 of the whole file (PLAN 2.3), streamed and computed lazily, inside `SourceRef` (path, size, mtime, dims, orientation, icc). Tests: stable across rename and mtime change; same-size files differing in the middle get different ids.
+- [x] **M1.03 Geometry model** - `Geometry::{Identity, Quad(QuadWarp), Grid(Arc<GridWarp>)}`; `QuadWarp` holds four f32 corners (0..1 EXIF-oriented, may exceed) plus the item's turns and mirror; `GridWarp` is an opaque serde payload (M12.27). Tests: 1e-4 px round trip at 12k px; EXIF 1-8; serde. Note: corners stay f64 (f32 cannot meet the 1e-4 px round trip at 12k px); see `docs/adr/m1-core-model-notes.md`.
+- [x] **M1.04 EditState v1** - `EditState {orientation (Identity/convert-only), items, margin = PaperEdge (B14), enhance = Original (B13)}`, `Item {id, include, geometry, enhance_override, origin, confidence}`; `render_hash()` skips provenance. Tests: corner change alters it, provenance does not.
+- [x] **M1.05 Schema migrations and snapshots** - `migrate(serde_json::Value) -> Result<EditState, ErrKind>` as pure `v(n) -> v(n+1)` fns; a newer schema gives `SchemaTooNew`, never data loss; `fixtures/editstate/v1_*.json`, a test-only v2 shim, `insta` snapshots. Acceptance: fixtures round-trip. Note: `migrate` lives in `engine` (core may not depend on `serde_json`).
+- [x] **M1.06 OutputSpec** - PLAN 2.3 type outside `EditState`: `colour Srgb|PreserveWideGamut` (sRGB default only for HEIC to JPG and enhanced output), `collision Rename|Skip|Replace`, `verify Full|Fast`, target InPlace or Copy; no backup switch. Property test: no value skips backup or verify.
+- [x] **M1.07 History and SessionCmd** - `commit()` replaces the top entry on a matching `GestureId`, else truncates redo and pushes; unchanged `render_hash` dropped; cap 200 per image; `SessionCmd` command/memento. Tests: proptest `undo(redo(x)) == x`, bounds, cap. _(gate: proptest green)_
+- [x] **M1.08 Core ports** - In `core`: `Raster`/`RasterView` (Gray8, Rgb8, Gray16, Rgb16; `est_bytes()`), `Probe`, `Want`, `DecodeLimits`; traits `Decoder` (bytes, never paths), `Encoder`, `Renderer`, `InferenceBackend`, `HeicBackend` with stubs. Acceptance: mocks, object-safety compile test.
+- [x] **M1.09 ErrKind and CancelToken** - `ErrKind` via `thiserror` (names per PLAN 2.10; M2.05 extends) with `user_message_key()` (B20); hierarchical `CancelToken` (batch, job, stage) with generation, deadline, `check_band(row)`. Tests: every variant has a string; parent cancels children only.
+- [x] **M1.10 MemoryBudget** - `engine` skeleton: weighted semaphore, cap min(25% RAM, 4 GiB, 50% free RAM), job weight pixels x 9 + 64 MiB, `acquire(bytes, &CancelToken)`, FIFO; an oversize job runs alone. Tests: oversize completes in 5 s; 8-thread stress stays under the cap. M2.03 wires it.
+- [x] **M1.11 Local logging** - `tracing` with a daily `tracing-appender` file in the OS data dir (7 days, 20 MB; PROVISIONAL); paths redacted above `debug` to `blake3(path)[..8]` plus extension; no network sink (B18, C4). Tests: info-level decode log has no raw path; rotation under a fake clock. Note: `logging::init` is not yet called by the CLI or shell.
 
 ### Codecs/I/O
 - [ ] **M1.12 Format sniffing and header probe** - `sniff(&[u8])` by magic bytes (JPEG, PNG, TIFF, WebP decodable; HEIC/AVIF, GIF, BMP, JXL recognised only) and `probe()` for dims, depth, frames, orientation, ICC, no pixel allocation. Tests: >= 30 fixtures; a 100 MP-declared file probes in < 1 MB.
