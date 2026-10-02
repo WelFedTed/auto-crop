@@ -138,3 +138,108 @@ pub fn ssim_luma_8x8(a: &Raster, b: &Raster) -> f64 {
     if n == 0 { 1.0 } else { total / n as f64 }
 }
 pub mod legacy_warp;
+
+/// Exact area-average downscale in f64 (the independent reference for resizer quality figures).
+pub fn area_reference_f64(src: &Raster, out_w: u32, out_h: u32) -> Raster {
+    let axis = |sn: usize, dn: usize| -> Vec<(usize, Vec<f64>)> {
+        let scale = sn as f64 / dn as f64;
+        (0..dn)
+            .map(|i| {
+                let (a, b) = (i as f64 * scale, (i as f64 + 1.0) * scale);
+                let first = a.floor() as usize;
+                let last = (b.ceil() as usize).min(sn).max(first + 1);
+                let w: Vec<f64> = (first..last)
+                    .map(|s| (b.min(s as f64 + 1.0) - a.max(s as f64)).max(0.0) / scale)
+                    .collect();
+                (first, w)
+            })
+            .collect()
+    };
+    let (sw, sh, dw, dh) = (
+        src.width as usize,
+        src.height as usize,
+        out_w as usize,
+        out_h as usize,
+    );
+    let (wx, wy) = (axis(sw, dw), axis(sh, dh));
+    let mut tmp = vec![0.0f64; dw * sh * 3];
+    for y in 0..sh {
+        for (x, (start, w)) in wx.iter().enumerate() {
+            for c in 0..3 {
+                tmp[(y * dw + x) * 3 + c] = w
+                    .iter()
+                    .enumerate()
+                    .map(|(k, wk)| wk * f64::from(src.data[(y * sw + start + k) * 3 + c]))
+                    .sum();
+            }
+        }
+    }
+    let mut out = Raster::new(out_w, out_h);
+    for (y, (start, w)) in wy.iter().enumerate() {
+        for x in 0..dw {
+            for c in 0..3 {
+                let v: f64 = w
+                    .iter()
+                    .enumerate()
+                    .map(|(k, wk)| wk * tmp[((start + k) * dw + x) * 3 + c])
+                    .sum();
+                out.data[(y * dw + x) * 3 + c] = (v + 0.5).clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+    out
+}
+
+/// The resizers under test, each returning an RGB8 raster of `out_w` x `out_h`.
+pub mod resizers {
+    use auto_crop_imgproc::Raster;
+    use auto_crop_imgproc::scale::resize_area;
+    use fast_image_resize::images::Image;
+    use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
+
+    pub fn own_area(src: &Raster, w: u32, h: u32) -> Raster {
+        resize_area(src, w, h)
+    }
+
+    pub fn fir(src: &Raster, w: u32, h: u32, filter: FilterType) -> Raster {
+        let view = Image::from_vec_u8(src.width, src.height, src.data.clone(), PixelType::U8x3)
+            .expect("rgb8 view");
+        let mut dst = Image::new(w, h, PixelType::U8x3);
+        let mut resizer = Resizer::new();
+        resizer
+            .resize(
+                &view,
+                &mut dst,
+                &ResizeOptions::new().resize_alg(ResizeAlg::Convolution(filter)),
+            )
+            .expect("fast_image_resize");
+        Raster::from_raw(w, h, dst.into_vec()).expect("size")
+    }
+
+    /// Variant that reuses the source buffer (no clone), for timing the resize alone.
+    pub fn fir_view(
+        src: &Image<'_>,
+        dst: &mut Image<'_>,
+        resizer: &mut Resizer,
+        filter: FilterType,
+    ) {
+        resizer
+            .resize(
+                src,
+                dst,
+                &ResizeOptions::new().resize_alg(ResizeAlg::Convolution(filter)),
+            )
+            .expect("fast_image_resize");
+    }
+
+    pub fn image_crate(
+        src: &Raster,
+        w: u32,
+        h: u32,
+        filter: image::imageops::FilterType,
+    ) -> Raster {
+        let img = image::RgbImage::from_raw(src.width, src.height, src.data.clone()).expect("rgb8");
+        let out = image::imageops::resize(&img, w, h, filter);
+        Raster::from_raw(w, h, out.into_raw()).expect("size")
+    }
+}
