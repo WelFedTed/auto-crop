@@ -28,6 +28,7 @@ mod format;
 pub mod guard;
 #[cfg(any(test, feature = "fixtures"))]
 pub mod hostile;
+pub mod jpeg_lossless;
 mod limits;
 mod parse;
 #[cfg(test)]

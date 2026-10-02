@@ -117,15 +117,7 @@ fn decode_inner(bytes: &[u8], limits: &DecodeLimits) -> Result<Decoded, CodecErr
         return Err(CodecError::UnsupportedFeature(reason.clone()));
     }
     if format == Format::Jpeg {
-        // Plausibility: every 8x8 luma block costs at least one bit of entropy-coded data, so a
-        // file far smaller than that cannot hold the image its header claims (a bomb header over
-        // a tiny scan, or a truncated file). The decoder would "succeed" with grey fill instead.
-        let blocks = u64::from(h.width.div_ceil(8)) * u64::from(h.height.div_ceil(8));
-        if (bytes.len() as u64) < blocks / 8 {
-            return Err(CodecError::corrupt(
-                "JPEG data is too short for the dimensions in its header",
-            ));
-        }
+        parse::jpeg::check_plausible(&h, bytes.len())?;
     }
     if format == Format::Png {
         // Deflate cannot shrink data by more than about 1032:1, so a PNG much smaller than its

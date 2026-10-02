@@ -5,6 +5,7 @@
 
 mod decode;
 mod limits;
+mod lossless;
 mod mutation;
 mod orientation;
 mod probe;

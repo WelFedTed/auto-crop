@@ -35,6 +35,10 @@ struct Outcome {
     probe_peak: usize,
     decode_ms: u64,
     decode_peak: usize,
+    /// Lossless JPEG transform of the same file (`-` when the file is not a JPEG).
+    xform_code: String,
+    xform_ms: u64,
+    xform_peak: usize,
 }
 
 /// The child process: decode one file and report.
@@ -81,6 +85,9 @@ fn parse_outcome(stdout: &str) -> Option<Outcome> {
             "probe_peak" => o.probe_peak = v.parse().ok()?,
             "decode_ms" => o.decode_ms = v.parse().ok()?,
             "decode_peak" => o.decode_peak = v.parse().ok()?,
+            "xform_code" => o.xform_code = v.to_owned(),
+            "xform_ms" => o.xform_ms = v.parse().ok()?,
+            "xform_peak" => o.xform_peak = v.parse().ok()?,
             _ => {}
         }
     }
@@ -125,6 +132,9 @@ fn check(expect: Expect, o: &Outcome) -> Vec<String> {
     if o.code == "internal_panic" {
         bad.push("a decoder panicked (caught as InternalPanic)".to_owned());
     }
+    if o.xform_code == "internal_panic" {
+        bad.push("the lossless transformer panicked (caught as InternalPanic)".to_owned());
+    }
     if o.code == "decode_timeout" {
         bad.push("unexpected decode timeout".to_owned());
     }
@@ -137,6 +147,18 @@ fn check(expect: Expect, o: &Outcome) -> Vec<String> {
     }
     match expect {
         Expect::Reject => {
+            if o.xform_code == "ok" {
+                bad.push(
+                    "was meant to be rejected but the lossless transform accepted it".to_owned(),
+                );
+            }
+            if o.xform_ms > REJECT_MS || o.xform_peak > REJECT_MIB * MIB {
+                bad.push(format!(
+                    "lossless transform rejection took {} ms / {} MiB",
+                    o.xform_ms,
+                    o.xform_peak / MIB
+                ));
+            }
             if o.ok {
                 bad.push("was meant to be rejected but decoded".to_owned());
             }
@@ -151,6 +173,13 @@ fn check(expect: Expect, o: &Outcome) -> Vec<String> {
             }
         }
         Expect::Bounded { max_ms, max_mib } => {
+            if o.xform_ms > max_ms || o.xform_peak > max_mib as usize * MIB {
+                bad.push(format!(
+                    "lossless transform took {} ms / {} MiB (budget {max_ms} ms / {max_mib} MiB)",
+                    o.xform_ms,
+                    o.xform_peak / MIB
+                ));
+            }
             if o.decode_ms > max_ms {
                 bad.push(format!("took {} ms (> {max_ms})", o.decode_ms));
             }

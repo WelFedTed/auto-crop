@@ -132,3 +132,17 @@ pub(crate) fn parse(b: &[u8], limits: &DecodeLimits) -> Result<Header, CodecErro
     }
     Ok(h)
 }
+
+/// Plausibility: every 8x8 luma block costs at least one bit of entropy-coded data, so a file far
+/// smaller than that cannot hold the image its header claims (a bomb header over a tiny scan, or a
+/// truncated file). Without this check the decoders "succeed" with grey fill.
+pub(crate) fn check_plausible(h: &Header, file_len: usize) -> Result<(), CodecError> {
+    let blocks = u64::from(h.width.div_ceil(8)) * u64::from(h.height.div_ceil(8));
+    if (file_len as u64) < blocks / 8 {
+        Err(CodecError::corrupt(
+            "JPEG data is too short for the dimensions in its header",
+        ))
+    } else {
+        Ok(())
+    }
+}

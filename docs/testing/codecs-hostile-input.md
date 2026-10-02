@@ -1,11 +1,12 @@
 # Codecs: limits, probe, decode guard and the hostile-file gate
 
-Roadmap: M1.12 (sniff and probe), M1.13 (`DecodeLimits`), M1.14 (decode guard), M1.15 (JPEG, PNG), M1.16 (TIFF, WebP), M1.17 (EXIF orientation, ICC), M1.69 (hostile-file corpus). Design: [PLAN 3.1, 3.6, 3.10](../plan/03-image-io-formats.md). Code: `crates/codecs` (all safe Rust, `forbid(unsafe_code)`) and `xtask/src/hostile.rs`.
+Roadmap: M1.12 (sniff and probe), M1.13 (`DecodeLimits`), M1.14 (decode guard), M1.15 (JPEG, PNG), M1.16 (TIFF, WebP), M1.17 (EXIF orientation, ICC), M1.20 (lossless JPEG transform, safe-Rust variant), M1.69 (hostile-file corpus). Design: [PLAN 3.1, 3.6, 3.10](../plan/03-image-io-formats.md). Code: `crates/codecs` (all safe Rust, `forbid(unsafe_code)`) and `xtask/src/hostile.rs`.
 
 ## How to run
 
 ```
-cargo test -p auto-crop-codecs        # 68 tests: 39-fixture probe table, limits, decode, orientation, mutation sweep
+cargo test -p auto-crop-codecs        # 79 tests (+1 ignored timing test): 39-fixture probe table, limits, decode, orientation,
+                                      # mutation sweep, lossless JPEG transforms
 cargo xtask make-hostile              # 89 hostile files, each decoded in its own process
 cargo xtask make-hostile --only png   # a subset (substring of the case name)
 ```
@@ -42,6 +43,24 @@ Gate (M1.69): 0 panics, 0 aborts, 0 hangs and 0 budget misses over 89 files, per
 - zune-jpeg 0.5.15 versus libjpeg-turbo 3.2.0 (through ImageMagick), 96x64: 4:4:4 mean abs diff 0.013 LSB (max 2); 4:2:0 0.271 (max 3); 4:2:2 0.164 (max 2); progressive 4:2:0 0.271 (max 3). Bound in the test: 1.5 LSB (PROVISIONAL, from M1.15). CMYK and YCCK conversions are identical to libjpeg-turbo + ImageMagick (0.000).
 - image-webp versus libwebp 1.6.0 on a lossy VP8 file: bit-identical (`inf` dB PSNR). Lossless WebP, PNG (8 and 16-bit, palette, Adam7) and uncompressed, LZW, Deflate and PackBits TIFF are bit-exact (16-bit sources within 1 level after the reduction to 8-bit).
 - A 1-bit Group 4 TIFF written by libtiff 4.7.2 and one written by the `fax` encoder both decode, without inversion, for WhiteIsZero and BlackIsZero.
+
+## Lossless JPEG transform (M1.20): `codecs::jpeg_lossless::transform`
+
+Safe Rust, no libjpeg-turbo: the file is entropy-decoded to DCT coefficients, blocks are moved (flips negate odd rows or columns of a block, transposes swap (u, v) and the quantisation table), and the result is written back as a baseline JPEG with Huffman tables optimised for the new data (T.81 Annex K.2). Every other segment (JFIF, EXIF, XMP, ICC, Adobe, comments) is copied byte for byte, so the Orientation tag is untouched. Ops: `Rotate90/180/270`, `FlipH`, `FlipV`, `Transpose`, `Transverse`, `Crop(Rect)`; `Policy::Perfect` refuses what cannot be exact, `Policy::Snap` trims partial edge MCUs (mirroring ops) or grows a crop to the MCU grid, and the result reports the realised `rect` and a `perfect` flag. Supported input: 8-bit sequential Huffman JPEG, any sampling factors, restart intervals, one interleaved scan; progressive, arithmetic, lossless, 12-bit and one-scan-per-component files are `UnsupportedFeature` (the caller re-encodes them).
+
+| Check | Result |
+|---|---|
+| Decode of the output versus rotating the decoded source, 6 variants (grey, 4:4:4, 4:2:0, 4:2:2, 4:4:0, 4:2:0 with restart) x 7 ops | mean abs diff at most 0.04 LSB (grey, 4:4:4) and 0.03 (subsampled); max 2 and 3. Rotate180 and both flips are exact (0). The ADR-0004 bound "within 2 levels" holds for grey and 4:4:4; 4:2:x reach 3 at the edge (upsampling filter) |
+| The inverse op, and four quarter turns | pixel-exact: the coefficients are restored |
+| libjpeg-turbo 3.2.0 decoding every output | agrees with zune-jpeg within 1.5 LSB for all 42 outputs (our Huffman tables and entropy coding are valid for an independent decoder) |
+| A libjpeg-turbo-made 4:2:0 file, Rotate90 versus ImageMagick's pixel rotation | mean 0.30 LSB, max 3 |
+| Partial MCUs (70 x 50, 4:2:0, 16 x 16 MCU) | `Perfect` refuses every mirroring op; `Snap` trims only the mirrored axes (70 -> 64, 50 -> 48) and reports `perfect: false`; Transpose is perfect at any size |
+| Crop | origin snaps down and far edge up to the 16-pixel grid (request 20,10 30x30 gives 16,0 48x48), an aligned or image-edge crop is `perfect`, empty and outside rectangles are errors |
+| 1,000 reused transforms of one input | identical output every time |
+| Byte-mutation sweep of the transformer, and the JPEGs of the hostile corpus (budgets as for decode) | 0 panics |
+| 12 MP (4000x3000, 4:2:0, 383 KB smooth file) | Rotate90 215 ms, FlipH 164 ms, a 2000x1500 crop 64 ms (dev profile, one thread; a photographic file has far more entropy data and will be slower: M1.56 should measure it) |
+
+The roadmap's "1000 reused buffers ASan-clean" is an FFI concern (caller-owned `TJPARAM_NOREALLOC` buffers); this implementation has no unsafe code and no reused foreign buffers, so the reuse test checks determinism instead, and M1.18 and M1.19 still own the turbojpeg variant. Not covered by a test: progressive input (refused), non-interleaved baseline input (refused), restart-interval *preservation* (the output has no restart markers).
 
 ## Findings and decisions that differ from, or add to, the plan
 
