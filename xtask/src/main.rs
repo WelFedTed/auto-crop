@@ -17,6 +17,7 @@ mod identity;
 mod licenses;
 mod native;
 mod native_watch;
+mod perf;
 mod profiles;
 mod provenance;
 mod register;
@@ -87,6 +88,12 @@ Commands:
         [--contact-sheet N]. See docs/testing/corpora.md.
   corpus-ingest <name> --src DIR [--out DIR] [--lock FILE] [adapter options]
         Run only the manifest adapter over an already extracted tree.
+  perf <host|gen|stages|memory|batch>
+        Performance harness for the pipeline skeleton (M1.60, M1.63): per-stage p50/p95 against
+        the PROVISIONAL budgets, peak heap, batch throughput. Release builds only:
+        cargo run --release -p xtask -- perf stages --mp 12
+        (stages [--mp 12,48,100] [--runs N] [--threads all|N] [--json F]; memory; batch
+        [--count 200] [--workers 1,..,8]; gen; host. Run `perf` alone for the full list.)
   synth --suite smoke|full [--out DIR] [--seed N] [--count N] [--max-edge N]
         Write a STAND-IN synthetic suite (images + manifest.jsonl) under target/synth/<suite> by
         default. Never committed. Wraps `auto-crop-eval synth`.
@@ -120,6 +127,7 @@ fn main() -> ExitCode {
         "hostile-run" => hostile::run_child(&rest),
         "fetch-corpus" => corpus::run_fetch(&rest),
         "corpus-ingest" => corpus::run_ingest(&rest),
+        "perf" => perf::run(&rest),
         "synth" => eval::run_synth(&rest),
         "eval" => eval::run_eval(&rest),
         "" | "help" | "--help" | "-h" => {

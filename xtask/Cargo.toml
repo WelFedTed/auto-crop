@@ -21,6 +21,12 @@ auto-crop-codecs = { path = "../crates/codecs", features = ["fixtures"] }
 auto-crop-eval = { path = "../crates/eval" }
 # Reads gzipped ground-truth tables (SmartDoc metadata.csv.gz); pure Rust backend, no network.
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+auto-crop-core = { path = "../crates/core" }
+auto-crop-engine = { path = "../crates/engine" }
+sysinfo = { version = "0.37", default-features = false, features = ["system"] }
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints]
 workspace = true

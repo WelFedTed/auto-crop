@@ -28,6 +28,8 @@
 //! Cancellation is checked before every stage and every 64 rows inside the warp; a stopped run
 //! returns a [`Failure`] naming the stage and the stages already done, never partial bytes.
 
+pub mod bench_images;
+
 use crate::error::{ErrKind, codec_err};
 use auto_crop_codecs::{DecodeLimits, Format, MAX_PIXELS, decode_with, encode, probe_with, sniff};
 use auto_crop_core::{CancelToken, Pt, QuadWarp};

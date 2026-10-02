@@ -15,7 +15,7 @@ Roadmap: M1.72 (`cargo xtask ci-guards`), M1.73 (licence gates), M1.80 (workflow
 
 | File | Why |
 |---|---|
-| `xtask/src/alloc_count.rs` | A counting `GlobalAlloc` that forwards to `System`; `hostile-run` uses it to measure how much heap a hostile file makes a decoder allocate, the same way on every OS (M1.69). `GlobalAlloc` is an unsafe trait, so there is no safe version. `xtask` is a developer tool and is never shipped. Its `unsafe` still needs `// SAFETY:` comments. |
+| `xtask/src/alloc_count.rs` | A counting `GlobalAlloc` that forwards to `System`; `hostile-run` uses it to measure how much heap a hostile file makes a decoder allocate, the same way on every OS (M1.69), and `cargo xtask perf memory` uses it for the per-stage peak heap of the pipeline skeleton (M1.60); the engine's own memory test uses the safe `peak_alloc` crate instead, so no second unsafe allocator wrapper exists. `GlobalAlloc` is an unsafe trait, so there is no safe version. `xtask` is a developer tool and is never shipped. Its `unsafe` still needs `// SAFETY:` comments. |
 
 Anything else needs the owner's agreement and a new row here.
 
