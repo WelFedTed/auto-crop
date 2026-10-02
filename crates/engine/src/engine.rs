@@ -438,6 +438,12 @@ impl Engine {
         }
         let decoded = decode(&bytes).map_err(codec_err)?;
         let raster = decoded.raster;
+        crate::logging::decode_done(
+            path,
+            &format!("{:?}", decoded.format),
+            raster.width,
+            raster.height,
+        );
         let detection = detect(&raster);
         let state = detection
             .quad
