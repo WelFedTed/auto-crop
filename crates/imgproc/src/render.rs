@@ -5,14 +5,18 @@
 //! rectangle, apply the quarter turns and the fine rotation. A pure function of its inputs.
 
 use crate::Raster;
+use crate::cancel::{Cancel, NeverCancel};
 use crate::geometry::{dist, homography};
-use crate::warp::warp_perspective;
+use crate::pixels::ImageRef;
+use crate::warp::warp_perspective_image;
 use auto_crop_core::QuadWarp;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RenderError {
     /// The four corners do not form a usable quadrilateral.
     DegenerateQuad,
+    /// The cancel token fired between bands; no partial output escapes.
+    Cancelled,
 }
 
 /// Limits for one render. `max_pixels` and `max_edge` shrink the output (a smaller output is
@@ -77,6 +81,17 @@ pub fn output_size(src_w: u32, src_h: u32, q: &QuadWarp, limits: Limits) -> (u32
 }
 
 pub fn render_quad(src: &Raster, q: &QuadWarp, limits: Limits) -> Result<Raster, RenderError> {
+    render_quad_cancellable(src, q, limits, &NeverCancel)
+}
+
+/// [`render_quad`] that stops at the next 64-row band with [`RenderError::Cancelled`] once
+/// `cancel` fires (ROADMAP M1.54: the skeleton's `rectify` stage honours the job token).
+pub fn render_quad_cancellable(
+    src: &Raster,
+    q: &QuadWarp,
+    limits: Limits,
+    cancel: &dyn Cancel,
+) -> Result<Raster, RenderError> {
     let c = corners_px(src.width, src.height, q);
     let (w, h) = output_size(src.width, src.height, q, limits);
     if w < 2 || h < 2 {
@@ -93,7 +108,18 @@ pub fn render_quad(src: &Raster, q: &QuadWarp, limits: Limits) -> Result<Raster,
         (-0.5, hf - 0.5),
     ];
     let m = homography(dst, src_corners).ok_or(RenderError::DegenerateQuad)?;
-    Ok(warp_perspective(src, &m, w, h))
+    let view = ImageRef {
+        width: src.width,
+        height: src.height,
+        channels: 3,
+        data: &src.data[..],
+    };
+    let out = warp_perspective_image(view, &m, w, h, cancel).map_err(|_| RenderError::Cancelled)?;
+    Ok(Raster {
+        width: out.width,
+        height: out.height,
+        data: out.data,
+    })
 }
 
 #[cfg(test)]
@@ -157,6 +183,22 @@ mod tests {
         assert_eq!((small.width, small.height), (50, 30));
         let capped = render_quad(&source(), &q, Limits::pixels(1500)).unwrap();
         assert!(u64::from(capped.width) * u64::from(capped.height) <= 1600);
+    }
+
+    #[test]
+    fn a_cancelled_token_stops_the_render_without_output() {
+        let stop = std::sync::atomic::AtomicBool::new(true);
+        assert_eq!(
+            render_quad_cancellable(&source(), &rect_quad(), Limits::pixels(u64::MAX), &stop),
+            Err(RenderError::Cancelled)
+        );
+        let go = std::sync::atomic::AtomicBool::new(false);
+        let out = render_quad_cancellable(&source(), &rect_quad(), Limits::pixels(u64::MAX), &go)
+            .unwrap();
+        assert_eq!(
+            out,
+            render_quad(&source(), &rect_quad(), Limits::pixels(u64::MAX)).unwrap()
+        );
     }
 
     #[test]

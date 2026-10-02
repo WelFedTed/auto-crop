@@ -14,6 +14,7 @@ pub mod migrate;
 pub mod paths;
 pub mod samples;
 pub mod settings;
+pub mod skeleton;
 pub mod source;
 pub mod store;
 pub mod util;

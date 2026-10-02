@@ -95,8 +95,14 @@ impl Pyramid {
     /// Builds all four proxies from the full-resolution `source` (taken by value so a level equal
     /// to the source can share it).
     pub fn build(source: Raster) -> Pyramid {
+        Self::build_shared(Arc::new(source))
+    }
+
+    /// Like [`Pyramid::build`] for a source the caller keeps (the full-resolution raster stays
+    /// available for the rectify stage without a copy).
+    pub fn build_shared(source: Arc<Raster>) -> Pyramid {
         let dims = (source.width, source.height);
-        let mut parent = Arc::new(source);
+        let mut parent = source;
         let mut levels: [Option<Arc<Raster>>; 4] = [None, None, None, None];
         for level in Level::ALL {
             let (w, h) = level_size(dims.0, dims.1, level);

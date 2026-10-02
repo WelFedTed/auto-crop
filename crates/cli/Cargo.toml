@@ -12,6 +12,13 @@ publish.workspace = true
 
 [dependencies]
 auto-crop-engine = { path = "../engine" }
+auto-crop-core = { path = "../core" }
+serde_json.workspace = true
+
+[dev-dependencies]
+auto-crop-codecs = { path = "../codecs" }
+auto-crop-imgproc = { path = "../imgproc" }
+tempfile = "3"
 
 [[bin]]
 name = "auto-crop"
