@@ -52,6 +52,8 @@ deny = [
     { crate = "x265-sys", reason = "GPL" },
     # OpenCV is a dev-only test oracle outside the shipping workspace, never shipped
     { crate = "opencv", reason = "dev-only oracle, never shipped" },
+    # purecv (pure-Rust OpenCV port) is LGPL-2.1-or-later, and Rust links statically (B2, M1.73)
+    { crate = "purecv", reason = "LGPL-2.1-or-later, statically linked by Rust" },
 ]
 
 [sources]

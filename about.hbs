@@ -23,3 +23,21 @@ Used by:
 ```
 
 {{/each}}
+
+## Native libraries (not Rust crates)
+
+These C and C++ libraries are built from source from the pinned releases in `native-deps.toml` and
+are not covered by the crate list above. The full licence texts are in the upstream repositories
+linked below, at the pinned release.
+
+- **libjpeg-turbo** (IJG AND BSD-3-Clause AND Zlib): this software is based in part on the work of
+  the Independent JPEG Group. The IJG licence requires this acknowledgement in the documentation
+  of every product that uses the library. Licence: https://github.com/libjpeg-turbo/libjpeg-turbo/blob/main/LICENSE.md
+- **libheif** (LGPL-3.0-or-later): HEIF and HEIC container decoding. Shipped as a separate,
+  dynamically linked, replaceable shared library. Source: https://github.com/strukturag/libheif
+- **libde265** (LGPL-3.0-or-later): HEVC decoding for libheif, loaded as a plugin, decode only.
+  Source: https://github.com/strukturag/libde265
+- **dav1d** (BSD-2-Clause): AV1 decoding for AVIF, when shipped. Source: https://code.videolan.org/videolan/dav1d
+- **libjxl** (BSD-3-Clause): JPEG XL, when shipped. Source: https://github.com/libjxl/libjxl
+- **libwebp** (BSD-3-Clause): WebP encoding, when shipped. Source: https://github.com/webmproject/libwebp
+- **ONNX Runtime** (MIT): model inference, when shipped. Source: https://github.com/microsoft/onnxruntime

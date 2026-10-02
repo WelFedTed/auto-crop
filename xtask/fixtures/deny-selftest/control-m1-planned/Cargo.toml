@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+# Pre-vets the M1 crates that are not in the workspace yet, against the real deny.toml (ROADMAP
+# M1.73): this fixture must PASS. Versions are pinned so a licence change upstream shows up as a
+# red check on purpose. Move a crate out of here when it joins the workspace.
+
+[workspace]
+
+[package]
+name = "selftest-control-m1-planned"
+version = "0.0.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+image-compare = "=0.5.0"
+turbojpeg = { version = "=1.5.1", default-features = false }
