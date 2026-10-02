@@ -75,6 +75,10 @@ Two results over the same manifest (same SHA-256; same image ids) are paired by 
 
 `PublishableMetrics` is the only shape that may leave the machine: aggregates, slices with n >= 30 only, calibration bins, and a count (not the names) of withheld slices. It has no per-image field, no id, path, quad, tag or note; `publish` serialises it and runs a leak check (forbidden keys anywhere, any image id anywhere in the text). The workflow side (publish only from main nightlies and releases, the fork test) is M1.51/M1.52 proper and not built.
 
+## Public corpora
+
+Real public datasets (SmartDoc 2015 Ch.1, CORD, MIDV-500, DIBCO, raw.pixls.us CC0) are fetched, verified and turned into manifests of this format by `cargo xtask fetch-corpus`; see [corpora.md](corpora.md). Manifest lines written by the adapters carry extra `licence`, `attribution` and `source` fields, which the harness ignores.
+
 ## The synthetic suites are a STAND-IN
 
 `synth` is a minimal M1.35 writer, **not** the M1.30 Python/Augraphy generator. It extends the Rust scene renderer in `auto-crop-imgproc::synth` with a pinhole camera (roll and tilt up to 45 degrees; analytic ground truth), distractor clutter that never touches the page, three lighting conditions and JPEG/PNG output.

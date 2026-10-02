@@ -5736,6 +5736,8 @@ name = "xtask"
 version = "0.0.1"
 dependencies = [
  "auto-crop-codecs",
+ "auto-crop-eval",
+ "flate2",
  "goblin",
  "serde",
  "serde_json",

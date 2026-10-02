@@ -76,7 +76,7 @@ GPL-licensed tools below are executed as separate programs for measurement and c
 
 ### Datasets, test images and weights
 
-Nothing is downloaded or committed today. Weights: none used. Datasets and images:
+Nothing is downloaded or committed today. Weights: none used. The public corpora (SmartDoc 2015 Ch.1, CORD, MIDV-500, DIBCO, raw.pixls.us CC0-only) are pinned in [corpus.lock.toml](../corpus.lock.toml) with URL, SPDX licence and attribution, but every size and SHA-256 is still the placeholder `TODO-first-fetch`, which `cargo xtask fetch-corpus` refuses; they are fetched into a cache outside the repository and never committed ([corpora guide](testing/corpora.md)). Datasets and images:
 
 | Name | Kind | SPDX | Use | Source | Checked |
 |---|---|---|---|---|---|

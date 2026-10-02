@@ -1,0 +1,115 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+# Public corpora for the accuracy harness (ROADMAP M1.36-M1.38). Read by `cargo xtask
+# fetch-corpus`; format and rules in docs/testing/corpora.md and xtask/src/corpus/lock.rs.
+#
+# Nothing in this file has been downloaded. Every pin below is the placeholder
+# `TODO-first-fetch`, which `fetch-corpus` REFUSES: no bytes are fetched until a maintainer has
+# run `cargo xtask fetch-corpus --record-hash <name>` once, reviewed the printed size and
+# SHA-256 and pasted them here. Every URL, file name and archive layout marked UNVERIFIED comes
+# from the research notes (docs/research) or from memory, not from a fetch; check it at first
+# fetch. The datasets themselves are never committed (they live in the fetch cache outside this
+# repository, B21).
+#
+# `spdx` is the licence of the DATA. Only CC0-1.0, CC-BY-4.0 and permissive code licences are
+# cleared (B2); anything else, including NOASSERTION, is refused at fetch and ingest time.
+
+version = 1
+
+# --- SmartDoc 2015 Challenge 1 (page quads on 5 backgrounds, video frames) -------------------
+[[corpus]]
+name = "smartdoc2015-ch1"
+adapter = "smartdoc2015-ch1"
+title = "SmartDoc 2015 Challenge 1 (original version)"
+spdx = "CC-BY-4.0"
+licence_url = "https://zenodo.org/records/1230217"
+attribution = "SmartDoc 2015 Challenge 1 dataset (Burie et al., ICDAR 2015 competition on smartphone document capture and OCR), CC BY 4.0, https://zenodo.org/records/1230217. The authors ask users to cite the ICDAR2015 SmartDoc paper and to email the organisers (icdar.smartdoc@gmail.com) about their use."
+notes = "Zenodo record 1230217 (research: testDataset.tar.gz about 1.5 GB, plus a 21 MB sample set). Use this original, not the HuggingFace DocCornerDataset aggregate (research-only claims there). UNVERIFIED: the exact file names below and the archive layout the adapter expects."
+
+  [[corpus.file]]
+  variant = "sample"
+  # UNVERIFIED file name: the record lists a ~21 MB sample set; confirm the name on first fetch.
+  url = "https://zenodo.org/records/1230217/files/sampleDataset.tar.gz"
+  size = "TODO-first-fetch"
+  sha256 = "TODO-first-fetch"
+  extract = "tar"
+
+  [[corpus.file]]
+  variant = "full"
+  url = "https://zenodo.org/records/1230217/files/testDataset.tar.gz"
+  size = "TODO-first-fetch"
+  sha256 = "TODO-first-fetch"
+  extract = "tar"
+
+# --- CORD (receipt photos with transcripts) ---------------------------------------------------
+[[corpus]]
+name = "cord"
+adapter = "cord"
+title = "CORD receipts (Clova AI)"
+spdx = "CC-BY-4.0"
+licence_url = "https://github.com/clovaai/cord"
+attribution = "CORD: A Consolidated Receipt Dataset for Post-OCR Parsing (Park et al., Clova AI), CC BY 4.0, https://github.com/clovaai/cord"
+notes = "UNVERIFIED: the research notes only give the landing pages. The URL below is the repository page, NOT a downloadable archive: replace it with the real archive URL (the data is distributed outside the repository) before the first fetch. The adapter expects the original layout <split>/image/*.png with <split>/json/*.json; the HuggingFace parquet release is not read."
+
+  [[corpus.file]]
+  variant = "full"
+  url = "https://github.com/clovaai/cord"
+  size = "TODO-first-fetch"
+  sha256 = "TODO-first-fetch"
+  extract = "zip"
+
+# --- MIDV-500 (ID documents in video, quads per frame) ---------------------------------------
+[[corpus]]
+name = "midv-500"
+adapter = "midv-500"
+title = "MIDV-500"
+# The provenance log has this dataset as `pending` with NOASSERTION: the source documents are
+# public domain or openly licensed per the paper, but the licence must be checked per release.
+# Until that is done and recorded here, fetch and ingest are refused on licence grounds.
+spdx = "NOASSERTION"
+licence_url = "https://arxiv.org/abs/1807.05786"
+attribution = "MIDV-500 (Arlazarov et al., 2019), https://arxiv.org/abs/1807.05786"
+notes = "Pending licence audit (docs/policy/provenance). UNVERIFIED: the dataset is published as one zip per document class (50 of them), reportedly over FTP; list every archive with its pin here when the licence is cleared. The adapter expects <document>/images/<condition>/<clip>/<frame>.tif with <document>/ground_truth/<condition>/<clip>/<frame>.json holding a `quad`."
+
+  [[corpus.file]]
+  variant = "full"
+  url = "ftp://smartengines.com/midv-500/dataset/01_alb_id.zip"
+  size = "TODO-first-fetch"
+  sha256 = "TODO-first-fetch"
+  extract = "zip"
+
+# --- DIBCO / H-DIBCO via Doxa BinBench (binarisation with ground truth) ------------------------
+[[corpus]]
+name = "dibco"
+adapter = "dibco"
+title = "DIBCO and H-DIBCO binarisation benchmarks (Doxa BinBench)"
+spdx = "CC0-1.0"
+licence_url = "https://github.com/brandonmpetty/Doxa"
+attribution = "DIBCO and H-DIBCO contest data as bundled by Doxa BinBench (CC0)"
+notes = "ROADMAP M7.51 names Doxa BinBench (CC0) as the source. UNVERIFIED: the repository URL and layout; the URL below is the project page, not an archive. Check the CC0 statement against the pinned release at first fetch. The adapter pairs originals with *_GT images (or a gt/ directory) per year folder."
+
+  [[corpus.file]]
+  variant = "full"
+  url = "https://github.com/brandonmpetty/Doxa/archive/refs/heads/master.tar.gz"
+  size = "TODO-first-fetch"
+  sha256 = "TODO-first-fetch"
+  extract = "tar"
+
+# --- raw.pixls.us (camera RAW samples; only the CC0 ones may be used) --------------------------
+[[corpus]]
+name = "rawpixls-cc0"
+adapter = "rawpixls-cc0"
+title = "raw.pixls.us RAW samples, CC0 only"
+spdx = "CC0-1.0"
+licence_url = "https://raw.pixls.us/"
+attribution = "Samples from raw.pixls.us marked CC0 (no attribution required)"
+notes = "Not every sample on the site is CC0 (older ones from rawsamples.ch are not), so the adapter keeps an index entry only when its licence is exactly CC0 and it has a pinned SHA-256. UNVERIFIED: the real index format; the adapter reads a JSON-lines or JSON-array index named index.jsonl with path, licence, sha256 and size per sample. This entry pins only the INDEX file; individual samples need their own verified fetch, which is not built yet."
+
+  [[corpus.file]]
+  variant = "full"
+  # UNVERIFIED: no index file of this shape is known to exist at this URL.
+  url = "https://raw.pixls.us/data/index.jsonl"
+  size = "TODO-first-fetch"
+  sha256 = "TODO-first-fetch"
+  extract = "none"

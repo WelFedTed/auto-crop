@@ -6,6 +6,7 @@
 mod alloc_count;
 mod check_native;
 mod ci_guards;
+mod corpus;
 mod dco;
 mod deny_selftest;
 mod deps;
@@ -71,6 +72,21 @@ Commands:
         Generate the hostile-file corpus (60000x60000 and 100 MP headers, zlib bombs, IFD
         floods, truncations, cyclic EXIF) and decode each file in a subprocess; fails on a
         panic, abort, hang, or a time or heap budget miss. Files go to target/hostile.
+  fetch-corpus [--sample] [--lock FILE] [--cache DIR] [--no-ingest] <name>
+  fetch-corpus --record-hash [--sample] <name>
+  fetch-corpus --list
+        Download a public corpus pinned in corpus.lock.toml (URL, size, SHA-256, SPDX licence,
+        attribution), verify it (a mismatch is refused and the file deleted), extract it into
+        the cache OUTSIDE the repository ($AUTOCROP_CORPUS_CACHE, --cache, else a per-user
+        cache directory) and write harness manifests next to the data. --sample picks the small
+        sample file of corpora that have one. A lock entry whose size or sha256 is the
+        placeholder TODO-first-fetch, or whose licence is not cleared, is refused with the reason.
+        --record-hash downloads into a quarantine, prints the size and SHA-256 to paste into the
+        lock (trust on first use), extracts nothing and deletes the file. Uses `curl`.
+        Adapter options: [--every N] [--scene-by clip|document] [--dev-percent N]
+        [--contact-sheet N]. See docs/testing/corpora.md.
+  corpus-ingest <name> --src DIR [--out DIR] [--lock FILE] [adapter options]
+        Run only the manifest adapter over an already extracted tree.
   synth --suite smoke|full [--out DIR] [--seed N] [--count N] [--max-edge N]
         Write a STAND-IN synthetic suite (images + manifest.jsonl) under target/synth/<suite> by
         default. Never committed. Wraps `auto-crop-eval synth`.
@@ -102,6 +118,8 @@ fn main() -> ExitCode {
         "ci-guards" => ci_guards::run(&rest),
         "make-hostile" => hostile::run(&rest),
         "hostile-run" => hostile::run_child(&rest),
+        "fetch-corpus" => corpus::run_fetch(&rest),
+        "corpus-ingest" => corpus::run_ingest(&rest),
         "synth" => eval::run_synth(&rest),
         "eval" => eval::run_eval(&rest),
         "" | "help" | "--help" | "-h" => {

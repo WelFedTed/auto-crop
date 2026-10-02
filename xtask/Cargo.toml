@@ -17,6 +17,10 @@ sha2 = "0.10"
 toml = "0.9"
 goblin = "0.10"
 auto-crop-codecs = { path = "../crates/codecs", features = ["fixtures"] }
+# Manifest types and checks of the accuracy harness, so corpus adapters write exactly its format.
+auto-crop-eval = { path = "../crates/eval" }
+# Reads gzipped ground-truth tables (SmartDoc metadata.csv.gz); pure Rust backend, no network.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 
 [lints]
 workspace = true
