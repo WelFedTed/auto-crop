@@ -23,7 +23,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 |---|---|---|---|---|---|
 | P | Planning | none | documents | - | 4 / 5 (80%) |
 | M0 | Foundations and week-1 spikes | none | CI only (Windows, macOS, Linux) | XL | 49 / 94 (52%) |
-| M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 17 / 94 (18%) |
+| M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 24 / 94 (25%) |
 | M2 | Classical pipeline, safe writes and CLI | v0.1.0 | Windows 10/11 x64 | L | 0 / 93 (0%) |
 | M3 | GUI alpha: single-image editor | v0.2.0 | Windows 10/11 x64 | XL | 0 / 94 (0%) |
 | M4 | ML detection, orientation and calibrated confidence | v0.3.0 | Windows 10/11 x64 | XL | 0 / 90 (0%) |
@@ -39,7 +39,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | X | Continuous and cross-cutting | - | - | - | 0 / 42 (0%) |
 | X | Post-1.0 backlog (1.x) | - | - | - | 0 / 43 (0%) |
 | X | Spikes and open decisions | - | - | - | 0 / 28 (0%) |
-| **Total** | | | | | **70 / 1407 (4%)** |
+| **Total** | | | | | **77 / 1407 (5%)** |
 <!-- progress:end -->
 
 ## Why this order
@@ -212,15 +212,15 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [x] **M1.11 Local logging** - `tracing` with a daily `tracing-appender` file in the OS data dir (7 days, 20 MB; PROVISIONAL); paths redacted above `debug` to `blake3(path)[..8]` plus extension; no network sink (B18, C4). Tests: info-level decode log has no raw path; rotation under a fake clock. Note: `logging::init` is not yet called by the CLI or shell.
 
 ### Codecs/I/O
-- [ ] **M1.12 Format sniffing and header probe** - `sniff(&[u8])` by magic bytes (JPEG, PNG, TIFF, WebP decodable; HEIC/AVIF, GIF, BMP, JXL recognised only) and `probe()` for dims, depth, frames, orientation, ICC, no pixel allocation. Tests: >= 30 fixtures; a 100 MP-declared file probes in < 1 MB.
-- [ ] **M1.13 DecodeLimits** - PLAN 3.10.1: 100 MP default (500 MP via Advanced, `--max-pixels` or "allow this file"), file bytes, metadata 16 MiB, scans 100, frames 10,000; order probe, cap, `est_bytes`, `image::Limits`. One test per field; a 60000x60000 header fails in < 1 s and < 64 MB.
-- [ ] **M1.14 Decode guard** - `guard_item` wraps decode, warp, encode: a panic becomes `InternalPanic` and the batch continues; `max_decode_ms` gives `DecodeTimeout` but the `MemoryBudget` hold lasts until the thread ends. Tests: panic then next item OK; pools install a `panic_handler`.
-- [ ] **M1.15 JPEG and PNG decode** - `image` 0.25.x with zune-jpeg 0.5.15 (not the 0.5.16 RC) and `png` to `Raster`; fixtures incl. progressive, CMYK/YCCK (RGB or `UnsupportedFeature`, never a panic), 12-bit, interlaced. Acceptance: mean abs diff vs libjpeg-turbo <= 1.5 LSB (PROVISIONAL).
-- [ ] **M1.16 TIFF and WebP decode** - `tiff` (8/16-bit; LZW, Deflate, PackBits; IFD count capped; multi-page = first page plus `tiff.multi_page`) and `image-webp` (animated = first frame plus `anim.first_frame_only`). Acceptance: a libtiff-made 1-bit G4 TIFF reads or the failure is recorded.
-- [ ] **M1.17 EXIF orientation and ICC** - Orientation 1-8 (JPEG, TIFF, WebP, PNG) applied once at decode, tag kept on `SourceRef`; ICC kept (JPEG APP2 multi-segment, PNG, TIFF, WebP), no conversion; HEIF half: M6.25. Tests: 8 orientations x 4 formats match one reference; 3-segment ICC byte-exact.
+- [x] **M1.12 Format sniffing and header probe** - `sniff(&[u8])` by magic bytes (JPEG, PNG, TIFF, WebP decodable; HEIC/AVIF, GIF, BMP, JXL recognised only) and `probe()` for dims, depth, frames, orientation, ICC, no pixel allocation. Tests: >= 30 fixtures; a 100 MP-declared file probes in < 1 MB.
+- [x] **M1.13 DecodeLimits** - PLAN 3.10.1: 100 MP default (500 MP via Advanced, `--max-pixels` or "allow this file"), file bytes, metadata 16 MiB, scans 100, frames 10,000; order probe, cap, `est_bytes`, `image::Limits`. One test per field; a 60000x60000 header fails in < 1 s and < 64 MB.
+- [x] **M1.14 Decode guard** - `guard_item` wraps decode, warp, encode: a panic becomes `InternalPanic` and the batch continues; `max_decode_ms` gives `DecodeTimeout` but the `MemoryBudget` hold lasts until the thread ends. Tests: panic then next item OK; pools install a `panic_handler`.
+- [x] **M1.15 JPEG and PNG decode** - `image` 0.25.x with zune-jpeg 0.5.15 (not the 0.5.16 RC) and `png` to `Raster`; fixtures incl. progressive, CMYK/YCCK (RGB or `UnsupportedFeature`, never a panic), 12-bit, interlaced. Acceptance: mean abs diff vs libjpeg-turbo <= 1.5 LSB (PROVISIONAL). Result: mean abs diff vs libjpeg-turbo 3.2.0 0.013-0.27 LSB (`docs/testing/codecs-hostile-input.md`).
+- [x] **M1.16 TIFF and WebP decode** - `tiff` (8/16-bit; LZW, Deflate, PackBits; IFD count capped; multi-page = first page plus `tiff.multi_page`) and `image-webp` (animated = first frame plus `anim.first_frame_only`). Acceptance: a libtiff-made 1-bit G4 TIFF reads or the failure is recorded.
+- [x] **M1.17 EXIF orientation and ICC** - Orientation 1-8 (JPEG, TIFF, WebP, PNG) applied once at decode, tag kept on `SourceRef`; ICC kept (JPEG APP2 multi-segment, PNG, TIFF, WebP), no conversion; HEIF half: M6.25. Tests: 8 orientations x 4 formats match one reference; 3-segment ICC byte-exact.
 - [ ] **M1.18 turbojpeg feature switch** - Extends M0.44/M0.45: enable `turbojpeg` 1.5.x behind cargo feature `turbojpeg` in `codecs` (off = zune-jpeg only) on the pinned libjpeg-turbo >= 3.1.4; no new ADR. Acceptance: the CI version check is red with 3.1.0, green with the pin on 3 OSes.
 - [ ] **M1.19 turbojpeg scaled decode** - `Want::Scaled{min_edge}` picks the smallest of 1/8, 1/4, 1/2, 1 keeping the long edge >= `min_edge`; EXIF orientation applies after scaling. Tests: on 40 fixtures scaled vs full decode + area downscale >= 35 dB PSNR (PROVISIONAL); odd sizes like 4001x3001.
-- [ ] **M1.20 JPEG lossless transform** - `transform(bytes, Op)`: rotate, flip, crop (`perfect`/`trim`); the crop snaps to the iMCU grid and returns the realised rectangle and a `perfect` flag. Tests: matches decode-then-transform if aligned; 1000 reused buffers ASan-clean; Orientation untouched.
+- [ ] **M1.20 JPEG lossless transform** - `transform(bytes, Op)`: rotate, flip, crop (`perfect`/`trim`); the crop snaps to the iMCU grid and returns the realised rectangle and a `perfect` flag. Tests: matches decode-then-transform if aligned; 1000 reused buffers ASan-clean; Orientation untouched. Status: implemented in safe Rust (no FFI); the ASan reuse test became a determinism test, so this stays open until the libjpeg-turbo path (M1.18/M1.19) exists or the owner accepts the change.
 - [ ] **M1.21 Baseline encoders** - `Encoder` impls for JPEG (turbojpeg q90 and `jpeg-encoder` with IJG attribution; default picked from M1.57) and PNG (`png`, 8/16-bit, dpi) for the harness and stage-sum only, not the M2 write path. Tests: JPEG round trip >= 40 dB at q90; 16-bit PNG bit-exact.
 
 ### Imaging kernels
@@ -286,7 +286,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [ ] **M1.68 Enhance sweep** - On rectified golden receipts: grey vs flatten + Otsu/Sauvola/NICK, windows 21-201 (PROVISIONAL), no-flatten ablation; CER change, share worse > 1 pt. ADR `docs/adr/NNNN-enhance-feasibility.md` (aggregates only) names the M7 default or "inconclusive". _(gate: CER)_
 
 ### Security/Legal
-- [ ] **M1.69 Hostile-file corpus** - `xtask make-hostile` writes bombs and corruptions (60000x60000 and 100 MP headers, zlib bomb, IFD floods, truncations, cyclic EXIF); each runs in a subprocess and returns an `ErrKind` or bounded decode, 3 OSes per PR. _(gate: 0 panics, aborts, hangs)_
+- [x] **M1.69 Hostile-file corpus** - `xtask make-hostile` writes bombs and corruptions (60000x60000 and 100 MP headers, zlib bomb, IFD floods, truncations, cyclic EXIF); each runs in a subprocess and returns an `ErrKind` or bounded decode, 3 OSes per PR. _(gate: 0 panics, aborts, hangs)_ Result: 89 hostile files, 0 panics, aborts or hangs on windows-2025, macos-latest, ubuntu-22.04 (`xtask/tests/hostile.rs`).
 - [ ] **M1.70 cargo-fuzz targets** - `fuzz/` (cargo-fuzz 0.13, nightly, Linux only): `probe`, `limits`, `metadata` (EXIF, ICC), `editstate_json` (parse and migrate never panic); seeds from fixtures and hostile files; ASan on turbojpeg targets. Acceptance: 5 minutes per target without a crash.
 - [ ] **M1.71 Fuzz CI and crash replay** - 60 s smoke per target on PRs touching `codecs`, `core` or `fuzz/` (path filter inside the job) and 1 h per target nightly (counts toward >= 72 h per target before 1.0); crashers become plain `#[test]` inputs on 3 OSes. _(gate: fuzz smoke green)_
 - [ ] **M1.72 CI policy guards** - Extends M0.31 (its `check-profiles` owns the `panic = "abort"` ban): `xtask ci-guards` adds `unsafe` only inside `ffi/` and `simd/` with `// SAFETY:` comments and no HTTP, TLS or socket crates in shipped crates (B18, C4). Acceptance: each guard has a red test.
