@@ -1,0 +1,7 @@
+augraphy==8.2.6
+numpy==2.5.3
+opencv-python-headless==5.0.0.93
+pillow==12.3.0
+scikit-image==0.26.0
+segno==1.6.6
+python-barcode==0.16.1

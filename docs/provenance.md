@@ -40,9 +40,20 @@ Pinned in `tools/imgproc-oracles/requirements.txt`, hash-locked in `requirements
 
 | Name | Kind | SPDX | Use | Source | Checked |
 |---|---|---|---|---|---|
-| `numpy` | Python package | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | float64 reference Lanczos3 warp (`warp_numpy_lanczos3.json`) | https://pypi.org/project/numpy/ | verified 2026-10-02 (wheel metadata, 2.5.3) |
-| `opencv-python-headless` | Python package | Apache-2.0 | homography and warp reference (`cv2.getPerspectiveTransform`, `cv2.warpPerspective`) used only to produce fixtures; the wheel bundles third-party libraries (including LGPL FFmpeg) that are never redistributed by this project | https://pypi.org/project/opencv-python-headless/ | verified 2026-10-02 (wheel metadata, 5.0.0.93) for the package; bundled libraries to verify |
-| `pillow` | Python package | MIT-CMU | renders the synthetic receipts of the OCR oracle (`tools/ocr_oracle`, M1.66; pinned in `tools/ocr_oracle/requirements.txt`, hash-locked, Python 3.10 or newer); the images are generated at run time and never committed | https://pypi.org/project/pillow/ | verified 2026-10-03 (package metadata, 12.3.0) |
+| `numpy` | Python package | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | float64 reference Lanczos3 warp (`warp_numpy_lanczos3.json`); also the arrays of `tools/synth` | https://pypi.org/project/numpy/ | verified 2026-10-02 (wheel metadata, 2.5.3) |
+| `opencv-python-headless` | Python package | Apache-2.0 | homography and warp reference (`cv2.getPerspectiveTransform`, `cv2.warpPerspective`) used only to produce fixtures; also the perspective warp, blur and drawing of `tools/synth`; the wheel bundles third-party libraries (including LGPL FFmpeg) that are never redistributed by this project | https://pypi.org/project/opencv-python-headless/ | verified 2026-10-02 (wheel metadata, 5.0.0.93) for the package; bundled libraries to verify |
+| `pillow` | Python package | MIT-CMU | renders the synthetic receipts of the OCR oracle (`tools/ocr_oracle`, M1.66; pinned in `tools/ocr_oracle/requirements.txt`, hash-locked, Python 3.10 or newer); the images are generated at run time and never committed; also the text drawing (FreeType) and the JPEG, PNG, TIFF and WebP encoding of `tools/synth`, which pins 12.3.0 in its own hash-locked lock | https://pypi.org/project/pillow/ | verified 2026-10-03 (package metadata, 12.3.0) |
+
+### Python packages for the synthetic generator (`tools/synth`, never shipped)
+
+Pinned in `tools/synth/requirements.txt` (plus the `numpy` and `opencv-python-headless` rows above), hash-locked in `tools/synth/requirements.lock` for Python 3.12 or newer with `opencv-python` cancelled by `overrides.txt` (it would overwrite the headless wheel). The lock holds 33 packages; the installed distributions (the 33 packages and pip) were read with `python -m synth licences` on 2026-10-03 and none is GPL, AGPL or non-commercial. Besides the rows below the transitive ones are matplotlib (matplotlib licence, a PSF-style licence; it also ships the fonts below), scipy, scikit-learn, numba, imageio, tifffile, networkx, joblib, threadpoolctl, lazy-loader, cloudpickle, contourpy, cycler, kiwisolver, fonttools, pyparsing, python-dateutil, six, packaging, narwhals, requests, urllib3, idna, charset-normalizer (all MIT, BSD or Apache-2.0 or a combination), llvmlite (BSD-2-Clause AND Apache-2.0 WITH LLVM-exception) and certifi (MPL-2.0: a CA bundle that Augraphy's optional downloader would use; the generator never downloads and the bundle is not redistributed). **AlbumentationsX (AGPL-3.0) is banned**: `tests/test_independence.py` fails if `albumentations` appears in the requirements or the lock.
+
+| Name | Kind | SPDX | Use | Source | Checked |
+|---|---|---|---|---|---|
+| `augraphy` | Python package | MIT | paper, ink and low-light degradations behind the `degrade.py` seam; 8.2.6 is a 2023 release, kept replaceable (`SYNTH_BACKEND=builtin` swaps it for NumPy code) | https://pypi.org/project/augraphy/ | verified 2026-10-03 (wheel LICENSE and metadata, 8.2.6) |
+| `scikit-image` | Python package | BSD-3-Clause | SSIM for the ground-truth check (`structural_similarity`); a dependency of Augraphy | https://pypi.org/project/scikit-image/ | verified 2026-10-03 (wheel metadata, 0.26.0) |
+| `segno` | Python package | BSD-3-Clause | QR code module matrices drawn on generated pages | https://pypi.org/project/segno/ | verified 2026-10-03 (wheel metadata, 1.6.6, "BSD License" classifier) |
+| `python-barcode` | Python package | MIT | Code 128 and EAN-13 bar patterns drawn on generated pages | https://pypi.org/project/python-barcode/ | verified 2026-10-03 (wheel metadata, 0.16.1) |
 
 ### Developer and CI tools (run, never linked, never shipped)
 
@@ -74,6 +85,8 @@ GPL-licensed tools below are executed as separate programs for measurement and c
 |---|---|---|---|---|---|
 | `@fontsource/ibm-plex-sans` | font (npm package) | OFL-1.1 | UI text; bundled through the npm package (imported in `ui/src/main.ts`), no font CDN | https://fontsource.org/fonts/ibm-plex-sans | to verify. The OFL text and copyright notice must ship with the app: open item for the third-party notices (M13). |
 | `@fontsource/ibm-plex-mono` | font (npm package) | OFL-1.1 | UI monospace text and numerals | https://fontsource.org/fonts/ibm-plex-mono | to verify, same notice duty |
+| `DejaVu Sans, Sans Mono and Serif` | font (inside the `matplotlib` wheel, `mpl-data/fonts/ttf`) | Bitstream-Vera | text of generated pages and receipts in `tools/synth` (sans, mono receipts, dot-style thermal text); loaded by path from the pinned wheel, not copied into the repository, never shipped | https://dejavu-fonts.github.io/ | verified 2026-10-03 (`LICENSE_DEJAVU` in the wheel: Bitstream Vera licence, DejaVu changes public domain; permits use and redistribution of the unmodified fonts, no sale on their own) |
+| `STIX General` | font (inside the `matplotlib` wheel) | OFL-1.1 | serif text of generated documents in `tools/synth`; same handling | https://www.stixfonts.org | verified 2026-10-03 (`LICENSE_STIX` in the wheel states SIL OFL 1.1; matplotlib converted the files from OTF to TTF) |
 | Hershey vector fonts (`cv2.putText`) | font | Apache-2.0 | glyphs in the throwaway `spikes/strips` receipt generator; not used by shipped code | part of OpenCV | to verify |
 | DejaVu Sans Mono (`fonts-dejavu-core`) | font (Ubuntu package) | Bitstream-Vera AND LicenseRef-DejaVu-public-domain-changes | glyphs of the synthetic receipts rendered by `tools/ocr_oracle` in the CI job (M1.66); the rendered images are generated at run time, never committed or shipped | https://dejavu-fonts.github.io | to verify |
 
@@ -83,7 +96,8 @@ Nothing is downloaded or committed today. Weights: none used. The public corpora
 
 | Name | Kind | SPDX | Use | Source | Checked |
 |---|---|---|---|---|---|
-| `stand-in synthetic suites` | generated data | MIT OR Apache-2.0 | `cargo xtask synth` writes smoke and full suites from a seed under `target/`; never committed (M1.50) | this repository | verified 2026-10-02 |
+| `stand-in synthetic suites` | generated data | MIT OR Apache-2.0 | `cargo xtask synth --generator rust` writes the old Rust stand-in smoke and full suites from a seed under `target/synth/<suite>-rust`; never committed (M1.50) | this repository | verified 2026-10-02 |
+| `python synthetic suites` | generated data | MIT OR Apache-2.0 | `cargo xtask synth` (default generator, `tools/synth`) writes smoke and full suites under `target/synth/<suite>`; never committed. Everything in them is generated by this project: pages and receipts from word lists written for it (invented shop and person names, random prices and digits, no third-party text or brand), procedural backgrounds (the manifest says so in `background.licence`; DTD is excluded), fonts as above | this repository | verified 2026-10-03 |
 | `hostile corpus` | generated data | MIT OR Apache-2.0 | `cargo xtask make-hostile`: bombs and corruptions written under `target/hostile` (M1.69) | this repository | verified 2026-10-02 |
 | `engine EditState fixtures` | test data | MIT OR Apache-2.0 | `crates/engine/fixtures/editstate/*.json`, hand-written | this repository | verified 2026-10-02 |
 | `imgproc oracle fixtures` | test data | MIT OR Apache-2.0 | `crates/imgproc/tests/fixtures/*.json`, numbers produced by `tools/imgproc-oracles` | this repository | verified 2026-10-02 |

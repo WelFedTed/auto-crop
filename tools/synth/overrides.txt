@@ -1,0 +1,4 @@
+# Augraphy 8.2.6 declares `opencv-python`. The GUI wheel and the headless wheel both install the
+# `cv2` module and overwrite each other, so that dependency is cancelled here (the marker is never
+# true) and `opencv-python-headless` from requirements.txt supplies cv2.
+opencv-python ; python_version < "0"

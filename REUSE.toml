@@ -38,6 +38,10 @@ path = [
     "tools/perf_gate/fixtures/**",
     "tools/ocr_oracle/requirements.txt",
     "tools/ocr_oracle/requirements.lock",
+    "tools/synth/requirements.txt",
+    "tools/synth/requirements.lock",
+    "tools/synth/overrides.txt",
+    "tools/synth/tests/golden_quads.json",
     "**/*.proptest-regressions",
     "fuzz/regressions/**",
 ]
