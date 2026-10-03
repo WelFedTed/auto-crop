@@ -3,7 +3,7 @@
 
 # The Python synthetic generator (tools/synth, ROADMAP M1.30 to M1.35).
 #
-# Per pull request (the job always reports; the path filter is a step inside it): the generator's
+# Per pull request and push to main (the job always reports; the path filter is a step inside it): the generator's
 # unit tests (golden ground-truth quads, determinism, independence from the app), the inverse-warp
 # SSIM of the ground truth, the Rust decoders on every format x EXIF x colour-space variant, the
 # **Tesseract 5 CER acceptance of M1.31** (the only place it runs: Tesseract is not installed on the
@@ -19,6 +19,8 @@
 name: Synthetic generator
 
 on:
+  push:
+    branches: [main]
   pull_request:
   schedule:
     - cron: "41 4 * * *"
@@ -48,10 +50,14 @@ jobs:
         id: changes
         env:
           EVENT: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          if [ "$EVENT" != "pull_request" ] || git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -Eq '^(tools/synth/|crates/(eval|codecs|imgproc)/|xtask/|Cargo\.toml$|Cargo\.lock$|rust-toolchain\.toml$|\.github/workflows/synth\.yml$)'; then
+          changed=unknown
+          if [ "$EVENT" = "pull_request" ] || [ "$EVENT" = "push" ]; then
+            changed=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" 2>/dev/null || echo unknown)
+          fi
+          if [ "$changed" = "unknown" ] || echo "$changed" | grep -Eq '^(tools/synth/|crates/(eval|codecs|imgproc)/|xtask/|Cargo\.toml$|Cargo\.lock$|rust-toolchain\.toml$|\.github/workflows/synth\.yml$)'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "relevant=false" >> "$GITHUB_OUTPUT"
@@ -90,6 +96,12 @@ jobs:
       - name: Generate the smoke suite from its seed
         if: steps.changes.outputs.relevant == 'true'
         run: cargo xtask synth --suite smoke
+      - name: Same seed, identical manifest and image bytes (M1.30 acceptance, on Linux)
+        if: steps.changes.outputs.relevant == 'true'
+        run: |
+          cargo xtask synth --suite smoke --out target/synth/smoke-again --jobs 3
+          diff -r -x suite.json target/synth/smoke target/synth/smoke-again
+          echo "smoke regenerated with a different worker count: manifest and all 200 images are byte-identical" >> "$GITHUB_STEP_SUMMARY"
       - name: Validate the manifest and the splits
         if: steps.changes.outputs.relevant == 'true'
         run: |
@@ -115,7 +127,7 @@ jobs:
 
   full:
     name: full suite (nightly)
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-22.04
     timeout-minutes: 120
     steps:
