@@ -28,7 +28,10 @@ unsafe_code = "deny"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# `float_roundtrip`: the default float parser can be one ulp off for 17-digit inputs, so a saved EditState
+# could change when reloaded (found by the M1.70 `editstate_json` fuzzer). Set here so every crate that
+# parses JSON gets it, whichever packages are built together.
+serde_json = { version = "1", features = ["float_roundtrip"] }
 thiserror = "2"
 
 # Every profile unwinds (never "abort"): decoder glue relies on catch_unwind.

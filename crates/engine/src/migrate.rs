@@ -302,6 +302,25 @@ mod tests {
         assert_eq!(migrate_value_with(v1, 2, &[]), Err(ErrKind::Internal));
     }
 
+    /// Found by the `editstate_json` fuzzer (M1.70, `fuzz/regressions/editstate_json/`): without
+    /// serde_json's `float_roundtrip` feature a 17-digit coordinate parsed one ulp off, so what was
+    /// saved did not equal what was loaded.
+    #[test]
+    fn coordinates_survive_a_save_and_load_exactly() {
+        let doc = r#"{"items":[{"id":1,"geometry":{"type":"quad","corners":[
+            {"x":0.02,"y":0.03},{"x":0.48,"y":0.02},{"x":0.47,"y":0.97},
+            {"x":0.03,"y":0.98888888888888888888888888}],"quarterTurns":0,"fineDeg":0.0}}]}"#;
+        let state = migrate_str(doc).unwrap();
+        let saved = serde_json::to_string(&state).unwrap();
+        assert_eq!(migrate_str(&saved).unwrap(), state);
+        // 0.9888888888888888 is the shortest text of its f64, so it must parse back to it.
+        let x = 0.9888888888888888f64;
+        assert_eq!(
+            serde_json::from_str::<f64>(&serde_json::to_string(&x).unwrap()).unwrap(),
+            x
+        );
+    }
+
     #[test]
     fn manifests_load_through_the_chain_via_deserialize_with() {
         #[derive(Deserialize)]

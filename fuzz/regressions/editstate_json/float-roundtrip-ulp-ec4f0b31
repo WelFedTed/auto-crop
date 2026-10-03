@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "orientation": {
+    "quarterTurns": 2,
+    "mirror": true
+  },
+  "items": [
+    {
+      "id": 1,
+      "include": true,
+      "geometry": {
+        "type": "quad",
+        "corners": [
+          {
+            "x": 0.02,
+            "y": 0.03
+          },
+          {
+            "x": 0.48,
+            "y": 0.02
+          },
+          {
+            "x": 0.47,
+            "y": 0.97
+          },
+          {
+            "x": 0.03,
+            "y": 0.988888888888888888888888888
+          }
+        ],
+        "quarterTurns": 0,
+        "mirror": false,
+        "fineDeg": 0.0
+      },
+      "enhanceOverride": null,
+      "origin": {
+        "kind": "autoThenEdited"
+      },
+      "confidence": null
+    },
+    {
+      "id": 2,      "id": 4,
+      "include": true,
+      "geometry": {
+        "type": "grid",
+        "outline": [
+          {
+            "x": 0.0,
+            "y": 0.0
+          },
+          {
+            "x": 1.0,
+            "y": 0.0
+          },
+          {
+            "x": 1.0,
+            "y": 1.0
+          },
+          {
+            "x": 0.0,
+            "y": 1.0
+          }
+        ],
+        "cols": 2,
+        "rows": 2,
+        "nodes": [
+          {
+            "x": 0.0,
+            "y": 0.0
+          },
+          {
+            "x": 1.0,
+            "y": 0.0
+          },
+          {
+            "x": 0.0,
+            "y": 1.0
+          },
+          {
+            "x": 1.0,
+            "y": 1.0
+          }
+        ],
+        "model": "test-grid-1",
+        "quarterTursn": 0,
+        "mirror": false
+      },
+    "confidence": null
+    }
+  ],
+  "margin": {
+    "kind": "paperEdge",
+    "margin": 1.0625
+  },
+  "enhance": {
+    "mode": "original"
+  }
+}
