@@ -40,14 +40,14 @@ jpeg-encoder = "0.7"
 # PNG writer for the baseline encoder (8/16-bit, pHYs, iCCP); the decoder side stays behind `image`.
 png = "0.18"
 tiff = { version = "0.11", optional = true }
-fax = { version = "0.2", optional = true }
+fax = { version = "0.3", optional = true }
 # Bounded inflate of the PNG iCCP chunk before the PNG decoder sees it (already in the tree via `png`).
 flate2 = "1"
 
 [dev-dependencies]
 rayon = "1"
 tiff = "0.11"
-fax = "0.2"
+fax = "0.3"
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 
 # CI and timing helper of the `heif` feature (decode one file, print one line).
