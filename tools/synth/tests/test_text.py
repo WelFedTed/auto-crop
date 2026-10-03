@@ -83,6 +83,17 @@ class PageTests(unittest.TestCase):
         self.assertEqual(int(p.clean_gray().max()), 255)
         self.assertEqual(set(np.unique(p.clean_binary())), {0, 255})
 
+    def test_the_text_only_render_leaves_out_rules_and_codes_and_every_layout_can_be_asked_for(self):
+        for layout in sorted(page.DOC_LAYOUTS):
+            p = page.render(R.stream(14, layout), "document", "white", ppm=6.0, layout=layout)
+            self.assertEqual(p.layout, layout)
+            self.assertTrue(bool(((p.text_ink > 0) <= (p.ink > 0)).all()))
+            if layout in ("form", "invoice"):  # rules, boxes, QR and Code 128
+                self.assertLess(int((p.text_ink > 127).sum()), int((p.ink > 127).sum()) * 0.8, layout)
+        r = page.render(R.stream(15, "r"), "receipt", "white")
+        self.assertLess(int((r.text_ink > 127).sum()), int((r.ink > 127).sum()))  # the codes are not text
+        self.assertEqual(r.clean_gray(text_only=True).shape, r.clean_gray().shape)
+
     def test_scene_axes_choose_the_page_kind(self):
         for aspect in plan.SCENE_AXES["aspect"]:
             p = page.render(R.stream(13, aspect), aspect, "white")

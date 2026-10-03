@@ -20,10 +20,13 @@ fn python() -> Option<PathBuf> {
         return Some(PathBuf::from(p));
     }
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    ["target/synth-venv/Scripts/python.exe", "target/synth-venv/bin/python"]
-        .iter()
-        .map(|rel| root.join(rel))
-        .find(|p| p.exists())
+    [
+        "target/synth-venv/Scripts/python.exe",
+        "target/synth-venv/bin/python",
+    ]
+    .iter()
+    .map(|rel| root.join(rel))
+    .find(|p| p.exists())
 }
 
 #[test]

@@ -11,6 +11,8 @@ import os
 import shutil
 import sys
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
 
 import cv2
@@ -137,6 +139,7 @@ def generate(
     truth: str = "text",
     quiet: bool = False,
     overrides: dict | None = None,
+    _worker=None,
 ) -> dict:
     """Write a suite under ``out``. Returns a summary dict (also written as ``suite.json``)."""
     out = Path(out)
@@ -146,25 +149,40 @@ def generate(
     scenes, images = plan.build(name, seed, count, overrides)
     tasks = [(sc, imgs, str(out), max_edge, truth, name) for sc, imgs in _group_by_scene(images)]
     jobs = jobs or min(os.cpu_count() or 1, 8)
+    worker = _worker or _render_scene  # replaceable so a test can make a worker die
     started = time.time()
-    rows: list[dict] = []
+    results: dict[int, list[dict]] = {}
     done = 0
+
+    def note(n_rows: int):
+        nonlocal done
+        done += n_rows
+        if not quiet and (done == count or done % max(1, count // 20) < n_rows):
+            print(f"  {done}/{count} images, {time.time() - started:.0f}s", file=sys.stderr, flush=True)
+
     if jobs <= 1 or len(tasks) == 1:
-        results = map(_render_scene, tasks)
-        pool = None
+        for i, task in enumerate(tasks):
+            results[i] = worker(task)
+            note(len(results[i]))
     else:
-        pool = mp.get_context("spawn").Pool(jobs)
-        results = pool.imap(_render_scene, tasks, chunksize=1)
-    try:
-        for r in results:
-            rows.extend(r)
-            done += len(r)
-            if not quiet and (done == count or done % max(1, count // 20) < len(r)):
-                print(f"  {done}/{count} images, {time.time() - started:.0f}s", file=sys.stderr, flush=True)
-    finally:
-        if pool is not None:
-            pool.close()
-            pool.join()
+        # A worker that dies (out of memory, a crashed native library) must not hang the run, which
+        # `multiprocessing.Pool` would: a broken pool raises, and the unfinished scenes are retried
+        # on a fresh pool. Every scene is a pure function of the seed, so a retry changes nothing.
+        for attempt in range(3):
+            pending = [i for i in range(len(tasks)) if i not in results]
+            if not pending:
+                break
+            try:
+                with ProcessPoolExecutor(max_workers=jobs, mp_context=mp.get_context("spawn")) as pool:
+                    futures = {pool.submit(worker, tasks[i]): i for i in pending}
+                    for f in as_completed(futures):
+                        results[futures[f]] = f.result()
+                        note(len(results[futures[f]]))
+            except BrokenProcessPool:
+                print(f"  a worker process died; retrying {len(tasks) - len(results)} unfinished scene(s) (attempt {attempt + 1} of 3)", file=sys.stderr, flush=True)
+        if len(results) != len(tasks):
+            raise RuntimeError(f"{len(tasks) - len(results)} scene(s) could not be rendered: workers keep dying (memory?)")
+    rows = [r for i in sorted(results) for r in results[i]]
     rows.sort(key=lambda r: r["id"])
     text = "".join(json.dumps(r, separators=(",", ":")) + "\n" for r in rows)
     (out / "manifest.jsonl").write_text(text, encoding="utf8", newline="\n")

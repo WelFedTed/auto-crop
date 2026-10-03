@@ -45,7 +45,7 @@ Every random choice comes from a stream named by `(seed, keys)` (BLAKE2b into Nu
 | `tests/` (unittest) | plan quotas, camera golden quads (CI fails if ground truth drifts), SSIM with teeth, encode and EXIF round trips, ICC validity, independence from the app, byte-identical regeneration | runs locally and in CI |
 | `check-geometry` | unwarping a render with only its quad matches the clean page, SSIM >= 0.98 (PROVISIONAL, band-limited: both sides are low-passed, sigma 1.5 px; see `verify.unwarp_ssim`) | min 0.994 over 48 renders |
 | `variants` + `auto-crop-eval check-variants` | the repo's Rust decoders return the upright reference for every format x orientation x colour space, ICC byte-exact | 160 of 160 |
-| `check-ocr` | Tesseract 5 character error rate <= 5% on the clean render (PROVISIONAL) | **not run locally (no tesseract on the dev machine); runs in CI** (`.github/workflows/synth.yml`) |
+| `check-ocr` | Tesseract 5 character error rate <= 5% on the clean render at 8 px/mm (about 203 dpi), text layer only (rules, boxes, bar and QR codes carry no transcript), 24 pages cycling the four document layouts and the receipt lengths, `--psm 3` for the two-column report and 6 otherwise (PROVISIONAL) | **not run locally (no tesseract on the dev machine); runs in CI** (`.github/workflows/synth.yml`) |
 
 ## Supply chain
 

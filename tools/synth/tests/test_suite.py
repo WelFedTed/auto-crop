@@ -116,6 +116,36 @@ class SuiteTests(unittest.TestCase):
         self.assertIn("lighting", s["tag_histogram"])
 
 
+def crash_once_worker(task):
+    """A scene worker that kills its own process the first time any worker runs (marker file)."""
+    marker = Path(tempfile.gettempdir()) / f"synth-crash-{os.getppid()}"
+    if not marker.exists():
+        marker.write_text("x")
+        os._exit(1)
+    return suite._render_scene(task)
+
+
+class WorkerDeathTests(unittest.TestCase):
+    def test_a_dying_worker_is_retried_instead_of_hanging_the_run(self):
+        old = os.environ.get("SYNTH_BACKEND")
+        os.environ["SYNTH_BACKEND"] = "builtin"  # the point is the pool, not Augraphy
+        tmp = Path(tempfile.mkdtemp(prefix="synth-crash-test-"))
+        marker = Path(tempfile.gettempdir()) / f"synth-crash-{os.getpid()}"
+        marker.unlink(missing_ok=True)
+        try:
+            suite.generate(tmp / "ref", "w", 9, 6, 160, jobs=1, truth="none", quiet=True)
+            suite.generate(tmp / "crash", "w", 9, 6, 160, jobs=2, truth="none", quiet=True, _worker=crash_once_worker)
+            self.assertTrue(marker.exists(), "the worker never died, so nothing was tested")
+            self.assertEqual(suite.hash_tree(tmp / "ref"), suite.hash_tree(tmp / "crash"))
+        finally:
+            marker.unlink(missing_ok=True)
+            shutil.rmtree(tmp, ignore_errors=True)
+            if old is None:
+                os.environ.pop("SYNTH_BACKEND", None)
+            else:
+                os.environ["SYNTH_BACKEND"] = old
+
+
 @unittest.skipUnless(os.environ.get("SYNTH_BACKEND") != "builtin", "needs Augraphy")
 class BackendTests(unittest.TestCase):
     def test_the_default_backend_is_the_pinned_augraphy(self):

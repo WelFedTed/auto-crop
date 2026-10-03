@@ -42,6 +42,7 @@ class Page:
     """One rendered page: an ink mask plus its ground truth text."""
 
     ink: np.ndarray  # uint8 HxW, 255 = ink (anti-aliased for documents)
+    text_ink: np.ndarray  # the same with only the text (no rules, boxes or bar and QR codes)
     size_mm: tuple[float, float]
     ppm: float
     kind: str  # document | receipt
@@ -65,9 +66,10 @@ class Page:
     def amounts(self) -> list[str]:
         return [t for t in re.split(r"\s+", self.text) if AMOUNT_RE.match(t)]
 
-    def clean_gray(self) -> np.ndarray:
-        """The clean render: black ink on pure white, 8-bit grey (what OCR is scored on)."""
-        return 255 - self.ink
+    def clean_gray(self, text_only: bool = False) -> np.ndarray:
+        """The clean render: black ink on pure white, 8-bit grey. ``text_only`` leaves out rules,
+        boxes and bar and QR codes, which carry no transcript (what OCR is scored on)."""
+        return 255 - (self.text_ink if text_only else self.ink)
 
     def clean_binary(self) -> np.ndarray:
         """The clean binary render: 0 = ink, 255 = paper."""
@@ -83,6 +85,10 @@ class Sheet:
         self.img = Image.new("L", (self.w, self.h), 0)
         self.d = ImageDraw.Draw(self.img)
         self.d.fontmode = "L" if antialias else "1"
+        # A second layer with the text alone, for the OCR acceptance (graphics are not text).
+        self.txt = Image.new("L", (self.w, self.h), 0)
+        self.dt = ImageDraw.Draw(self.txt)
+        self.dt.fontmode = self.d.fontmode
         self.lines: list[str] = []
 
     def px(self, mm: float) -> int:
@@ -97,6 +103,7 @@ class Sheet:
             return
         anchor = {"l": "ls", "r": "rs", "m": "ms"}[align]
         self.d.text((x, y), s, fill=255, font=font, anchor=anchor)
+        self.dt.text((x, y), s, fill=255, font=font, anchor=anchor)
         if record:
             self.lines.append(s)
 
@@ -128,8 +135,8 @@ class Sheet:
             out.append(line)
         return out
 
-    def finish(self) -> np.ndarray:
-        return np.asarray(self.img, dtype=np.uint8).copy()
+    def finish(self) -> tuple[np.ndarray, np.ndarray]:
+        return np.asarray(self.img, dtype=np.uint8).copy(), np.asarray(self.txt, dtype=np.uint8).copy()
 
 
 def _pick_colours(g: Rand, paper: str, thermal: bool):
@@ -306,16 +313,17 @@ def _report(s: Sheet, g: Rand, fam: str, margin: float):
 DOC_LAYOUTS = {"letter": _letter, "invoice": _invoice, "form": _form, "report": _report}
 
 
-def render_document(rng, paper: str, ppm: float = DOC_PPM) -> Page:
+def render_document(rng, paper: str, ppm: float = DOC_PPM, layout: str | None = None) -> Page:
     g = Rand(rng)
     size = g.pick([LETTER_MM, A4_MM])
     fam = g.pick(["sans", "serif"])
-    layout = g.pick(sorted(DOC_LAYOUTS))
+    layout = g.pick(sorted(DOC_LAYOUTS)) if layout is None else layout
     s = Sheet(size, ppm, antialias=True)
     DOC_LAYOUTS[layout](s, g, fam, g.between(16, 24))
     pr, ir = _pick_colours(g, paper, thermal=False)
+    ink, text_ink = s.finish()
     return Page(
-        s.finish(), size, ppm, "document", layout, fam, s.lines, pr, ir, False,
+        ink, text_ink, size, ppm, "document", layout, fam, s.lines, pr, ir, False,
         {"paper_size": "letter" if size == LETTER_MM else "a4"},
     )
 
@@ -424,14 +432,15 @@ def render_receipt(rng, aspect_class: str, paper: str, ppm: float = RECEIPT_PPM)
                 s.text(xm, y, part, f, "m")
                 y += lh
     pr, ir = _pick_colours(g, paper, thermal=True)
+    ink, text_ink = s.finish()
     return Page(
-        s.finish(), (width_mm, height_mm), ppm, "receipt", "receipt", fam, s.lines, pr, ir, True,
+        ink, text_ink, (width_mm, height_mm), ppm, "receipt", "receipt", fam, s.lines, pr, ir, True,
         {"aspect": round(height_mm / width_mm, 3), "items": n, "chars": chars, "total": textgen.money(total + tax)},
     )
 
 
-def render(rng, aspect: str, paper: str, ppm: float | None = None) -> Page:
+def render(rng, aspect: str, paper: str, ppm: float | None = None, layout: str | None = None) -> Page:
     """The page of a scene: a document for ``aspect == "document"``, else a receipt."""
     if aspect == "document":
-        return render_document(rng, paper, DOC_PPM if ppm is None else ppm)
+        return render_document(rng, paper, DOC_PPM if ppm is None else ppm, layout)
     return render_receipt(rng, aspect, paper, RECEIPT_PPM if ppm is None else ppm)

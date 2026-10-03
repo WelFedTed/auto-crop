@@ -199,11 +199,13 @@ def check_ocr(argv: list[str]) -> int:
             kind = kinds[i % len(kinds)]
             rng = R.stream(a.seed, "ocr", i)
             # 8 px per mm is about 203 dpi, the resolution of a thermal print head and a plain scan.
-            pg = pagemod.render(rng, kind, "white", ppm=8.0)
-            gray = pg.clean_gray()
+            layouts = sorted(pagemod.DOC_LAYOUTS)
+            pg = pagemod.render(rng, kind, "white", ppm=8.0, layout=layouts[(i // len(kinds)) % len(layouts)])
+            gray = pg.clean_gray(text_only=True)  # rules, boxes and codes carry no transcript
             path = Path(tmp) / f"p{i}.png"
             cv2.imwrite(str(path), gray)
-            psm = "3" if kind == "document" else "6"
+            # Page segmentation: columns for the report layout, one block of lines otherwise.
+            psm = "3" if pg.layout == "report" else "6"
             r = subprocess.run(
                 ["tesseract", str(path), "stdout", "-l", "eng", "--psm", psm],
                 capture_output=True, text=True, encoding="utf8", errors="replace",
