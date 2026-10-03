@@ -10,7 +10,7 @@ use auto_crop_eval::publish::{PublishableMetrics, check_no_leak};
 use auto_crop_eval::report::summary_text;
 use auto_crop_eval::run::{RunConfig, from_json, run, to_json};
 use auto_crop_eval::stats::MIN_GATE_N;
-use auto_crop_eval::{manifest, noise, selfcheck, synth};
+use auto_crop_eval::{manifest, noise, selfcheck, splits, synth, variants};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::time::Instant;
@@ -35,6 +35,12 @@ Commands:
         Write the publishable aggregate view (no per-image rows; slices n >= 30 only) and leak-check it.
   validate-manifest FILE
         Check a manifest: valid quads, unique ids, relative paths, scene-disjoint splits.
+  check-splits FILE...
+        Fail when a scene_id, scene_seed, group_id, document_id or background_seed appears in two
+        splits, in one manifest or across several (an item without `split` counts as its file).
+  check-variants --dir DIR
+        Decode every format x EXIF orientation x colour-space variant written by
+        `python -m synth variants --out DIR` and require the upright reference back.
   self-check
         Harness self-validation with no dataset (oracle, analytic jitter curve, area fraction,
         crash counting, determinism, gate mutation, calibration).
@@ -247,6 +253,48 @@ fn cmd_validate(a: &Args) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
+fn cmd_check_splits(a: &Args) -> Result<ExitCode, String> {
+    if a.rest.is_empty() {
+        return Err("check-splits needs at least one manifest".to_owned());
+    }
+    let paths: Vec<&Path> = a.rest.iter().map(Path::new).collect();
+    let violations = splits::check_files(&paths)?;
+    if violations.is_empty() {
+        println!(
+            "splits ok: {} manifest(s), no scene or seed spans two splits",
+            paths.len()
+        );
+        Ok(ExitCode::SUCCESS)
+    } else {
+        for v in &violations {
+            eprintln!("SPLIT LEAK {v}");
+        }
+        eprintln!("{} leak(s)", violations.len());
+        Ok(ExitCode::from(1))
+    }
+}
+
+fn cmd_check_variants(a: &Args) -> Result<ExitCode, String> {
+    let dir = PathBuf::from(a.required("--dir")?);
+    let r = variants::check_dir(&dir)?;
+    println!(
+        "variants: {} decoded ({} lossless exact, {} lossy within bound; worst lossy mean abs error {:.3}), {} failure(s)",
+        r.checked,
+        r.lossless,
+        r.checked - r.lossless,
+        r.worst_lossy_error,
+        r.failures.len()
+    );
+    for f in &r.failures {
+        eprintln!("VARIANT {f}");
+    }
+    Ok(if r.failures.is_empty() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    })
+}
+
 fn cmd_self_check() -> Result<ExitCode, String> {
     // The crash-counting check plants panics on purpose; keep their reports out of the log.
     let default = std::panic::take_hook();
@@ -289,6 +337,8 @@ fn main() -> ExitCode {
         "noise-floor" => cmd_noise_floor(&a),
         "publish" => cmd_publish(&a),
         "validate-manifest" => cmd_validate(&a),
+        "check-splits" => cmd_check_splits(&a),
+        "check-variants" => cmd_check_variants(&a),
         "self-check" => cmd_self_check(),
         "" | "help" | "--help" | "-h" => {
             print!("{HELP}");

@@ -9,9 +9,11 @@
 //! * Metric core, independent of the code it measures (imports no project crate): [`geom`],
 //!   [`metrics`], [`stats`], [`calib`].
 //! * Data and plumbing: [`manifest`], [`predictor`], [`run`], [`report`], [`compare`], [`noise`],
-//!   [`publish`] (the publishing guard type) and [`selfcheck`].
-//! * Adapters and data that do use the app crates: [`detector`] (the real classical detector) and
-//!   [`synth`] (a stand-in synthetic suite writer).
+//!   [`publish`] (the publishing guard type), [`splits`] (`check-splits`) and [`selfcheck`].
+//! * Adapters and data that do use the app crates: [`detector`] (the real classical detector),
+//!   [`synth`] (the Rust STAND-IN synthetic suite writer; the real generator is the Python tool in
+//!   `tools/synth`) and [`variants`] (the decoder check on the generator's format, EXIF and
+//!   colour-space variants).
 //!
 //! Synthetic numbers detect regressions between builds. They never back a real-world accuracy
 //! claim, and nothing here may publish a per-image row (golden-set policy, B21).
@@ -28,8 +30,10 @@ pub mod publish;
 pub mod report;
 pub mod run;
 pub mod selfcheck;
+pub mod splits;
 pub mod stats;
 pub mod synth;
+pub mod variants;
 
 #[cfg(test)]
 mod independence {
