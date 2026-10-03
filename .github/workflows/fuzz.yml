@@ -68,7 +68,7 @@ jobs:
             pull_request)
               # HEAD is the merge of the PR into its base: HEAD^1 is the base, so this is the PR's diff.
               if files=$(git diff --name-only HEAD^1 HEAD 2>/dev/null); then
-                if ! printf '%s\n' "$files" | grep -Eq '^(crates/(codecs|core)/|fuzz/|\.github/workflows/fuzz\.yml$)'; then
+                if ! printf '%s\n' "$files" | grep -Eq '^(crates/(codecs|core)/|fuzz/|Cargo\.(toml|lock)$|\.github/workflows/fuzz\.yml$)'; then
                   run=false
                 fi
               fi
