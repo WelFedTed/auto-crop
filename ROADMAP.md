@@ -23,7 +23,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 |---|---|---|---|---|---|
 | P | Planning | none | documents | - | 4 / 5 (80%) |
 | M0 | Foundations and week-1 spikes | none | CI only (Windows, macOS, Linux) | XL | 49 / 94 (52%) |
-| M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 38 / 94 (40%) |
+| M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 39 / 94 (41%) |
 | M2 | Classical pipeline, safe writes and CLI | v0.1.0 | Windows 10/11 x64 | L | 0 / 93 (0%) |
 | M3 | GUI alpha: single-image editor | v0.2.0 | Windows 10/11 x64 | XL | 0 / 94 (0%) |
 | M4 | ML detection, orientation and calibrated confidence | v0.3.0 | Windows 10/11 x64 | XL | 0 / 90 (0%) |
@@ -39,7 +39,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | X | Continuous and cross-cutting | - | - | - | 0 / 42 (0%) |
 | X | Post-1.0 backlog (1.x) | - | - | - | 0 / 43 (0%) |
 | X | Spikes and open decisions | - | - | - | 0 / 28 (0%) |
-| **Total** | | | | | **91 / 1407 (6%)** |
+| **Total** | | | | | **92 / 1407 (6%)** |
 <!-- progress:end -->
 
 ## Why this order
@@ -287,8 +287,8 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 
 ### Security/Legal
 - [x] **M1.69 Hostile-file corpus** - `xtask make-hostile` writes bombs and corruptions (60000x60000 and 100 MP headers, zlib bomb, IFD floods, truncations, cyclic EXIF); each runs in a subprocess and returns an `ErrKind` or bounded decode, 3 OSes per PR. _(gate: 0 panics, aborts, hangs)_ Result: 89 hostile files, 0 panics, aborts or hangs on windows-2025, macos-latest, ubuntu-22.04 (`xtask/tests/hostile.rs`).
-- [ ] **M1.70 cargo-fuzz targets** - `fuzz/` (cargo-fuzz 0.13, nightly, Linux only): `probe`, `limits`, `metadata` (EXIF, ICC), `editstate_json` (parse and migrate never panic); seeds from fixtures and hostile files; ASan on turbojpeg targets. Acceptance: 5 minutes per target without a crash.
-- [ ] **M1.71 Fuzz CI and crash replay** - 60 s smoke per target on PRs touching `codecs`, `core` or `fuzz/` (path filter inside the job) and 1 h per target nightly (counts toward >= 72 h per target before 1.0); crashers become plain `#[test]` inputs on 3 OSes. _(gate: fuzz smoke green)_
+- [x] **M1.70 cargo-fuzz targets** - `fuzz/` (cargo-fuzz 0.13, nightly, Linux only): `probe`, `limits`, `metadata` (EXIF, ICC), `editstate_json` (parse and migrate never panic); seeds from fixtures and hostile files; ASan on turbojpeg targets. Acceptance: 5 minutes per target without a crash. Verified: manual 5-minute run (4 targets, 0.45-8.4 M executions each) green; the fuzzers found and fixed a zune-jpeg AVX2 panic (such 4:2:0 one-scan-per-component JPEGs are now `UnsupportedFeature`) and a serde_json float round-trip bug. Turbojpeg ASan targets not added yet.
+- [ ] **M1.71 Fuzz CI and crash replay** - 60 s smoke per target on PRs touching `codecs`, `core` or `fuzz/` (path filter inside the job) and 1 h per target nightly (counts toward >= 72 h per target before 1.0); crashers become plain `#[test]` inputs on 3 OSes. _(gate: fuzz smoke green)_ Status: 60 s PR smoke ran green (path filter inside the job) and crasher replay passes on 3 OSes; the 1 h nightly has not run yet (first run 02:23 UTC), so this stays open until it does.
 - [x] **M1.72 CI policy guards** - Extends M0.31 (its `check-profiles` owns the `panic = "abort"` ban): `xtask ci-guards` adds `unsafe` only inside `ffi/` and `simd/` with `// SAFETY:` comments and no HTTP, TLS or socket crates in shipped crates (B18, C4). Acceptance: each guard has a red test.
 - [x] **M1.73 Licence gates for M1 deps** - `cargo deny check` green for the M1 crates (`image`, `fast_image_resize`, `turbojpeg`, `blake3`, `image-compare`, bench/test tools); bans confirmed (`dssim-core`, `heic`, `jpegxl-rs`, x264/x265, `purecv`, `opencv`); IJG notices in THIRD_PARTY_NOTICES.
 - [x] **M1.74 Provenance register and data policy** - `docs/provenance.md` lists every tool, font, dataset and weight in use with SPDX licence, use and source (datasets, weights: models-repo log) plus an excluded list; CONTRIBUTING gains the B21 rule: no real photos in PRs, aggregate-only metrics.
