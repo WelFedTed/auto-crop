@@ -90,8 +90,23 @@ fn heif(prefix: &Path) {
         "cargo:rustc-env=AUTOCROP_HEIF_INCLUDE={}",
         heif_dir.display()
     );
-    link_dir(&prefix.join("lib"));
-    println!("cargo:rustc-link-lib=dylib=heif");
+    let lib = prefix.join("lib");
+    if env::var_os("AUTOCROP_HEIF_STATIC").is_some() {
+        // For the sanitizer job: libheif, libde265 (linked in, no plugin) and dav1d built as static
+        // archives with -fsanitize=address, so overruns inside the C code are caught too.
+        println!("cargo:rustc-link-search=native={}", lib.display());
+        for l in ["heif", "de265", "dav1d"] {
+            println!("cargo:rustc-link-lib=static={l}");
+        }
+        match env::var("CARGO_CFG_TARGET_OS").unwrap_or_default().as_str() {
+            "macos" => println!("cargo:rustc-link-lib=dylib=c++"),
+            "windows" => {}
+            _ => println!("cargo:rustc-link-lib=dylib=stdc++"),
+        }
+    } else {
+        link_dir(&lib);
+        println!("cargo:rustc-link-lib=dylib=heif");
+    }
 }
 
 fn main() {
@@ -100,6 +115,7 @@ fn main() {
     println!("cargo:rerun-if-changed=native_header.rs");
     println!("cargo:rerun-if-env-changed=AUTOCROP_NATIVE_PREFIX");
     println!("cargo:rerun-if-env-changed=AUTOCROP_TURBOJPEG_STATIC");
+    println!("cargo:rerun-if-env-changed=AUTOCROP_HEIF_STATIC");
     let want_turbo = env::var_os("CARGO_FEATURE_TURBOJPEG").is_some();
     let want_heif = env::var_os("CARGO_FEATURE_HEIF").is_some();
     if !want_turbo && !want_heif {

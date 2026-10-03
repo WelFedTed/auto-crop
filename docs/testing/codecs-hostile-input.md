@@ -7,7 +7,7 @@ Roadmap: M1.12 (sniff and probe), M1.13 (`DecodeLimits`), M1.14 (decode guard), 
 ```
 cargo test -p auto-crop-codecs        # 79 tests (+1 ignored timing test): 39-fixture probe table, limits, decode, orientation,
                                       # mutation sweep, lossless JPEG transforms
-cargo xtask make-hostile              # 89 hostile files, each decoded in its own process
+cargo xtask make-hostile              # 128 hostile files, each decoded in its own process
 cargo xtask make-hostile --only png   # a subset (substring of the case name)
 ```
 
@@ -36,7 +36,7 @@ cargo xtask make-hostile --only png   # a subset (substring of the case name)
 | Truncations at 3 B, 20 B, 10%, 50%, 99%, -1 B of JPEG, progressive JPEG, PNG, Adam7 PNG, TIFF, WebP, animated WebP | typed errors, or `ok` when the image data is complete (a PNG missing its last CRC byte, an animated WebP cut after frame 0) |
 | Byte-mutation sweep (every byte of every header region, 4 values; every truncation) over 39 generated fixtures | 0 caught panics |
 
-Gate (M1.69): 0 panics, 0 aborts, 0 hangs and 0 budget misses over 89 files, per OS through `cargo test -p xtask`. A caught decoder panic (`InternalPanic`) counts as a panic in this gate, not as a pass.
+Gate (M1.69): 0 panics, 0 aborts, 0 hangs and 0 budget misses over 128 files (89 plus the 39 HEIF and AVIF cases), per OS through `cargo test -p xtask`. A caught decoder panic (`InternalPanic`) counts as a panic in this gate, not as a pass.
 
 ## Decode accuracy (measured)
 
@@ -96,3 +96,30 @@ Everything here runs in `.github/workflows/turbojpeg.yml` (the pinned libjpeg-tu
 | Encoders (M1.21) | libjpeg-turbo q90 4:2:0 round trip 47.8 dB on a smooth gradient and 40.3 dB on a noisy photo-like image; `jpeg-encoder` q90 47.4 dB; both embed the ICC profile byte-exact and the JFIF density; 8-bit and 16-bit PNG (RGB and grey) are bit-exact and carry `pHYs` and `iCCP` |
 
 Open policy points: `STOPONWARNING` also refuses files with harmless warnings (extraneous bytes before a marker), which zune-jpeg accepts; CMYK JPEGs fall back to the safe path because TurboJPEG cannot convert them to RGB; iMCU sizes come from TurboJPEG's subsampling table, so an unusual sampling (for example 3x1) is `UnsupportedFeature` for transforms.
+
+## HEIC, HEIF and AVIF (header walk always, libheif and dav1d with feature `heif`)
+
+Decision: [ADR-0009](../adr/0009-heif-decode-backend.md); build and run guide: [heif-native.md](heif-native.md). The header walk (`parse/heif.rs`) is safe Rust in every build and is covered by the probe table (15 committed AVIF files plus generated containers with `clap`, `irot`, `imir`, ICC and extra items: size, depth, frames, orientation as EXIF value and ICC all asserted), the byte-mutation and truncation sweeps of `suite/mutation.rs` (which also run libheif and dav1d when the feature is on) and the hostile corpus.
+
+Hostile cases (`hostile.rs`, 39 files; each decodes in its own process under `cargo xtask make-hostile`, with the feature through `cargo run -p xtask --features heif -- make-hostile`):
+
+| Case | Typed outcome (feature on) |
+|---|---|
+| `ispe` 60000 x 60000, 65535 x 65535, 4G x 4G, 10000 x 10001 (100 MP + 1), clean aperture 16 x 16 over a 60000 x 60000 `ispe`, a grid canvas of 60000 x 60000 | `too_large`, 0 ms, 0.0 MiB (rejected from the header, libheif never sees the file) |
+| `ispe` 0 x 0, `meta` box size 4 GiB, ftyp-only file | `corrupt` |
+| 20,000 items, `iinf` claiming 4 billion entries, an Exif item claiming 4 GiB | `limit_exceeded` (frames / metadata caps), 0 ms |
+| a valid structure without coded data (AVIF and HEIC), an image sequence structure | `corrupt` from libheif, 2 to 5 ms |
+| a grid of 4096 tiles over a 1024 x 1024 canvas (AVIF and HEIC) | `limit_exceeded` (libheif's own item limit), 2 ms, 0.1 MiB |
+| truncations of real files (3 B, 20 B, 10%, 50%, 90%, 99%, minus 1 B) of the gradient, 10-bit and sequence fixtures | `corrupt` (a box overruns its parent), never a decode of a partial image |
+| 4 MiB of noise after an `avif` or `heic` ftyp | `corrupt`, 0 ms |
+
+The Rust-side heap column of the corpus runner counts only Rust allocations: libheif and dav1d allocate with the C allocator, which the counting allocator does not see (the libheif security limits, set from the same caps, are what bound that memory).
+
+Limits applied to HEIF (PLAN 3.10.1): `max_pixels` and the memory estimate on the `ispe` size and on the size after the transformations, then `heif_security_limits` with `max_image_size_pixels`, `max_number_of_tiles` (65,536), `max_color_profile_size` (the metadata cap), `max_memory_block_size` and `max_total_memory` (the memory estimate) lowered to ours and never to zero (zero means unlimited to libheif); libheif's own `max_items` (1000) stays. The decoder's deadline is `max_decode_ms` through libheif's cancel callback.
+
+Findings while testing:
+
+1. **`imir` axis**: libavif and libheif flip top-bottom for axis 0 and left-right for axis 1 (the Pillow-made fixtures for EXIF orientations 2 to 8 pin it; the first version of the walk had it the other way round and the probe table caught it).
+2. **HEIF `mif3` "mini" files** have the codec in the `ftyp` minor version and a bit-packed `mini` box instead of `meta`; the sniffer reads the minor version, the header walk reports `UnsupportedFeature` naming the layout.
+3. **libheif versus our caps**: libheif's default `max_items` is 1000, lower than our frame cap of 10,000, so a file with 1001 to 10,000 items passes the header walk and is refused by libheif as `limit_exceeded`.
+4. **dav1d prints to stderr** (`Error parsing OBU data`) for damaged coded data; harmless, not silenceable through libheif.

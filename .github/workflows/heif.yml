@@ -171,3 +171,38 @@ jobs:
             cat target/heif-timing.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  asan:
+    # AddressSanitizer over the whole stack: libde265, dav1d and libheif are built from the same pins
+    # with clang -fsanitize=address as static archives (libde265 linked in, no plugin) and the heif
+    # tests run on nightly Rust with the sanitizer, so overruns inside the C and C++ code are caught
+    # as well as misuse on the Rust side. Best-effort: the instrumented build is not what ships.
+    name: AddressSanitizer (ubuntu-22.04, best-effort)
+    runs-on: ubuntu-22.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install NASM, Meson, Ninja and clang
+        run: sudo apt-get update && sudo apt-get install -y nasm meson ninja-build clang
+      - name: Nightly toolchain (sanitizers need it)
+        run: rustup toolchain install nightly --profile minimal --target x86_64-unknown-linux-gnu
+      - name: Build libde265, dav1d and libheif with AddressSanitizer (static)
+        env:
+          CC: clang
+          CXX: clang++
+          CFLAGS: -fsanitize=address -fno-omit-frame-pointer -g -O1
+          CXXFLAGS: -fsanitize=address -fno-omit-frame-pointer -g -O1
+          AUTOCROP_CMAKE_ARGS: -DBUILD_SHARED_LIBS=OFF -DWITH_LIBDE265_PLUGIN=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+          AUTOCROP_MESON_ARGS: -Ddefault_library=static -Db_sanitize=address -Db_lundef=false
+        run: cargo xtask build-native --only libde265,dav1d,libheif
+      - name: Tests under AddressSanitizer
+        env:
+          AUTOCROP_NATIVE_PREFIX: ${{ github.workspace }}/target/native/prefix
+          AUTOCROP_HEIF_STATIC: "1"
+          AUTOCROP_REQUIRE_HEIF_SAMPLES: "1"
+          RUSTFLAGS: -Zsanitizer=address
+          RUSTDOCFLAGS: -Zsanitizer=address
+          ASAN_OPTIONS: detect_leaks=0:abort_on_error=0:halt_on_error=1
+        run: cargo +nightly test -p auto-crop-codecs --features heif --target x86_64-unknown-linux-gnu --lib -- --nocapture

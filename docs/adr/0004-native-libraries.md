@@ -68,3 +68,7 @@ M1.18 was written as "enable the `turbojpeg` 1.5.x crate". Before wiring it into
 Revisit if the crate gains a version floor and a prefix-aware build (or a maintained fork does), or if the binding grows beyond about 25 functions.
 
 The version check is enforced three ways, each with a negative test: `xtask check-native` (header edited to 3.1.0 is rejected, `native.yml`), `build.rs` (`cargo build --features turbojpeg` against a header edited to 3.1.0 fails with "older than 3.1.4", `turbojpeg.yml`, unit-tested in `native_header.rs`), and the manifest check (`native-deps.toml` below its `min_version` is rejected). A real libjpeg-turbo 3.1.0 build is not exercised: the pin is 3.2.0, and an edited header proves the gate, not the library.
+
+## Update 2026-10-04: dav1d is built and linked (ADR-0009)
+
+`cargo xtask build-native` now also builds **dav1d 1.5.4** (`build = "meson"`, shared; needs meson, ninja and NASM on x86) before libheif, which is configured with `WITH_DAV1D=ON` and no other AV1 codec. `check-native` allows `dav1d` and fails on AV1 encoder symbols (`aom_codec_av1_cx`, `rav1e_context_new`, `svt_av1_enc_init`) and on a libheif that does not link dav1d (a unit-tested rule plus a planted-symbol negative test in `native.yml`). The AVIF decoder is therefore no longer an "open item"; ONNX Runtime, libjxl and libwebp still are.

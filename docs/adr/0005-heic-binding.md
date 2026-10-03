@@ -44,3 +44,7 @@ Fedora is a best-effort cell (see ADR-0004).
 - M6 builds the worker routes, metadata (EXIF, ICC, `irot`/`imir`) and colour handling on this binding, and a Windows packaging item decides the plugin directory for relocated installs.
 - The 1x1 fixture proves the pipeline but not colour correctness; the real-device corpus (M0.49, M6) covers that.
 - **Revisit trigger:** a maintained permissive pure-Rust HEVC/HEIC decoder (D4, about six months), or a libheif API change that breaks the ten bound functions.
+
+## Update 2026-10-04: the backend exists in `codecs` (ADR-0009)
+
+The binding of this spike now lives in `crates/codecs/src/heif/ffi/` behind the cargo feature `heif`, with a safe wrapper that applies `heif_security_limits`, orientation, ICC and the typed errors (`HevcDecoderMissing` included). The `HeicBackend` trait of `core::ports` is **not** wired yet: the engine calls `codecs::decode` in-process, and the sandboxed worker pool (ADR-0006) is still M6 work. AVIF goes through the same library with dav1d.
