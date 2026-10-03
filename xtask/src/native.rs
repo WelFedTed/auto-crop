@@ -5,8 +5,9 @@
 //!
 //! Reads `native-deps.toml`, fetches every archive with `curl`, **refuses any
 //! download whose SHA-256 differs from the pin**, extracts it with `tar` and builds
-//! the `build = "cmake"` entries into `target/native/prefix`. Build order follows
-//! the dependency order: libde265, libjpeg-turbo, libheif.
+//! the `build = "cmake"` entries (and the `build = "meson"` entry, dav1d) into
+//! `target/native/prefix`. Build order follows the dependency order: libde265,
+//! libjpeg-turbo, dav1d, libheif (which links dav1d for AVIF).
 
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -18,7 +19,7 @@ use std::process::Command;
 const MANIFEST: &str = "native-deps.toml";
 const BANNED: &[&str] = &["x265", "x264", "kvazaar", "libx265", "libx264"];
 /// Build order for the entries this command knows how to build.
-const ORDER: &[&str] = &["libde265", "libjpeg-turbo", "libheif"];
+const ORDER: &[&str] = &["libde265", "libjpeg-turbo", "dav1d", "libheif"];
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Lib {
@@ -241,6 +242,42 @@ fn build_cmake(lib: &Lib, src: &Path, build: &Path, prefix: &Path) -> Result<(),
     )
 }
 
+/// Whitespace-separated `AUTOCROP_MESON_ARGS`, appended after the manifest flags.
+fn extra_meson_args() -> Vec<String> {
+    split_args(&std::env::var("AUTOCROP_MESON_ARGS").unwrap_or_default())
+}
+
+/// Builds a `build = "meson"` entry (dav1d). `meson` and `ninja` must be on `PATH`; on Windows
+/// meson activates the Visual Studio environment itself when `cl` is not already on `PATH`; on x86
+/// dav1d's assembly needs NASM (`nasm` on `PATH`).
+fn build_meson(lib: &Lib, src: &Path, build: &Path, prefix: &Path) -> Result<(), String> {
+    let mut cfg = Command::new("meson");
+    cfg.arg("setup").arg(build).arg(src);
+    cfg.arg(format!("--prefix={}", prefix.display()));
+    // `lib`, not the multiarch directory Debian-style systems would pick, so every OS has the
+    // same layout and `prefix/lib` is the one search path.
+    cfg.args(["--libdir=lib", "--buildtype=release"]);
+    cfg.args(&lib.flags);
+    // One-off builds (a sanitizer job: `AUTOCROP_MESON_ARGS="-Db_sanitize=address"`); they come
+    // after the manifest flags, so they win; the pin and the hash check are unchanged.
+    cfg.args(extra_meson_args());
+    run_cmd(
+        &mut cfg,
+        &format!(
+            "meson setup {} (are meson and ninja on PATH? `pip install meson ninja`)",
+            lib.name
+        ),
+    )?;
+    run_cmd(
+        Command::new("meson").arg("compile").arg("-C").arg(build),
+        &format!("meson compile {}", lib.name),
+    )?;
+    run_cmd(
+        Command::new("meson").arg("install").arg("-C").arg(build),
+        &format!("meson install {}", lib.name),
+    )
+}
+
 pub fn run(args: &[String]) -> Result<(), String> {
     let only: Option<Vec<String>> = args
         .iter()
@@ -289,8 +326,17 @@ pub fn run(args: &[String]) -> Result<(), String> {
         let src_parent = work.join("src");
         let _ = fs::remove_dir_all(&src_parent);
         let src = extract(&archive, &src_parent)?;
-        println!("== {}: building (cmake)", lib.name);
-        build_cmake(lib, &src, &work.join("build"), &prefix)?;
+        println!("== {}: building ({})", lib.name, lib.build);
+        match lib.build.as_str() {
+            "cmake" => build_cmake(lib, &src, &work.join("build"), &prefix)?,
+            "meson" => build_meson(lib, &src, &work.join("build"), &prefix)?,
+            other => {
+                return Err(format!(
+                    "{}: build system `{other}` cannot be built here",
+                    lib.name
+                ));
+            }
+        }
     }
     println!("build-native: done; prefix {}", prefix.display());
     Ok(())
@@ -393,6 +439,29 @@ mod tests {
         for name in ["dav1d", "libjxl", "libwebp"] {
             assert!(libs.iter().any(|l| l.name == name), "{name}");
         }
+        // AVIF: libheif links dav1d (BSD-2); no other AV1 decoder and no AV1 or HEVC encoder.
+        let heif = libs.iter().find(|l| l.name == "libheif").unwrap();
+        for want in [
+            "-DWITH_DAV1D=ON",
+            "-DWITH_AOM_DECODER=OFF",
+            "-DWITH_AOM_ENCODER=OFF",
+            "-DWITH_RAV1E=OFF",
+            "-DWITH_SvtEnc=OFF",
+            "-DWITH_X265=OFF",
+            "-DWITH_X264=OFF",
+            "-DWITH_LIBDE265_PLUGIN=ON",
+        ] {
+            assert!(heif.flags.iter().any(|f| f == want), "libheif flag {want}");
+        }
+        let dav1d = libs.iter().find(|l| l.name == "dav1d").unwrap();
+        assert_eq!(
+            (dav1d.build.as_str(), dav1d.version.as_str()),
+            ("meson", "1.5.4")
+        );
+        assert!(dav1d.flags.iter().any(|f| f == "-Ddefault_library=shared"));
+        // dav1d has to be installed before libheif is configured, or WITH_DAV1D=ON finds nothing.
+        let pos = |n: &str| ORDER.iter().position(|x| *x == n).unwrap();
+        assert!(pos("dav1d") < pos("libheif"));
         assert!(libs.iter().any(|l| l.name.starts_with("onnxruntime")));
     }
 }

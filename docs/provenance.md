@@ -27,7 +27,7 @@ LGPL libraries are separate, dynamically linked, replaceable shared libraries (B
 | `libde265` | native library | LGPL-3.0-or-later | HEVC decoding plugin for libheif; decoder only (B12) | https://github.com/strukturag/libde265 | verified 2026-10-02 (native-deps.toml) |
 | `libheif` | native library | LGPL-3.0-or-later | HEIF and HEIC container decoding; decode-only build, no x265 | https://github.com/strukturag/libheif | verified 2026-10-02 (native-deps.toml) |
 | `libjpeg-turbo` | native library | IJG AND BSD-3-Clause AND Zlib | fast JPEG decode, scaled decode, lossless transforms (M1); IJG acknowledgement in the third-party notices | https://github.com/libjpeg-turbo/libjpeg-turbo | verified 2026-10-02 (native-deps.toml) |
-| `dav1d` | native library | BSD-2-Clause | AV1 decoding for AVIF; pinned, built from M6 | https://code.videolan.org/videolan/dav1d | verified 2026-10-02 (native-deps.toml) |
+| `dav1d` | native library | BSD-2-Clause | AV1 decoding for AVIF, linked into libheif (shared library built by `cargo xtask build-native` with meson; WITH_DAV1D=ON); the BSD-2 text ships in the third-party notices | https://code.videolan.org/videolan/dav1d | verified 2026-10-04 (native-deps.toml, COPYING of the 1.5.4 archive) |
 | `libjxl` | native library | BSD-3-Clause | JPEG XL; pinned, built from M11 | https://github.com/libjxl/libjxl | verified 2026-10-02 (native-deps.toml) |
 | `libwebp` | native library | BSD-3-Clause | WebP encoding; pinned, built from M11 | https://github.com/webmproject/libwebp | verified 2026-10-02 (native-deps.toml) |
 | `onnxruntime-win-x64` | native library (prebuilt) | MIT | model inference runtime for ort; not yet shipped | https://github.com/microsoft/onnxruntime | verified 2026-10-02 (native-deps.toml) |
@@ -71,7 +71,8 @@ GPL-licensed tools below are executed as separate programs for measurement and c
 | `uv` | dev tool | MIT OR Apache-2.0 | regenerates `requirements.lock` only | https://github.com/astral-sh/uv | verified 2026-10-02 (package metadata, 0.12.22) |
 | `cmake` | build tool | BSD-3-Clause | builds the native libraries | https://cmake.org | to verify |
 | `ninja` | build tool | Apache-2.0 | native build backend | https://ninja-build.org | to verify |
-| `nasm` | build tool | BSD-2-Clause | SIMD assembly for libjpeg-turbo on x86 | https://www.nasm.us | to verify |
+| `nasm` | build tool | BSD-2-Clause | SIMD assembly for libjpeg-turbo and dav1d on x86 | https://www.nasm.us | to verify |
+| `meson` | build tool | Apache-2.0 | builds dav1d (`cargo xtask build-native`; `pip install meson ninja`) | https://mesonbuild.com | to verify |
 | `node` | build tool | MIT | builds the UI (Vite, Svelte) | https://nodejs.org | to verify |
 | `valgrind` | dev tool | GPL-2.0-or-later | heap and leak profiling on Linux (M1.60), run only | https://valgrind.org | to verify |
 | `gungraun` / `gungraun-runner` | dev tool (crate, CI binary) | Apache-2.0 OR MIT | Valgrind instruction-count benchmarks and the PR gate (M1.58); `gungraun` is a dev-dependency of `crates/imgproc-bench`, `gungraun-runner` 0.20.0 is installed by `perf-gate.yml`; neither is shipped | https://github.com/gungraun/gungraun | verified 2026-10-03 (crates.io metadata, 0.20.0) |
@@ -102,6 +103,8 @@ Nothing is downloaded or committed today. Weights: none used. The public corpora
 | `engine EditState fixtures` | test data | MIT OR Apache-2.0 | `crates/engine/fixtures/editstate/*.json`, hand-written | this repository | verified 2026-10-02 |
 | `imgproc oracle fixtures` | test data | MIT OR Apache-2.0 | `crates/imgproc/tests/fixtures/*.json`, numbers produced by `tools/imgproc-oracles` | this repository | verified 2026-10-02 |
 | `libheif conformance_window_padding.heic` | test image | to verify (libheif source tree, LGPL-3.0-or-later) | HEIC decode check in the native CI job; read from the extracted libheif release archive, never committed | libheif release archive in `native-deps.toml` | to verify the per-file licence before any redistribution |
+| `libheif archive HEIF test files` | test images | to verify (libheif source tree, LGPL-3.0-or-later) | the `heif` feature tests of `auto-crop-codecs` read `rainbow-451x461.heic`, `with-alpha-512x512.heic`, `clap_cropped*.heic/.avif`, `clap_oversized_ispe_*.avif`, `examples/example.avif`, the mini-layout `simple_osm_tile_*.avif` and `lightning_mini.heif` and four files of `fuzzing/data/corpus` (AVC, JPEG, J2K and VVC codecs) in place from the extracted release archive after the SHA-256 check; never copied or committed | libheif release archive in `native-deps.toml` | to verify the per-file licences before any redistribution |
+| `heif AVIF fixtures` | test images | MIT OR Apache-2.0 | `crates/codecs/tests/fixtures/heif/*.avif` (15 files, 18 KB) and `icc-srgb.icc`: procedural pictures (gradient, four coloured corner squares, a diagonal; nothing copied) written by `make_heif_fixtures.py` with Pillow 12.3.0 (libavif and aom, BSD-2-Clause, inside the wheel) and, for the 10-bit file, ImageMagick; the sRGB profile is the one Little CMS (MIT) builds for Pillow's `ImageCms.createProfile("sRGB")`. The encoders are tools used to make the files, not part of Auto Crop | this repository | verified 2026-10-04 |
 | `private golden set` | real photos and scans | not applicable (private) | accuracy evaluation; lives only on the maintainer's encrypted disk and in the private `auto-crop-golden` repo; only aggregate metrics leave it | [golden-set policy](testing/golden-set.md) | B21 |
 
 ### Rust crates and npm code packages

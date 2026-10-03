@@ -15,7 +15,16 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const ALLOWED: &str = "packaging/allowed-libs.txt";
-const FORBIDDEN: &[&str] = &["x265_", "x264_"];
+/// Symbol prefixes that must never appear in a built library: the GPL encoders (B12) and the
+/// encoders of the AV1 family, which the decode-only build leaves out (libaom's and rav1e's
+/// encoder entry points, SVT-AV1's encoder handle). dav1d's own `dav1d_` symbols are expected.
+const FORBIDDEN: &[&str] = &[
+    "x265_",
+    "x264_",
+    "aom_codec_av1_cx",
+    "rav1e_context_new",
+    "svt_av1_enc_init",
+];
 /// libjpeg-turbo 3.1.4 as LIBJPEG_TURBO_VERSION_NUMBER.
 const JPEG_TURBO_FLOOR: u32 = 3_001_004;
 
@@ -45,6 +54,24 @@ pub fn libs_needed(bytes: &[u8]) -> Result<Vec<String>, String> {
         .into_iter()
         .map(|n| n.rsplit(['/', '\\']).next().unwrap_or(&n).to_lowercase())
         .collect())
+}
+
+/// True for the main libheif library (not a plugin such as `heif-libde265`).
+pub fn is_libheif(path: &Path) -> bool {
+    let n = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    let stem = n.strip_prefix("lib").unwrap_or(&n);
+    stem.starts_with("heif") && !stem.starts_with("heif-")
+}
+
+/// True when the dependencies of libheif include dav1d (AVIF is read through it).
+pub fn links_dav1d(needed: &[String]) -> bool {
+    needed
+        .iter()
+        .any(|n| n.starts_with("dav1d") || n.starts_with("libdav1d"))
 }
 
 /// Allow-list lines: one name per line, `#` comments; a trailing `*` matches any suffix.
@@ -144,6 +171,18 @@ pub fn run(args: &[String]) -> Result<(), String> {
         match libs_needed(&bytes) {
             Ok(needed) => {
                 println!("{}: needs {}", lib.display(), needed.join(", "));
+                if is_libheif(lib) {
+                    // AVIF is read through dav1d (decision B12, PLAN 3.4.2): a libheif that does
+                    // not link it would silently drop AVIF support.
+                    if links_dav1d(&needed) {
+                        println!("{}: links dav1d (AVIF)", lib.display());
+                    } else {
+                        problems.push(format!(
+                            "{}: libheif does not link dav1d (build with WITH_DAV1D=ON)",
+                            lib.display()
+                        ));
+                    }
+                }
                 for n in needed.iter().filter(|n| !is_allowed(n, &allow)) {
                     problems.push(format!(
                         "{}: dependency `{n}` is not on {ALLOWED}",
@@ -195,6 +234,48 @@ mod tests {
         assert_eq!(forbidden_symbols(b"..x265_encoder_open.."), vec!["x265_"]);
         assert_eq!(forbidden_symbols(b"x264_encoder_open x265_param").len(), 2);
         assert!(forbidden_symbols(b"libde265 decoder only").is_empty());
+    }
+
+    #[test]
+    fn av1_encoders_are_forbidden_but_the_dav1d_decoder_is_fine() {
+        assert_eq!(
+            forbidden_symbols(b"..aom_codec_av1_cx.."),
+            vec!["aom_codec_av1_cx"]
+        );
+        assert_eq!(forbidden_symbols(b"rav1e_context_new").len(), 1);
+        assert_eq!(forbidden_symbols(b"svt_av1_enc_init_handle").len(), 1);
+        assert!(forbidden_symbols(b"dav1d_open dav1d_send_data dav1d_get_picture").is_empty());
+    }
+
+    #[test]
+    fn libheif_is_told_from_its_plugins_and_must_link_dav1d() {
+        for yes in [
+            "heif.dll",
+            "libheif.so.1.23.5",
+            "libheif.1.dylib",
+            "libheif.so",
+        ] {
+            assert!(is_libheif(Path::new(yes)), "{yes}");
+        }
+        for no in [
+            "heif-libde265.dll",
+            "libheif-libde265.so",
+            "libde265.so.0",
+            "turbojpeg.dll",
+        ] {
+            assert!(!is_libheif(Path::new(no)), "{no}");
+        }
+        assert!(links_dav1d(&["dav1d.dll".into(), "kernel32.dll".into()]));
+        assert!(links_dav1d(&["libdav1d.so.7".into()]));
+        assert!(links_dav1d(&["libdav1d.7.dylib".into()]));
+        assert!(!links_dav1d(&["libde265.so.0".into(), "libc.so.6".into()]));
+        // dav1d is on the allow-list (system libraries only otherwise).
+        let allow = parse_allow(&std::fs::read_to_string("../packaging/allowed-libs.txt").unwrap());
+        for ok in ["dav1d.dll", "libdav1d.so.7", "libdav1d.7.dylib"] {
+            assert!(is_allowed(ok, &allow), "{ok}");
+        }
+        assert!(!is_allowed("libaom.so.3", &allow));
+        assert!(!is_allowed("libx265.so.199", &allow));
     }
 
     #[test]

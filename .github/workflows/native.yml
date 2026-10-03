@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
 # SPDX-FileCopyrightText: 2026 Auto Crop contributors
 
-# Builds the pinned native libraries (decode-only libheif, libde265, libjpeg-turbo) on three OSes
+# Builds the pinned native libraries (decode-only libheif with dav1d, libde265, libjpeg-turbo) on three OSes
 # (ROADMAP M0.40, M0.41, M0.44). Nothing from this build is distributed.
 name: Native libraries
 
@@ -55,9 +55,16 @@ jobs:
           if (-not (Get-Command nasm -ErrorAction SilentlyContinue)) { choco install nasm -y --no-progress }
           $dir = "C:\Program Files\NASM"
           if (Test-Path $dir) { $dir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8 }
-      - name: Install NASM (Linux)
+      - name: Install NASM, Meson and Ninja (Linux; Meson and Ninja build dav1d)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y nasm
+        run: sudo apt-get update && sudo apt-get install -y nasm meson ninja-build
+      - name: Install Meson and Ninja (Windows; Meson builds dav1d)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: python -m pip install --quiet meson ninja
+      - name: Install Meson and Ninja (macOS; Meson builds dav1d)
+        if: runner.os == 'macOS'
+        run: brew install meson ninja
       - name: Build pinned native libraries
         env:
           AUTOCROP_BUILD_JOBS: ${{ matrix.jobs }}
@@ -88,6 +95,16 @@ jobs:
           fi
           echo "$out" | grep -q "below the floor" || { echo "failed for the wrong reason: $out"; exit 1; }
           echo "libjpeg-turbo 3.1.0 was rejected, as required"
+          # 3) a planted AV1 encoder entry point (the decode-only build links dav1d and no encoder)
+          rm -rf target/native-neg3 && mkdir -p target/native-neg3/lib
+          cp -r target/native/prefix/include target/native-neg3/include
+          cp "$lib" "target/native-neg3/lib/$(basename "$lib")"
+          printf 'aom_codec_av1_cx' >> "target/native-neg3/lib/$(basename "$lib")"
+          if out=$(cargo xtask check-native --prefix target/native-neg3 2>&1); then
+            echo "a planted AV1 encoder symbol was NOT detected"; exit 1
+          fi
+          echo "$out" | grep -q "aom_codec_av1_cx" || { echo "failed for the wrong reason: $out"; exit 1; }
+          echo "planted AV1 encoder symbol was rejected, as required"
       - name: libjpeg-turbo spike (scaled decode, lossless rotate, MCU-aligned crop)
         shell: bash
         run: |
@@ -137,7 +154,7 @@ jobs:
     container: fedora@sha256:43b29f65a41eb9c35e1cd5323e3bdf3b655c2357a9f4f1ff2f9c2798e5045d80 # fedora:latest on 2026-10-01
     steps:
       - name: Install toolchain
-        run: dnf install -y git cmake gcc gcc-c++ make nasm curl tar xz findutils rustup && rustup-init -y --profile minimal --default-toolchain none
+        run: dnf install -y git cmake gcc gcc-c++ make nasm meson ninja-build curl tar xz findutils rustup && rustup-init -y --profile minimal --default-toolchain none
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false

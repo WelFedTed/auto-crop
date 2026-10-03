@@ -6,6 +6,8 @@
 # Minimum versions are security floors (libheif >= 1.23.5, libde265 >= 1.1.3, libjpeg-turbo >= 3.1.4).
 # Licences: LGPL libraries are shipped as separate, dynamically linked, replaceable libraries (B12).
 # Never add x265, x264 or any GPL encoder (B12, B2).
+# dav1d (meson) is built before libheif, which links it (AVIF); `build = "meson"` entries need
+# `meson` and `ninja` on PATH (and NASM on x86), see docs/testing/heif-native.md.
 # `watch` names the upstream GitHub repository checked daily by `cargo xtask native-watch`;
 # `watch_line` limits the check to one release line (ONNX Runtime stays on 1.28 for ort =2.0.0-rc.13).
 
@@ -52,7 +54,8 @@ flags = [
     "-DWITH_OpenH264_DECODER=OFF",
     "-DWITH_AOM_DECODER=OFF",
     "-DWITH_AOM_ENCODER=OFF",
-    "-DWITH_DAV1D=OFF",
+    "-DWITH_DAV1D=ON",
+    "-DWITH_DAV1D_PLUGIN=OFF",
     "-DWITH_SvtEnc=OFF",
     "-DWITH_RAV1E=OFF",
     "-DWITH_JPEG_DECODER=OFF",
@@ -62,7 +65,7 @@ flags = [
     "-DWITH_OPENJPH_ENCODER=OFF",
     "-DWITH_FFMPEG_DECODER=OFF",
 ]
-notes = "decode-only build; never embedded-libheif or vcpkg hevc"
+notes = "decode-only build; AVIF through dav1d (shared), HEVC through the libde265 plugin; never embedded-libheif or vcpkg hevc"
 
 [[lib]]
 name = "libjpeg-turbo"
@@ -87,8 +90,14 @@ sha256 = "686616b7c69eb88d44459391ab25cac13b6647a3b288835c5784e71c1514a5c5"
 license = "BSD-2-Clause"
 kind = "source"
 build = "meson"
-flags = []
-notes = "AV1 decoder for AVIF; built later (M6)"
+flags = [
+    "-Ddefault_library=shared",
+    "-Denable_tools=false",
+    "-Denable_tests=false",
+    "-Denable_examples=false",
+    "-Denable_docs=false",
+]
+notes = "AV1 decoder for AVIF, linked by libheif (WITH_DAV1D=ON); needs meson, ninja and, on x86, NASM; builds before libheif"
 
 [[lib]]
 name = "libjxl"

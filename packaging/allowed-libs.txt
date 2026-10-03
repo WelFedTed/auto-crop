@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
 # SPDX-FileCopyrightText: 2026 Auto Crop contributors
 #
-# Libraries a built native library (libde265, libheif, libjpeg-turbo) may depend on.
+# Libraries a built native library (libde265, libheif, libjpeg-turbo, dav1d) may depend on.
 # `cargo xtask check-native` fails on any other dependency. One name per line (lower case);
 # a trailing * matches any suffix. Everything here is a system or runtime library or one of ours.
 
@@ -11,6 +11,8 @@ libheif*
 libturbojpeg*
 libjpeg*
 heif*
+libdav1d*
+dav1d*
 de265*
 turbojpeg*
 jpeg62*
