@@ -7,18 +7,19 @@
 //!   (`decode`: pre-checks, zune-jpeg, orientation) against libjpeg-turbo (`decode_scaled`, feature
 //!   `turbojpeg`) at full size and at 1/2, 1/4 and 1/8 DCT scaling, plus what the safe-Rust
 //!   fallback costs for the same output size (full decode, then a block average).
+//! * JPEG encoders at q90 (12 MP): the `image` crate, `jpeg-encoder`, libjpeg-turbo.
 //! * PNG, TIFF (uncompressed, LZW, Deflate) and WebP (lossless), 4 MP.
 //!
 //! Run: `cargo bench -p auto-crop-codecs --features fixtures[,turbojpeg] --bench decode`. Numbers
 //! from a shared or loaded machine are labelled NOISY in the ADR.
 
-use auto_crop_codecs::decode;
-use auto_crop_codecs::encoders::PngEncoder;
+use auto_crop_codecs::encoders::{JpegRsEncoder, PngEncoder};
 use auto_crop_codecs::fixtures::{JpegSpec, TiffComp, TiffOpts, photo, tiff_rgb8, webp_lossless};
 #[cfg(feature = "turbojpeg")]
 use auto_crop_codecs::{DecodeLimits, decode_scaled};
+use auto_crop_codecs::{Format, decode};
 use auto_crop_core::CancelToken;
-use auto_crop_core::output::OutputSpec;
+use auto_crop_core::output::{OutputSpec, Quality};
 #[cfg(feature = "turbojpeg")]
 use auto_crop_core::ports::Want;
 use auto_crop_core::ports::{EncodeMeta, Encoder, PixelFormat, Raster, Samples};
@@ -71,6 +72,59 @@ fn bench_jpeg(c: &mut Criterion) {
     g.finish();
 }
 
+/// JPEG encoders at q90, 4:2:0, 12 MP RGB8: the `image` crate encoder that the pipeline skeleton
+/// uses today, `jpeg-encoder`, and libjpeg-turbo (feature). Output sizes are printed once.
+fn bench_encode(c: &mut Criterion) {
+    let (w, h) = (4000u32, 3000u32);
+    let raster =
+        Raster::from_samples(w, h, PixelFormat::Rgb8, Samples::U8(photo(w, h, 1))).unwrap();
+    let imgproc_raster =
+        auto_crop_imgproc::Raster::from_raw(w, h, photo(w, h, 1)).expect("raster size");
+    let spec = OutputSpec {
+        quality: Quality::Fixed { value: 90 },
+        ..OutputSpec::default()
+    };
+    let (meta, cancel) = (EncodeMeta::default(), CancelToken::never());
+    let mut g = c.benchmark_group("jpeg_encode_12MP_q90");
+    g.sample_size(10)
+        .warm_up_time(Duration::from_secs(1))
+        .measurement_time(Duration::from_secs(4))
+        .throughput(Throughput::Elements(12_000_000));
+    let image_len = auto_crop_codecs::encode(&imgproc_raster, Format::Jpeg, 90, None)
+        .unwrap()
+        .len();
+    g.bench_function("image_crate (codecs::encode)", |b| {
+        b.iter(|| {
+            black_box(auto_crop_codecs::encode(&imgproc_raster, Format::Jpeg, 90, None).unwrap())
+        })
+    });
+    let rs = JpegRsEncoder::default();
+    let rs_len = rs
+        .encode(&raster.view(), &spec, &meta, &cancel)
+        .unwrap()
+        .len();
+    g.bench_function("jpeg_encoder_crate", |b| {
+        b.iter(|| black_box(rs.encode(&raster.view(), &spec, &meta, &cancel).unwrap()))
+    });
+    #[cfg(feature = "turbojpeg")]
+    {
+        let tj = auto_crop_codecs::encoders::JpegTurboEncoder::default();
+        let tj_len = tj
+            .encode(&raster.view(), &spec, &meta, &cancel)
+            .unwrap()
+            .len();
+        println!(
+            "encoded sizes at q90: image {image_len}, jpeg-encoder {rs_len}, libjpeg-turbo {tj_len} bytes"
+        );
+        g.bench_function("turbo", |b| {
+            b.iter(|| black_box(tj.encode(&raster.view(), &spec, &meta, &cancel).unwrap()))
+        });
+    }
+    #[cfg(not(feature = "turbojpeg"))]
+    println!("encoded sizes at q90: image {image_len}, jpeg-encoder {rs_len} bytes");
+    g.finish();
+}
+
 fn bench_other_formats(c: &mut Criterion) {
     let (w, h) = (2000u32, 2000u32);
     let rgb = photo(w, h, 2);
@@ -113,5 +167,5 @@ fn bench_other_formats(c: &mut Criterion) {
     g.finish();
 }
 
-criterion_group!(benches, bench_jpeg, bench_other_formats);
+criterion_group!(benches, bench_jpeg, bench_encode, bench_other_formats);
 criterion_main!(benches);
