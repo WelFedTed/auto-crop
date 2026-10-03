@@ -86,7 +86,12 @@ pub fn find_python() -> Result<String, String> {
     }
     let v = venv_python();
     if v.exists() {
-        return Ok(v.to_string_lossy().into_owned());
+        // Absolute, so a command that also changes directory (the unit tests run in tools/synth)
+        // still finds it: a relative program path is resolved against the new directory on Unix.
+        let abs = std::env::current_dir()
+            .map_err(|e| format!("cannot read the current directory: {e}"))?
+            .join(v);
+        return Ok(abs.to_string_lossy().into_owned());
     }
     Err(format!(
         "no Python environment for tools/synth: run `cargo xtask synth-setup` (creates {VENV} from {LOCK}) or set AUTO_CROP_SYNTH_PYTHON"
