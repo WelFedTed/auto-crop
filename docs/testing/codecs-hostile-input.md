@@ -80,7 +80,7 @@ The roadmap's "1000 reused buffers ASan-clean" is an FFI concern; the safe-Rust 
 
 ## libjpeg-turbo path (M1.18 to M1.21, feature `turbojpeg`)
 
-Everything here runs in `.github/workflows/turbojpeg.yml` (the pinned libjpeg-turbo 3.2.0 built by `cargo xtask build-native --only libjpeg-turbo`, then `cargo test -p auto-crop-codecs --features turbojpeg`); run 37118012868 was green on windows-2025, macos-latest and ubuntu-22.04 (120 tests each, 3 more than the default build's 101 plus the feature-only ones), under AddressSanitizer, and for the negative tests. Locally the feature needs CMake, NASM and a C compiler; without `--features turbojpeg` nothing native is searched for or linked (the `default build has no native dependency` job proves it with a prefix that does not exist, a test binary without `turbojpeg` symbols, and a feature build that must fail with a pointer to `build-native`).
+Everything here runs in `.github/workflows/turbojpeg.yml` (the pinned libjpeg-turbo 3.2.0 built by `cargo xtask build-native --only libjpeg-turbo`, then `cargo test -p auto-crop-codecs --features turbojpeg`); run 37118012868 was green on windows-2025, macos-latest and ubuntu-22.04 (120 tests with the feature, 101 without), under AddressSanitizer, and for the negative tests. Locally the feature needs CMake, NASM and a C compiler; without `--features turbojpeg` nothing native is searched for or linked (the `default build has no native dependency` job proves it with a prefix that does not exist, a test binary without `turbojpeg` symbols, and a feature build that must fail with a pointer to `build-native`).
 
 | Check | Result |
 |---|---|

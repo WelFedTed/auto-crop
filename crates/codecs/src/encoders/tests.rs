@@ -255,3 +255,15 @@ fn the_libjpeg_turbo_encoder_round_trips_at_q90_above_40_db() {
         .unwrap();
     assert_eq!(crate::probe(&out).unwrap().channels, 1);
 }
+
+#[test]
+fn the_default_jpeg_encoder_writes_a_decodable_jpeg() {
+    let src = rgb8(64, 48);
+    let enc = default_jpeg_encoder();
+    assert_eq!(enc.format(), OutFormat::Jpeg);
+    let out = enc
+        .encode(&src.view(), &spec(90), &EncodeMeta::default(), &never())
+        .unwrap();
+    let d = crate::decode(&out).unwrap();
+    assert_eq!((d.raster.width, d.raster.height), (64, 48));
+}

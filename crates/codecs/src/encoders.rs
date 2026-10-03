@@ -21,6 +21,16 @@ use std::borrow::Cow;
 /// Quality used when the spec does not pin one (the M1.21 baseline).
 pub const DEFAULT_JPEG_QUALITY: u8 = 90;
 
+/// The baseline JPEG encoder ADR-0008 picks from the M1.56 numbers: libjpeg-turbo when the build
+/// has it (2.3 to 3.5x faster than `jpeg-encoder`, 4 to 9x faster than the `image` encoder, smallest files),
+/// otherwise `jpeg-encoder` (1.8 to 2.5x faster than the `image` encoder, 11% smaller files).
+pub fn default_jpeg_encoder() -> Box<dyn Encoder> {
+    #[cfg(feature = "turbojpeg")]
+    return Box::new(JpegTurboEncoder::default());
+    #[cfg(not(feature = "turbojpeg"))]
+    return Box::new(JpegRsEncoder::default());
+}
+
 fn check(cancel: &CancelToken) -> Result<(), ErrKind> {
     cancel.check().map_err(|i| match i {
         Interrupt::Deadline => ErrKind::DeadlineExceeded,
