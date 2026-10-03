@@ -17,17 +17,22 @@ pub mod edit;
 pub mod error;
 pub mod geometry;
 pub mod history;
+pub mod items;
 pub mod output;
 pub mod ports;
 pub mod source;
+pub mod triage;
 
 pub use cancel::{BAND_ROWS, CancelToken, GenerationCounter, Interrupt, Level};
 pub use confidence::{Confidence, Forced, Reason, ReasonCode};
 pub use edit::{
-    EDIT_STATE_VERSION, EditState, Enhance, Item, ItemId, MarginPolicy, Orient, Origin,
+    EDIT_STATE_VERSION, EditState, Enhance, Item, ItemId, MarginPolicy, OrderMode, Orient, Origin,
+    SplitPolicy, SplitProfile, SplitState,
 };
 pub use error::{CoreError, ErrKind};
 pub use geometry::{ExifOrientation, Geometry, GridWarp, Pt, QuadWarp, Side};
 pub use history::{GestureId, History, SessionCmd, SessionHistory};
+pub use items::{Cut, CutAxis, ItemsError, MAX_ITEMS, Redetected};
 pub use output::{OutputSpec, WriteRequirements};
 pub use source::{SourceId, SourceRef};
+pub use triage::{Band, FAILED_FLOOR, STRICT_CUTOFF, ScanTriage};

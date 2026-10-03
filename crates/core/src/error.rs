@@ -72,6 +72,19 @@ pub enum ErrKind {
     BackupFailed,
     #[error("the backup of the original has expired")]
     OriginalExpired,
+    // Multi-item scans (M10)
+    #[error("an output name was taken since the plan was made")]
+    PlanStale,
+    #[error("the set of files could not be written as a whole")]
+    GroupCommitFailed,
+    #[error("the saved scan could not be removed because another program uses it")]
+    SavedSourceInUse,
+    #[error("the scan is held for review and was not written")]
+    HeldForReview,
+    #[error("that change to the items is not possible")]
+    ItemOp,
+    #[error("this source is never replaced")]
+    NotReplaceable,
     // Stored data
     #[error("the saved edit was written by a newer version")]
     SchemaTooNew,
@@ -87,7 +100,7 @@ pub enum ErrKind {
 impl ErrKind {
     /// Every variant, in declaration order (the exhaustive [`ErrKind::ordinal`] match and the test
     /// `all_lists_every_variant` keep this honest).
-    pub const ALL: [ErrKind; 28] = [
+    pub const ALL: [ErrKind; 34] = [
         ErrKind::Corrupt,
         ErrKind::UnsupportedFormat,
         ErrKind::UnsupportedFeature,
@@ -112,6 +125,12 @@ impl ErrKind {
         ErrKind::VerifyFailed,
         ErrKind::BackupFailed,
         ErrKind::OriginalExpired,
+        ErrKind::PlanStale,
+        ErrKind::GroupCommitFailed,
+        ErrKind::SavedSourceInUse,
+        ErrKind::HeldForReview,
+        ErrKind::ItemOp,
+        ErrKind::NotReplaceable,
         ErrKind::SchemaTooNew,
         ErrKind::Cancelled,
         ErrKind::DeadlineExceeded,
@@ -146,10 +165,16 @@ impl ErrKind {
             ErrKind::VerifyFailed => 21,
             ErrKind::BackupFailed => 22,
             ErrKind::OriginalExpired => 23,
-            ErrKind::SchemaTooNew => 24,
-            ErrKind::Cancelled => 25,
-            ErrKind::DeadlineExceeded => 26,
-            ErrKind::Internal => 27,
+            ErrKind::PlanStale => 24,
+            ErrKind::GroupCommitFailed => 25,
+            ErrKind::SavedSourceInUse => 26,
+            ErrKind::HeldForReview => 27,
+            ErrKind::ItemOp => 28,
+            ErrKind::NotReplaceable => 29,
+            ErrKind::SchemaTooNew => 30,
+            ErrKind::Cancelled => 31,
+            ErrKind::DeadlineExceeded => 32,
+            ErrKind::Internal => 33,
         }
     }
 
@@ -181,6 +206,12 @@ impl ErrKind {
             ErrKind::VerifyFailed => "err.verify_failed",
             ErrKind::BackupFailed => "err.backup_failed",
             ErrKind::OriginalExpired => "err.original_expired",
+            ErrKind::PlanStale => "err.plan_stale",
+            ErrKind::GroupCommitFailed => "err.group_commit_failed",
+            ErrKind::SavedSourceInUse => "err.saved_source_in_use",
+            ErrKind::HeldForReview => "err.held_for_review",
+            ErrKind::ItemOp => "err.item_op",
+            ErrKind::NotReplaceable => "err.not_replaceable",
             ErrKind::SchemaTooNew => "err.schema_too_new",
             ErrKind::Cancelled => "err.cancelled",
             ErrKind::DeadlineExceeded => "err.deadline_exceeded",

@@ -1,0 +1,97 @@
+---
+source: crates/engine/src/migrate.rs
+expression: state
+---
+{
+  "version": 2,
+  "orientation": {
+    "quarterTurns": 0,
+    "mirror": false
+  },
+  "items": [
+    {
+      "id": 5,
+      "include": true,
+      "geometry": {
+        "type": "quad",
+        "corners": [
+          {
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "x": 0.9,
+            "y": 0.5
+          },
+          {
+            "x": 0.9,
+            "y": 0.9
+          },
+          {
+            "x": 0.5,
+            "y": 0.9
+          }
+        ],
+        "quarterTurns": 0,
+        "mirror": false,
+        "fineDeg": 0.0
+      },
+      "enhanceOverride": null,
+      "origin": {
+        "kind": "manual"
+      },
+      "confidence": null
+    },
+    {
+      "id": 2,
+      "include": true,
+      "geometry": {
+        "type": "quad",
+        "corners": [
+          {
+            "x": 0.1,
+            "y": 0.1
+          },
+          {
+            "x": 0.4,
+            "y": 0.1
+          },
+          {
+            "x": 0.4,
+            "y": 0.4
+          },
+          {
+            "x": 0.1,
+            "y": 0.4
+          }
+        ],
+        "quarterTurns": 0,
+        "mirror": false,
+        "fineDeg": 0.0
+      },
+      "enhanceOverride": null,
+      "origin": {
+        "kind": "auto",
+        "pipelineVer": 2
+      },
+      "confidence": {
+        "score": 0.96875,
+        "forced": null,
+        "reasons": []
+      }
+    }
+  ],
+  "margin": {
+    "kind": "paperEdge",
+    "margin": 0.0
+  },
+  "enhance": {
+    "mode": "original"
+  },
+  "split": {
+    "policy": "always",
+    "profile": "photos",
+    "orderMode": "manual",
+    "nextId": 9
+  }
+}

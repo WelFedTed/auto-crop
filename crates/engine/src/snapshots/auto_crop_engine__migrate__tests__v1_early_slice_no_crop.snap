@@ -3,7 +3,7 @@ source: crates/engine/src/migrate.rs
 expression: state
 ---
 {
-  "version": 1,
+  "version": 2,
   "orientation": {
     "quarterTurns": 0,
     "mirror": false
@@ -15,5 +15,11 @@ expression: state
   },
   "enhance": {
     "mode": "original"
+  },
+  "split": {
+    "policy": "never",
+    "profile": "photos",
+    "orderMode": "reading",
+    "nextId": 0
   }
 }

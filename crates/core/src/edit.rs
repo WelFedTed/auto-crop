@@ -12,7 +12,11 @@ use serde::{Deserialize, Serialize};
 
 /// Current schema version of [`EditState`]. Migrations are pure functions `v(n) -> v(n+1)` that
 /// live next to the JSON handling in the engine (`auto_crop_engine::migrate`).
-pub const EDIT_STATE_VERSION: u32 = 1;
+///
+/// Version 2 (M10.17) adds [`SplitState`]: the split policy, profile, order mode and the next free
+/// [`ItemId`]. A version 1 document migrates by adding the default `split` block, so nothing in it
+/// is lost or reinterpreted.
+pub const EDIT_STATE_VERSION: u32 = 2;
 
 /// Stable id of an item across edits and undo (not render-relevant).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -117,6 +121,56 @@ impl Item {
     }
 }
 
+/// Whether a scan may be split into several items (PLAN 4.7, `split` of `AnalyzeOptions`). `Never`
+/// is the single-item behaviour of M2.16 and is what a state written before M10 means.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SplitPolicy {
+    /// Split when the scan looks like several items on a bed; the result is held for review
+    /// unless the user has opted in to auto-saving splits (0.x preview rule, M10.29).
+    Auto,
+    /// Look for several items even where the scan does not look bed-like (such a scan is held).
+    Always,
+    /// One item per file: no splitting.
+    #[default]
+    Never,
+}
+
+/// What the items on a scan are (M10.12): Photos keep the orientation they were placed in,
+/// Receipts are made upright by the orientation net.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SplitProfile {
+    #[default]
+    Photos,
+    Receipts,
+}
+
+/// How the items are numbered (M10.20).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OrderMode {
+    /// Reading order: rows by vertical overlap, then left to right.
+    #[default]
+    Reading,
+    /// The user reordered the items; re-detection keeps their order.
+    Manual,
+}
+
+/// Multi-item bookkeeping that render ignores (M10.17). The order of `EditState::items` IS the
+/// output order (`{n}` numbers the included items in that order), so there is no per-item order
+/// field that could disagree with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+pub struct SplitState {
+    pub policy: SplitPolicy,
+    pub profile: SplitProfile,
+    pub order_mode: OrderMode,
+    /// The next id to hand out. An id is never reused for the life of the state; 0 means "derive
+    /// it from the items" ([`EditState::next_item_id`] never goes below that).
+    pub next_id: u32,
+}
+
 /// Versioned, serialisable edit parameters (PLAN 2.3). `items` is empty for an image with no crop
 /// (the original is left untouched, or a convert-only job).
 ///
@@ -132,6 +186,8 @@ pub struct EditState {
     pub margin: MarginPolicy,
     /// Default enhancement for all items.
     pub enhance: Enhance,
+    /// Split policy, profile, order mode and id allocator (M10.17). Not render-relevant.
+    pub split: SplitState,
 }
 
 impl Default for EditState {
@@ -142,6 +198,7 @@ impl Default for EditState {
             items: Vec::new(),
             margin: MarginPolicy::default(),
             enhance: Enhance::Original,
+            split: SplitState::default(),
         }
     }
 }
@@ -187,6 +244,39 @@ impl EditState {
         self.items.iter().filter(|i| i.include)
     }
 
+    /// The item with this id, included or not.
+    pub fn item(&self, id: ItemId) -> Option<&Item> {
+        self.items.iter().find(|i| i.id == id)
+    }
+
+    pub fn item_mut(&mut self, id: ItemId) -> Option<&mut Item> {
+        self.items.iter_mut().find(|i| i.id == id)
+    }
+
+    /// Position of the item with this id in the output order.
+    pub fn item_index(&self, id: ItemId) -> Option<usize> {
+        self.items.iter().position(|i| i.id == id)
+    }
+
+    /// The id the next new item gets: above every id in use and above every id handed out so far,
+    /// so an id is never reused (M10.17).
+    pub fn next_item_id(&self) -> ItemId {
+        let used = self.items.iter().map(|i| i.id.0).max().unwrap_or(0);
+        ItemId(self.split.next_id.max(used.saturating_add(1)).max(1))
+    }
+
+    /// Hands out a fresh id and records it.
+    pub fn alloc_item_id(&mut self) -> ItemId {
+        let id = self.next_item_id();
+        self.split.next_id = id.0.saturating_add(1);
+        id
+    }
+
+    /// The 1-based output rank (`{n}`) of an included item, or `None` if it is excluded or absent.
+    pub fn output_rank(&self, id: ItemId) -> Option<usize> {
+        self.included().position(|i| i.id == id).map(|p| p + 1)
+    }
+
     /// Rejects states written by a newer schema.
     pub fn validate(&self) -> Result<(), CoreError> {
         if self.version > EDIT_STATE_VERSION {
@@ -210,44 +300,27 @@ impl EditState {
         h.u64(self.items.len() as u64);
         for it in &self.items {
             h.bool(it.include);
-            match &it.geometry {
-                Geometry::Identity => h.u8(0),
-                Geometry::Quad(q) => {
-                    h.u8(1);
-                    for c in &q.corners {
-                        h.f64(c.x);
-                        h.f64(c.y);
-                    }
-                    h.u8(q.quarter_turns % 4);
-                    h.bool(q.mirror);
-                    h.f32(q.fine_deg);
-                }
-                Geometry::Grid(g) => {
-                    h.u8(2);
-                    for c in &g.outline {
-                        h.f64(c.x);
-                        h.f64(c.y);
-                    }
-                    h.u32(u32::from(g.cols));
-                    h.u32(u32::from(g.rows));
-                    h.u64(g.nodes.len() as u64);
-                    for c in &g.nodes {
-                        h.f64(c.x);
-                        h.f64(c.y);
-                    }
-                    h.u8(g.quarter_turns % 4);
-                    h.bool(g.mirror);
-                }
-            }
-            match &it.enhance_override {
-                None => h.u8(0),
-                Some(e) => {
-                    h.u8(1);
-                    h.enhance(e);
-                }
-            }
+            h.geometry(&it.geometry);
+            h.enhance_override(&it.enhance_override);
         }
         h.finish()
+    }
+
+    /// A 64-bit hash of what decides the pixels of ONE item's output (M10.28): the whole-image
+    /// orientation and margin, the effective enhancement (the item's override, else the default)
+    /// and the item's geometry. Inclusion, position, id and provenance do not contribute, so
+    /// editing item 2, excluding item 3 or reordering leaves item 1's key (and its cache) alone.
+    /// `None` if there is no such item.
+    pub fn item_render_hash(&self, id: ItemId) -> Option<u64> {
+        let it = self.item(id)?;
+        let mut h = Fnv::new();
+        h.u8(0xA5); // domain separator: never equal to a whole-state hash by construction
+        h.u8(self.orientation.quarter_turns % 4);
+        h.bool(self.orientation.mirror);
+        h.margin(&self.margin);
+        h.enhance(it.enhance_override.as_ref().unwrap_or(&self.enhance));
+        h.geometry(&it.geometry);
+        Some(h.finish())
     }
 }
 
@@ -296,6 +369,46 @@ impl Fnv {
             v
         };
         self.u32(v.to_bits());
+    }
+    fn geometry(&mut self, g: &Geometry) {
+        match g {
+            Geometry::Identity => self.u8(0),
+            Geometry::Quad(q) => {
+                self.u8(1);
+                for c in &q.corners {
+                    self.f64(c.x);
+                    self.f64(c.y);
+                }
+                self.u8(q.quarter_turns % 4);
+                self.bool(q.mirror);
+                self.f32(q.fine_deg);
+            }
+            Geometry::Grid(g) => {
+                self.u8(2);
+                for c in &g.outline {
+                    self.f64(c.x);
+                    self.f64(c.y);
+                }
+                self.u32(u32::from(g.cols));
+                self.u32(u32::from(g.rows));
+                self.u64(g.nodes.len() as u64);
+                for c in &g.nodes {
+                    self.f64(c.x);
+                    self.f64(c.y);
+                }
+                self.u8(g.quarter_turns % 4);
+                self.bool(g.mirror);
+            }
+        }
+    }
+    fn enhance_override(&mut self, e: &Option<Enhance>) {
+        match e {
+            None => self.u8(0),
+            Some(e) => {
+                self.u8(1);
+                self.enhance(e);
+            }
+        }
     }
     fn margin(&mut self, m: &MarginPolicy) {
         match m {
@@ -491,5 +604,70 @@ mod tests {
         s.items[0].include = false;
         assert!(s.quad().is_none() && s.quad_mut().is_none());
         assert_eq!(s.included().count(), 0);
+    }
+
+    #[test]
+    fn split_state_defaults_serialise_and_ids_are_never_reused() {
+        let s = EditState::default();
+        assert_eq!(
+            s.split.policy,
+            SplitPolicy::Never,
+            "no splitting unless asked"
+        );
+        let v = serde_json::to_value(&s).unwrap();
+        assert_eq!(v["version"], 2);
+        assert_eq!(v["split"]["policy"], "never");
+        assert_eq!(v["split"]["orderMode"], "reading");
+        // A document without the block still loads (serde(default)).
+        let no_split: EditState = serde_json::from_str(r#"{"version":2}"#).unwrap();
+        assert_eq!(no_split.split, SplitState::default());
+
+        let mut s = EditState::single(QuadWarp::inset_frame(0.1));
+        assert_eq!(s.next_item_id(), ItemId(2));
+        let a = s.alloc_item_id();
+        let b = s.alloc_item_id();
+        assert_eq!((a, b), (ItemId(2), ItemId(3)));
+        // Nothing was inserted, yet the ids are not handed out again.
+        assert_eq!(s.next_item_id(), ItemId(4));
+        // Items with high ids push the counter up.
+        s.items.push(Item {
+            id: ItemId(50),
+            ..Item::default()
+        });
+        assert_eq!(s.next_item_id(), ItemId(51));
+    }
+
+    #[test]
+    fn item_render_hash_ignores_other_items_inclusion_order_and_provenance() {
+        let mut s = EditState::single(QuadWarp::inset_frame(0.1));
+        s.items.push(Item::quad(
+            ItemId(2),
+            QuadWarp::inset_frame(0.3),
+            Origin::Manual,
+        ));
+        let h1 = s.item_render_hash(ItemId(1)).unwrap();
+        let h2 = s.item_render_hash(ItemId(2)).unwrap();
+        assert_ne!(h1, h2);
+        assert_eq!(s.item_render_hash(ItemId(9)), None);
+
+        let mut t = s.clone();
+        t.items[1].include = false; // another item excluded
+        t.items.swap(0, 1); // reordered
+        t.items[1].origin = Origin::AutoThenEdited;
+        t.items[1].confidence = None;
+        assert_eq!(t.item_render_hash(ItemId(1)), Some(h1));
+        // Editing item 2 changes item 2's key only.
+        let mut e = s.clone();
+        e.quad_mut().unwrap(); // item 1
+        e.items[1].geometry = Geometry::Quad(QuadWarp::inset_frame(0.35));
+        assert_eq!(e.item_render_hash(ItemId(1)), Some(h1));
+        assert_ne!(e.item_render_hash(ItemId(2)), Some(h2));
+        // The whole-image settings and the effective enhancement are part of every key.
+        let mut o = s.clone();
+        o.orientation.quarter_turns = 1;
+        assert_ne!(o.item_render_hash(ItemId(1)), Some(h1));
+        let mut m = s.clone();
+        m.margin = MarginPolicy::PaperEdge { margin: 0.02 };
+        assert_ne!(m.item_render_hash(ItemId(2)), Some(h2));
     }
 }

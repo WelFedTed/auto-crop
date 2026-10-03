@@ -167,6 +167,13 @@ impl<T: Clone + PartialEq> History<T> {
         self.trimmed + self.cursor
     }
 
+    /// The state at a [`History::position`] taken earlier, without moving the cursor (M10.19:
+    /// "revert item k to step n"). `None` if that entry has since been trimmed or cut.
+    pub fn state_at(&self, position: usize) -> Option<&T> {
+        let c = position.checked_sub(self.trimmed)?;
+        self.entries.get(c).map(|e| &e.state)
+    }
+
     /// Moves the cursor to a [`History::position`] taken earlier. Returns `false` (and does
     /// nothing) if that entry has since been trimmed or cut.
     pub fn seek(&mut self, position: usize) -> bool {

@@ -25,9 +25,45 @@ use serde_json::{Value, json};
 /// (including the new `version` number). Pure: no I/O, no clock, no randomness.
 pub type Step = fn(Value) -> Result<Value, ErrKind>;
 
-/// The real migration chain. `STEPS[n - 1]` upgrades version `n` to `n + 1`; it is empty while
-/// `EDIT_STATE_VERSION` is 1. When the schema moves to 2, append the `v1 -> v2` function here.
-pub const STEPS: &[Step] = &[];
+/// The real migration chain. `STEPS[n - 1]` upgrades version `n` to `n + 1`.
+pub const STEPS: &[Step] = &[v1_to_v2];
+
+/// `v1 -> v2` (M10.17): adds the `split` block (policy `never`, which is what a single-item state
+/// written before M10 means, profile `photos`, reading order, and `nextId` above every id in
+/// use so no id is ever reused). Nothing else is touched, so the migration is lossless.
+pub fn v1_to_v2(mut doc: Value) -> Result<Value, ErrKind> {
+    let obj = doc.as_object_mut().ok_or(ErrKind::Corrupt)?;
+    if !obj.contains_key("split") {
+        let max_id = obj
+            .get("items")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|i| i.get("id").and_then(Value::as_u64))
+                    .max()
+                    .unwrap_or(0)
+            })
+            .unwrap_or(0);
+        // 0 = "derive it from the items": an empty state stays equal to the default one.
+        let next = if max_id == 0 {
+            0
+        } else {
+            u32::try_from(max_id.saturating_add(1)).unwrap_or(u32::MAX)
+        };
+        obj.insert(
+            "split".to_owned(),
+            json!({
+                "policy": "never",
+                "profile": "photos",
+                "orderMode": "reading",
+                "nextId": next,
+            }),
+        );
+    }
+    obj.insert("version".to_owned(), json!(2));
+    Ok(doc)
+}
 
 /// The schema version a document claims. A missing `version` means 1 (every field is optional,
 /// as in `EditState`'s `serde(default)`).
@@ -167,10 +203,17 @@ mod tests {
             "v1_early_slice_quad",
             "v1_multi_item",
             "v1_single_quad",
+            "v2_split_three_items",
+            "v2_split_manual_order",
         ] {
             assert!(names.iter().any(|n| n == want), "missing fixture {want}");
         }
-        assert!(names.iter().all(|n| n.starts_with("v1_")), "{names:?}");
+        assert!(
+            names
+                .iter()
+                .all(|n| n.starts_with("v1_") || n.starts_with("v2_")),
+            "{names:?}"
+        );
     }
 
     #[test]
@@ -181,8 +224,8 @@ mod tests {
             // Serialise and migrate again: the state is a fixed point.
             let json = serde_json::to_value(&state).unwrap();
             assert_eq!(migrate_ref(&json).unwrap(), state, "{name}");
-            // Canonical v1 documents (not the early-slice shape) reserialise byte for byte.
-            if !name.contains("early_slice") && name != "v1_empty" {
+            // Canonical current-version documents reserialise byte for byte.
+            if name.starts_with("v2_") {
                 assert_eq!(json, doc, "{name} is not in canonical form");
             }
             // And the text path agrees.
@@ -200,6 +243,57 @@ mod tests {
             let state = migrate_ref(&doc).unwrap();
             insta::assert_json_snapshot!(name, state);
         }
+    }
+
+    /// M10.17: an old single-item state migrates losslessly. Everything the v1 document said is
+    /// still there, unchanged; the only additions are the version and the default `split` block.
+    #[test]
+    fn v1_documents_migrate_losslessly_to_v2() {
+        let mut n = 0;
+        for (name, doc) in fixtures() {
+            if !name.starts_with("v1_") || name.contains("early_slice") || name == "v1_empty" {
+                continue;
+            }
+            n += 1;
+            let migrated = serde_json::to_value(migrate_ref(&doc).unwrap()).unwrap();
+            let mut got = migrated.as_object().unwrap().clone();
+            let split = got.remove("split").expect("a split block");
+            got.remove("version");
+            let mut want = doc.as_object().unwrap().clone();
+            want.remove("version");
+            assert_eq!(Value::Object(got), Value::Object(want), "{name}");
+            let max = doc["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|i| i["id"].as_u64().unwrap())
+                .max()
+                .unwrap_or(0);
+            assert_eq!(
+                split,
+                json!({"policy": "never", "profile": "photos", "orderMode": "reading", "nextId": max + 1}),
+                "{name}"
+            );
+            // `Never` is the single-item behaviour of M2.16.
+            assert_eq!(
+                migrate_ref(&doc).unwrap().split.policy,
+                auto_crop_core::SplitPolicy::Never
+            );
+        }
+        assert!(n >= 2, "fixtures were checked");
+        // A document with no version at all (every field optional) is version 1.
+        let bare = migrate(json!({})).unwrap();
+        assert_eq!((bare.version, bare.items.len()), (2, 0));
+    }
+
+    #[test]
+    fn a_migrated_id_counter_is_above_every_id_so_ids_are_never_reused() {
+        let s = migrate(json!({"version":1,"items":[{"id":7},{"id":3}]})).unwrap();
+        assert_eq!(s.split.next_id, 8);
+        assert_eq!(s.next_item_id().0, 8);
+        // Already-current documents are not rewritten.
+        let v2 = json!({"version":2,"items":[{"id":9}],"split":{"nextId":40}});
+        assert_eq!(migrate(v2).unwrap().next_item_id().0, 40);
     }
 
     #[test]
