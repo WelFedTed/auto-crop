@@ -169,6 +169,19 @@ def pins_to_overrides(pins: list[str]) -> dict[str, dict[str, float]]:
     return out
 
 
+def pins_to_multi_overrides(pins: list[str]) -> dict[str, dict[str, float]]:
+    """``--pin`` for the multi-item suites: ``["separation=touching", "count=3"]``."""
+    from .multi_item import AXES  # late import: multi_item imports this module
+
+    out: dict[str, dict[str, float]] = {}
+    for pin in pins:
+        axis, _, value = pin.partition("=")
+        if axis not in AXES or value not in AXES[axis]:
+            raise ValueError(f"cannot pin {pin!r}: axes are " + ", ".join(f"{a}={'|'.join(v)}" for a, v in AXES.items()))
+        out[axis] = {value: 1.0}
+    return out
+
+
 def build(
     name: str, seed: int, count: int, overrides: dict[str, dict[str, float]] | None = None
 ) -> tuple[list[SceneSpec], list[ImageSpec]]:

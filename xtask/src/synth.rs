@@ -3,7 +3,7 @@
 
 //! `cargo xtask synth`, `synth-setup`, `synth-check` and `check-splits` (ROADMAP M1.30-M1.35).
 //!
-//! * `synth --suite smoke|full [--generator python|rust] ...` writes a suite under
+//! * `synth --suite smoke|full|multi-smoke|multi-full [--generator python|rust] ...` writes a suite under
 //!   `target/synth/<suite>` (never committed). The default generator is the Python tool in
 //!   `tools/synth` (Augraphy behind a seam, known-text pages, pinhole camera, EXIF and colour-space
 //!   variants); `--generator rust` selects the old STAND-IN writer in `auto-crop-eval`, kept as a
@@ -172,6 +172,14 @@ pub fn run_setup(_args: &[String]) -> Result<(), String> {
 pub fn run_synth(args: &[String]) -> Result<(), String> {
     let (generator, rest) = split_generator(args)?;
     let full = generator_args(generator, &rest)?;
+    if generator == Generator::Rust
+        && value_of(&full, "--suite").is_some_and(|s| s.starts_with("multi-"))
+    {
+        return Err(
+            "the multi-item suites (multi-smoke, multi-full) come from the Python generator only"
+                .to_owned(),
+        );
+    }
     match generator {
         Generator::Rust => {
             let mut a = vec!["synth".to_owned()];
@@ -299,6 +307,23 @@ mod tests {
             a,
             s(&["--suite", "full", "--out", "target/synth/full-rust"])
         );
+    }
+
+    #[test]
+    fn multi_item_suites_are_python_only_and_get_their_own_directory() {
+        let a = generator_args(Generator::Python, &s(&["--suite", "multi-smoke"])).expect("valid");
+        assert_eq!(
+            a,
+            s(&[
+                "--suite",
+                "multi-smoke",
+                "--out",
+                "target/synth/multi-smoke"
+            ])
+        );
+        let e =
+            run_synth(&s(&["--generator", "rust", "--suite", "multi-full"])).expect_err("rejected");
+        assert!(e.contains("Python generator only"), "{e}");
     }
 
     #[test]
