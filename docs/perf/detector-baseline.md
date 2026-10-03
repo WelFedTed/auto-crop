@@ -1,4 +1,4 @@
-# Classical page detector on the synthetic stand-in suites: baseline and the line-based rewrite
+# Classical page detector on the synthetic suites: baseline, the line-based rewrite, and the check on an independent generator
 
 Two measurements of the classical page detector (`auto_crop_imgproc::detect::detect`) with the accuracy harness (`crates/eval`, ROADMAP M1.45-M1.49), both on Windows 11 x86-64, release build:
 
@@ -12,14 +12,96 @@ Two measurements of the classical page detector (`auto_crop_imgproc::detect::det
 - Large synthetic gains can come from fitting the generator's habits. The constants of the new detector were chosen on two seeds, checked on a third, and then run once on a fourth that did not exist until they were frozen (see "Other seeds and sizes"); it was also run on other image sizes. That guards against tuning to one seed; it cannot rule out a quirk shared by every seed of the generator, which is why the caveats below matter more than the numbers.
 - The confidence is still an uncalibrated heuristic; the Good/Check/Failed mapping (Good at score >= 0.90 with no forced band, Failed below 0.60 or when it reports no quad) is the interim Balanced cutoff from PLAN 7.4, not a calibrated operating point.
 - Aggregates only. No per-image rows are recorded here.
+- **The update directly below measures the same detector on the independent Python generator and the numbers do not carry over. Everything after it ("Method" onwards) was measured on the Rust stand-in generator.**
+
+## Update 2026-10-03: the same detector on an independent generator (bad news)
+
+The classical detector above was developed and checked on the Rust stand-in suites, whose scenes come from the same renderer the detector's unit tests use. The Python generator (`tools/synth`, M1.30 to M1.35; Augraphy, known-text pages and receipts, a pinhole camera written separately, procedural desks, partial framing, long strips) shares no code with either, and nothing in the detector was changed or tuned for it: it is the detector of the "after" column below (commit `5ede426`). Same harness, same metrics, same day. **The detector's headline numbers did not transfer.**
+
+| | Stand-in smoke (200, 480 px) | Python smoke (200, 320 px) | Stand-in full (5,184, 480 px) | Python full (5,200, 512 px) |
+|---|---|---|---|---|
+| Mean IoU (95% bootstrap CI) | 0.9772 (0.9680-0.9839) | 0.6039 (0.5416-0.6630) | 0.9792 (0.9777-0.9806) | **0.6323 (0.6201-0.6450)** |
+| Failure rate (IoU < 0.90, incl. no quad) | 1.50% (3) | 45.50% (91) | 1.85% (96) | **44.37% (2,307)** |
+| Success at IoU >= 0.95 / >= 0.98 | 96.5% / 76.0% | 49.0% / 33.5% | 96.5% / 81.4% | 52.3% / 39.9% |
+| No quad found | 0 | 53 | 3 | 1,137 (21.9%) |
+| Corner error, % of diagonal, answered, p50 / p95 / p99 | 0.175 / 0.80 / 8.0 | 0.64 / 47.4 / 57.1 | 0.166 / 0.86 / 5.7 | 0.51 / 57.1 / 72.4 |
+| Skew degrees, answered, p50 / p95 / p99 | 0.137 / 0.62 / 0.80 | 0.45 / 33.2 / 41.8 | 0.113 / 0.69 / 1.16 | 0.24 / 25.5 / 48.4 |
+| Auto-accepted (Good) | 175 | 39 | 4,558 | 1,456 |
+| Silent failures among auto-accepted | 0 (bound 1.70%) | 0 of 39 (bound 7.39%) | 6 (0.13%, bound 0.26%) | **31 (2.13%, bound 2.86%)** |
+| Flag rate (Check or Failed) | 12.5% | 80.5% | 12.1% | 72.0% |
+| Calibration (reported, not gated): ECE / Brier / AUROC | 0.019 / 0.012 / 0.985 | 0.187 / 0.169 / 0.921 | 0.017 / 0.015 / 0.908 | 0.196 / 0.179 / 0.913 |
+
+The stand-in rows re-measured today are identical to the "after" columns of the table further down (the stand-in numbers are reproducible). The Python rows are a different, harder distribution, so the comparison is "how does it fare on data it was not built against", not a regression. The silent-failure rate, the number the plan cares about, is 16 times the stand-in's; a statement like "below 0.3% on this generator" holds for the stand-in and not for this one. **Nothing here satisfies or fails B6** (that is measured on the golden set), but it does show that a good score on a self-made generator says little. Also note that the detector's own behaviour is conservative: it holds 72% of the images for review (it did not guess), and only 28% reach Good.
+
+### Where it fails (full suite, every slice has at least 468 images, so all are gated-size)
+
+| Slice | n | Mean IoU | Failure rate | | Slice | n | Mean IoU | Failure rate |
+|---|---|---|---|---|---|---|---|---|
+| aspect = document | 2,082 | 0.782 | 29.1% | | framing = full | 4,576 | 0.694 | 36.8% |
+| aspect = receipt (2:1 to 4:1) | 1,560 | 0.675 | 39.9% | | **framing = partial** | 624 | **0.177** | **99.8%** |
+| aspect = long (4:1 to 8:1) | 1,090 | 0.456 | 63.8% | | curl = flat / curled | 4,680 / 520 | 0.632 / 0.638 | 44.2% / 45.6% |
+| **aspect = strip (over 8:1)** | 468 | **0.237** | **82.1%** | | ink = normal / faded | 3,796 / 1,404 | 0.668 / 0.537 | 41.2% / 52.9% |
+| background = wood | 831 | 0.744 | 31.2% | | lighting = normal | 1,768 | 0.640 | 44.0% |
+| background = plain | 729 | 0.736 | 31.8% | | lighting = dim | 832 | 0.598 | 47.1% |
+| background = stone / fabric | 729 / 729 | 0.670 / 0.664 | 39.0% / 40.5% | | lighting = harsh-shadow | 936 | 0.636 | 45.2% |
+| background = dark-mat | 727 | 0.652 | 41.5% | | lighting = colour-cast | 832 | 0.631 | 44.0% |
+| background = white-desk | 831 | 0.467 | 60.8% | | lighting = low-contrast | 832 | 0.648 | 41.8% |
+| **background = tile** | 624 | **0.478** | **68.9%** | | clutter = none / light / heavy | 1,560 / 1,820 / 1,820 | 0.696 / 0.641 / 0.570 | 37.2% / 43.1% / 51.8% |
+| tilt = 0-10 / 10-30 / 30-45 | 1,768 / 1,716 / 1,716 | 0.649 / 0.635 / 0.613 | 43.0% / 43.9% / 46.3% | | blur = sharp / soft / blurry | 2,860 / 1,560 / 780 | 0.635 / 0.643 / 0.600 | 44.8% / 41.7% / 48.2% |
+| rotation = upright / tilted / any | 2,600 / 1,560 / 1,040 | 0.644 / 0.616 / 0.628 | 43.7% / 45.7% / 44.1% | | noise = low / medium / high | 2,600 / 1,560 / 1,040 | 0.650 / 0.624 / 0.600 | 42.5% / 45.8% / 46.8% |
+| EXIF orientation 1 to 8 | 490 to 1,768 each | 0.624 to 0.644 | 43.3% to 45.3% | | format = jpeg / png / tiff / webp | 2,860 / 520 / 520 / 1,300 | 0.633 / 0.669 / 0.652 / 0.608 | 44.6% / 39.6% / 42.5% / 46.6% |
+| colour space = srgb / display-p3 | 4,056 / 1,144 | 0.628 / 0.648 | 44.8% / 43.0% | | paper = white / cream / coloured | 3,118 / 1,041 / 1,041 | 0.635 / 0.642 / 0.615 | 44.3% / 43.0% / 45.8% |
+
+Worst slice by mean IoU and by failure rate: `framing = partial`. What the table says:
+
+- **Flat across EXIF orientation, file format, colour space, lighting class, tilt, rotation, curl, blur and noise** (within a few points of the 44% overall rate). That is the useful part of the independence check: the decode path (JPEG, PNG, TIFF, WebP, orientation 1 to 8, Display P3) does not distort the geometry, and the detector is not fragile to the photographic degradations of this generator. The one-factor sweep below agrees.
+- **Partial framing (624 images, 99.8% failed).** The ground-truth quad leaves the frame; 347 of the 624 get no quad, 274 are held (Check) and 3 are auto-accepted. Part of this is structural: a quad clipped to the frame scores IoU equal to the visible fraction at best, which is 0.55 to 0.93 here (only 8.7% of these images are visible to 0.90 or more), so no in-frame answer can pass the 0.90 line. The metric counts them as failures; the behaviour (never trusting such a page) is the safe one. Whether partial pages should be extrapolated is a product decision for M2/M4, not something this table settles.
+- **Long and strip receipts (aspect over 4:1): 63.8% and 82.1% failed** (58.7% and 79.8% with the page fully in frame). The plan's long-receipt slice is the detector's weakest area, and the stand-in's receipts (about 3.1:1) never exercised it.
+- **Look-alike surfaces: white desk 60.8%, tile 68.9%** (and dark mat 41.5%): a tile grout grid or a near-white desk gives many competing edges or no contrast. 13 of the 31 silent failures are on a white desk and 10 on tile.
+- **Confident wrong answers.** 19 of the 31 silent failures have IoU below 0.05 with confidence 0.92 to 0.997: the answer does not overlap the page at all. The harness does not dump predicted quads, so this is inferred, not observed: in the four of these images looked at (ground truth drawn on the picture) another white sheet from the generator's clutter lies on the desk, in some cases larger than the thin strip that was the target, which is the likely explanation. If so it is a multi-item situation in product terms, but still a Good verdict on the wrong object. Why the confidence stays high for it was not investigated.
+- **Faded thermal ink: 52.9% against 41.2%** for normal ink on the same receipts-and-documents mix.
+- None of the 31 silent failures is outside the cases above: all have at least one of long/strip, white desk or tile, heavy clutter, low contrast, partial framing or faded ink.
+
+Failures compound. Counting the "hard" factors an image has (long or strip, a white-desk, tile or dark-mat desk, heavy clutter, low-contrast lighting, partial framing, faded ink), the failure rate climbs steeply with the count:
+
+| Hard factors present | 0 | 1 | 2 | 3 | 4 | 5 or 6 |
+|---|---|---|---|---|---|---|
+| Images | 797 | 1,765 | 1,540 | 848 | 221 | 29 |
+| Mean IoU | 0.960 | 0.729 | 0.556 | 0.379 | 0.254 | 0.168 |
+| Failure rate | 5.8% | 34.6% | 54.0% | 71.7% | 84.2% | 89.7% |
+| Silent failures / auto-accepted | 0 / 543 | 5 / 527 | 17 / 293 | 7 / 78 | 1 / 14 | 1 / 1 |
+
+(With full framing only the same pattern holds: 5.8%, 29.8%, 46.8%, 63.7%, 73.1%, 78.6%.) With none of them the detector is at 0.960 mean IoU and 5.8% failures, still above the stand-in's 1.85%, and the 44% overall is mostly the product of many images carrying two or three of them.
+
+**One-factor sweep from an easy base.** To see what each factor costs on its own, 12 small suites (150 to 360 images, seed 777, 512 px) pin every tag to an easy value (document, white paper, plain desk, normal light, no clutter, tilt 0-10, upright, full frame, flat, sharp, low noise, PNG, EXIF 1, sRGB) and free one axis at a time (`--pin AXIS=VALUE`). The easy base itself scores mean IoU 0.992 with 0 of 150 failures, so the generator is not broken and the detector is fine on easy pictures of this generator. Failure rate and (mean IoU) per freed value, n in brackets; every other value in these sweeps scored 0% to 2.4% failures:
+
+| Freed axis | Value (n): failure rate (mean IoU) |
+|---|---|
+| aspect | document (144) 0.0% (0.993); receipt (108) 0.0% (0.989); **long (75) 8.0% (0.922)**; **strip (33) 30.3% (0.705)** |
+| background | plain, fabric, stone, wood (51 to 57 each) 0.0% (0.992 to 0.997); **dark-mat (51) 17.6% (0.884)**; **white-desk (57) 10.5% (0.934)**; **tile (42) 31.0% (0.824)** |
+| lighting | normal, dim, harsh-shadow, colour-cast (57 to 122) 0.0% (0.992 to 0.993); **low-contrast (58) 8.6% (0.952)** |
+| clutter | none (108) 0.0% (0.993); light (126) 2.4% (0.989); **heavy (126) 7.9% (0.972)** |
+| framing | full (317) 0.0% (0.992); **partial (43) 100% (0.169)** |
+| ink (receipts) | normal (198) 0.5% (0.986); faded (162) 0.6% (0.983) |
+| paper | white, cream (72 to 216) 0.0% (0.990 to 0.992); coloured (72) 1.4% (0.989) |
+| tilt, rotation, curl, blur, noise | every value 0.0% to 0.9% (0.986 to 0.996) |
+
+Read together with the table above: alone, only partial framing, strips, long receipts, tile, dark mat, white desk, low contrast and heavy clutter hurt, and tilt, rotation, curl, blur, noise and (alone) faded ink do not; it is the combinations (a faded long receipt on a tile desk with clutter) that take the failure rate to 44%. The stand-in could not show this because it had none of the first group and its other factors were all mild.
+
+### What this does and does not mean
+
+- It does **not** show the detector is bad on photographs: this generator is harder in several ways than a typical phone photo (extra white sheets as deliberate distractors, 8:1 strips on tile, 27% of images with a faded thermal receipt, 12% partial framing), and real photographs have things this one does not. It shows that **the 0.98 IoU / 1.85% failure / 0.13% silent-failure claim was an artefact of the stand-in**, and that the detector has at least three weak areas (long and strip receipts, look-alike surfaces with distractor sheets, partial pages) that the plan cares about. The golden set (M1.39 onward) is the only place this gets decided.
+- The generator was not tuned against the detector: no generator parameter was changed in response to a detector result. The detector saw a 12-image integration run while the generator was being built; after the first 200-image run only the smoke suite's picture size and format mix (for the 5 MB archive budget), the `--pin` option for the sweep and a worker-death retry were added. The look of the pictures (contact sheet of 100 smoke images) was reviewed by eye, not by detector score.
+- The previous section's seed-hygiene protocol (develop on some seeds, hold one back) does not apply to a different generator, but the same caution does: the Python generator is now a development target too, and the next detector change should be judged on both generators and on seeds it has not seen. One seed of each was run here.
+- Reproduce: `cargo xtask synth-setup`, then `cargo xtask synth --suite full` (5,200 images, about 11 minutes with 10 workers and 413 MB under `target/synth/full`, never committed), then `cargo xtask eval run --manifest target/synth/full/manifest.jsonl --predictor detector --out full-py.json --suite full-py` (80 s). The stand-in: `cargo xtask synth --suite full --generator rust`. The sweep: `python -m synth --seed 777 --count 360 --pin aspect=document --pin background=plain ... --out DIR` with one axis left unpinned.
 
 ## Method
 
 ```
-cargo xtask synth --suite smoke          # 200 images, 480 px long edge, seed 0x5EEDA070C20B0001
-cargo xtask synth --suite full           # 5,184 images, same generator and seed (its first 200 are the smoke set)
-cargo xtask synth --suite full --count 1728 --seed 1234567 --out target/synth/mid-b      # other seeds: balanced, 1,728 images
-cargo xtask synth --suite smoke --max-edge 1024 --out target/synth/smoke-1024             # other sizes
+cargo xtask synth --generator rust --suite smoke   # stand-in: 200 images, 480 px long edge, seed 0x5EEDA070C20B0001 (target/synth/smoke-rust)
+cargo xtask synth --generator rust --suite full    # 5,184 images, same generator and seed (its first 200 are the smoke set)
+cargo xtask synth --generator rust --suite full --count 1728 --seed 1234567 --out target/synth/mid-b      # other seeds: balanced, 1,728 images
+cargo xtask synth --generator rust --suite smoke --max-edge 1024 --out target/synth/smoke-1024             # other sizes
 cargo xtask eval run --manifest target/synth/<suite>/manifest.jsonl --predictor detector \
     --out target/synth/<suite>-detector.json --suite <suite>
 cargo xtask eval compare --base base.json --head head.json
