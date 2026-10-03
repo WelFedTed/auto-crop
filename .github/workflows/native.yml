@@ -40,7 +40,8 @@ jobs:
           - { os: ubuntu-22.04, best-effort: false }
           - { os: ubuntu-24.04, best-effort: true }
           - { os: ubuntu-22.04-arm, best-effort: true, jobs: '2' }
-          - { os: windows-11-arm, best-effort: true }
+          # dav1d's arm64 assembly under MSVC needs gas-preprocessor.pl; the C version is enough to prove the build.
+          - { os: windows-11-arm, best-effort: true, meson_args: '-Denable_asm=false' }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -68,6 +69,7 @@ jobs:
       - name: Build pinned native libraries
         env:
           AUTOCROP_BUILD_JOBS: ${{ matrix.jobs }}
+          AUTOCROP_MESON_ARGS: ${{ matrix.meson_args }}
         run: cargo xtask build-native
       - name: Check the built libraries (no GPL encoders, allowed dependencies, libjpeg-turbo floor)
         run: cargo xtask check-native

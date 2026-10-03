@@ -23,9 +23,27 @@ ADR-0005 proved a hand-written libheif binding in a throwaway spike and decided 
 9. **Native build**: `cargo xtask build-native` builds dav1d 1.5.4 with meson (shared, no tools or tests) before libheif, which is configured with `WITH_DAV1D=ON` (dav1d linked, not a plugin); every encoder and every other decoder stays off. `check-native` additionally rejects AV1 encoder symbols and a libheif that does not link dav1d; `packaging/allowed-libs.txt` allows `dav1d`. dav1d needs meson, ninja and, on x86, NASM; macOS arm64 needs no NASM.
 10. **Writers do not exist, so nothing here may replace such a source** (PLAN 3.2.3). The engine opens WebP, TIFF, AVIF, HEIC and HEIF when the build can decode them, and `save_items` refuses `Replace` for any source whose format has no writer (`ErrKind::UnsupportedOutput`; the source stays byte-identical, no temp file, no backup). `Copy` writes `AutoCrop/<stem>.png` (`.jpg` for HEIC, the conversion target of PLAN 3.5) carrying the ICC profile. There is no output-format choice in the engine yet, so this is the only copy format for these sources.
 
+## Results
+
+Measured 2026-10-04. CI: [HEIF path run 37134891451](https://github.com/WelFedTed/auto-crop/actions/runs/37134891451) (windows-2025, macos-latest, ubuntu-22.04, the AddressSanitizer job and the default-build job; the only red step was the benchmark's `pip install` on ubuntu-22.04, fixed afterwards), [Native libraries run 37134891404](https://github.com/WelFedTed/auto-crop/actions/runs/37134891404) (build and `check-native` on the three required OSes plus ubuntu-24.04, ubuntu-22.04-arm and Fedora). An earlier run of the same code on windows-2025 was red for a real reason: meson picked MinGW gcc, libheif's MSVC CMake found no dav1d and was built without AVIF, and `check-native` ("libheif does not link dav1d") caught it; `meson --vsenv` and a CMakeCache check in `build-native` fixed it. windows-11-arm (best-effort) needs `-Denable_asm=false` for dav1d (no `gas-preprocessor.pl` under MSVC arm64).
+
+| Check | windows-2025 | macos-latest (arm64) | ubuntu-22.04 |
+|---|---|---|---|
+| `check-native`: libheif links dav1d, no forbidden symbols, allowed dependencies | pass | pass | pass |
+| codecs tests with `heif` (132, real AVIF and HEIC files, mutation sweeps through libheif and dav1d) | pass | pass | pass |
+| engine tests with `heif` (open AVIF, refuse replace, PNG copy with ICC) | pass | pass | pass |
+| hostile corpus, 128 files, each in its own process, through libheif | 0 failed | 0 failed | 0 failed |
+| HEVC plugin present decodes `rainbow-451x461.heic`; plugin directory moved away: `ERR code=hevc_decoder_missing`, AVIF still decodes | pass | pass | pass |
+| libheif header edited to 1.23.4: build refused ("older than 1.23.5") | pass | pass | pass |
+| 12 MP AVIF (4000 x 3000, 4:2:0, q70, 1.28 MB), mean ms of 10 decodes: 1 thread / 2 threads / all cores | 245 / 165 / 136 (4 vCPU) | 278 / 157 / 116 (3 vCPU) | 272 / 201 / 172 (4 vCPU) |
+
+Shared runners, **NOISY**. Dev machine (Windows 11, i7-8700K, 12 threads, release): 241 ms (1 thread), 157 ms (2), 119 ms (4), 91 ms best (all cores). AddressSanitizer job (clang; libde265, dav1d and libheif built from the same pins as static archives with `-fsanitize=address`; nightly Rust with the sanitizer): the 132 tests, including the byte-mutation sweeps over every fixture, are clean.
+
+What the tests prove beyond "it decodes": the seven mirrored or turned orientations (Pillow wrote each as `irot`/`imir`) decode equal (worst difference at most 1 level) to the unturned file turned by the EXIF table of the `image` crate; the header walk's orientation, size, depth, ICC length and frame count equal what libheif produced for all 15 fixtures and for the HEVC and AVIF files of the libheif archive; the ICC profile comes back byte-exact; a 10-bit file reports `depth.reduced_to_8` and `source_bit_depth` 10; an Exif Orientation of 6 without `irot` leaves the pixels alone.
+
 ## Consequences and open items
 
 - **Not done**: encoding (AVIF, HEIC) is out of scope; `mif3` "mini" files are a typed `UnsupportedFeature` (libheif could decode them, the header walk does not read the bit-packed `mini` box); no HDR tone-mapping, wide-gamut conversion, gain-map or depth handling (M6.24, M6.29, M6.30); alpha is dropped, not flattened on white (M6.31); no thumbnail-first draft; the sandboxed worker pool and the `HeicBackend` trait of `core::ports` are not wired (the engine calls `codecs::decode` in-process); no `heic.engine = system` path; packaging (DLL and plugin placement, rpaths, `heif::configure`) is a later task, see [heif-native.md](../testing/heif-native.md).
-- **Threads**: dav1d and libde265 use every core by default; `heif::set_codec_threads` lowers it (12 MP AVIF, dev machine, release: see Results).
+- **Threads**: dav1d and libde265 use every core by default; `heif::set_codec_threads` lowers it (see the 12 MP row of Results).
 - **Diagnostics**: dav1d logs `Error parsing OBU data` lines to stderr for damaged files; libheif's API gives no way to silence them.
 - **Revisit trigger**: a libheif or dav1d security release (bump the pin; `native-watch` tracks both), `mini` files in the wild, or the plan's HEIC engine setting (`system`) needing a trait seam.
