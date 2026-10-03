@@ -652,10 +652,19 @@ impl Engine {
         run_name: &str,
         hook: &dyn FaultHook,
     ) -> SaveOutcome {
+        // Two or more crops are a group. So is a single crop that follows a group saved the same
+        // way (a split scan edited down to one item: the scan is gone, its pixels are in the
+        // backup, and the old set has to be retired). A single crop after a group saved the other
+        // way is an ordinary single save (replace in place, or one copy).
+        let copy = target == SaveTarget::Copy;
         let group = self.item(id).is_some_and(|i| {
             let it = lock(&i);
             it.status == ItemStatus::Ready
-                && (it.is_split() || it.saved.as_ref().is_some_and(|s| !s.group.is_empty()))
+                && (it.is_split()
+                    || it
+                        .saved
+                        .as_ref()
+                        .is_some_and(|s| !s.group.is_empty() && s.copy == copy))
         });
         if group {
             return self.save_group(id, target, run_id, run_name, hook);

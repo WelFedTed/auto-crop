@@ -1488,3 +1488,78 @@ fn a_single_document_on_a_desk_still_takes_the_single_item_route() {
         assert!(!v.split.as_ref().unwrap().is_split, "{}", v.name);
     }
 }
+
+#[test]
+fn a_single_crop_after_a_copy_split_replaces_in_place_the_ordinary_way() {
+    let e = env();
+    e.engine.set_item_detector(Stub::new(&grid4()));
+    let v = e.open("scan.jpg", &grid4());
+    e.engine.accept_scan(v.id).unwrap();
+    let out = e.save(v.id, SaveTarget::Copy);
+    assert!(out.ok, "{out:?}");
+    assert_eq!(out.saved.unwrap().outputs.len(), 4);
+    // Edit it down to one crop and save as a replacement: the plain name, in place, with a backup.
+    let mut v = v;
+    for c in v.crops.clone().iter().skip(1) {
+        v = e.engine.remove_crop(v.id, c.id).unwrap();
+    }
+    let out = e.save(v.id, SaveTarget::Replace);
+    assert!(out.ok, "{out:?}");
+    assert_eq!(out.saved.unwrap().output, "scan.jpg");
+    assert_eq!(e.files(), ["scan.jpg"]);
+    let f = e.engine.list_backups().runs[0].files[0].clone();
+    assert_eq!(f.kind, auto_crop_engine::store::BackupKind::OneToOne);
+    // The copies from before are still there; nothing of the user's was removed.
+    assert_eq!(fs::read_dir(e.dir.join("AutoCrop")).unwrap().count(), 4);
+}
+
+#[test]
+fn a_replaced_single_save_that_gains_items_retires_the_old_single_output() {
+    let e = env();
+    // Start as an ordinary single-item save.
+    e.engine
+        .set_item_detector(Arc::new(auto_crop_engine::NoSplit));
+    let one = e.open("scan.jpg", &grid4());
+    assert!(one.crops.len() <= 1);
+    let mut v = one;
+    if v.crops.is_empty() {
+        v = e.engine.draw_crop(v.id).unwrap();
+    }
+    assert!(e.save(v.id, SaveTarget::Replace).ok);
+    let single_output = fs::read(e.dir.join("scan.jpg")).unwrap();
+    // Now the user draws two more items and saves again: the cropped file moves into the store,
+    // two new files appear.
+    let v = e.engine.add_crop(v.id, Some(grid4()[0]), None).unwrap();
+    let v = e.engine.add_crop(v.id, Some(grid4()[1]), None).unwrap();
+    assert!(v.crops.len() >= 3);
+    e.engine.accept_scan(v.id).unwrap();
+    let out = e.save(v.id, SaveTarget::Replace);
+    assert!(out.ok, "{out:?}");
+    let names = out.saved.unwrap().outputs;
+    assert!(names.len() >= 3 && !e.files().contains(&"scan.jpg".to_owned()));
+    let bid = e.engine.list_backups().runs[0].files[0]
+        .id
+        .split('/')
+        .next()
+        .unwrap()
+        .to_owned();
+    let superseded = e.engine.paths().backups_dir().join(&bid).join("superseded");
+    let kept: Vec<Vec<u8>> = fs::read_dir(superseded)
+        .unwrap()
+        .flatten()
+        .map(|f| fs::read(f.path()).unwrap())
+        .collect();
+    assert!(
+        kept.contains(&single_output),
+        "the old single output is in the store"
+    );
+    // And the scan restores byte for byte.
+    let r = e.engine.restore_file_derived(
+        &e.engine.list_backups().runs[0].files[0].id,
+        RestoreMode::Auto,
+        DerivedAction::Remove,
+        &nop,
+    );
+    assert!(r.ok, "{r:?}");
+    assert_eq!(e.files(), ["scan.jpg"]);
+}
