@@ -223,15 +223,18 @@ def photo_texture(rng, w: int, h: int, border: str) -> tuple[np.ndarray, tuple[i
     iw, ih = max(w - bl - br, 8), max(h - bt - bb, 8)
     yy = np.linspace(0, 1, ih, dtype=np.float32)[:, None]
     horizon = float(rng.uniform(0.35, 0.65))
+    # A real horizon is never a straight line across the whole picture: it wanders.
+    wander = (_fbm(rng, 4, iw, 4, 2).mean(axis=0) - 0.5) * 2.0
+    hz = (horizon + 0.14 * wander)[None, :].astype(np.float32)
     sky = np.array(rng.uniform((90, 130, 170), (200, 215, 235)), dtype=np.float32)
     sky2 = np.array(rng.uniform((150, 160, 170), (250, 235, 220)), dtype=np.float32)
     ground = np.array(rng.uniform((40, 55, 30), (150, 130, 90)), dtype=np.float32)
     ground2 = np.array(rng.uniform((20, 20, 20), (110, 100, 80)), dtype=np.float32)
-    t = np.clip(yy / max(horizon, 1e-3), 0, 1)
+    t = np.clip(yy / np.maximum(hz, 1e-3), 0, 1)
     top = sky * (1 - t[..., None]) + sky2 * t[..., None]
-    g = np.clip((yy - horizon) / max(1 - horizon, 1e-3), 0, 1)
+    g = np.clip((yy - hz) / np.maximum(1 - hz, 1e-3), 0, 1)
     bot = ground * (1 - g[..., None]) + ground2 * g[..., None]
-    img = np.where((yy < horizon)[..., None], top, bot) * np.ones((1, iw, 1), dtype=np.float32)
+    img = np.where((yy < hz)[..., None], top, bot)
     tex = _fbm(rng, ih, iw, 5, int(rng.integers(3, 7)))
     img *= (0.62 + 0.76 * tex)[..., None]
     for _ in range(int(rng.integers(2, 7))):  # subjects: soft blobs and shapes
