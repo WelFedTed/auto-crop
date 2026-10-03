@@ -31,7 +31,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ocr-oracle-${{ github.ref }}
+  group: ocr-oracle-${{ github.run_id }}
   cancel-in-progress: false
 
 jobs:

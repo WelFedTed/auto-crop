@@ -42,7 +42,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: perf-gate-${{ github.ref }}
+  # A push to main keeps its own result (a pending run in a shared group would be replaced by the next one; dispatch runs likewise).
+  group: perf-gate-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
