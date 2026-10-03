@@ -39,6 +39,17 @@ fn f_lab(t: f32) -> f32 {
 pub fn to_lab(r: &Raster) -> Lab {
     let (w, h) = (r.width as usize, r.height as usize);
     let lut = srgb_lut();
+    // The cube root as a table (4096 steps over 0..1.2, linear in between): the same Lab within
+    // 0.01, several times faster than three `cbrt` calls per pixel.
+    let table: Vec<f32> = (0..=4097)
+        .map(|i| f_lab(i as f32 * (1.2 / 4096.0)))
+        .collect();
+    let flut = |t: f32| -> f32 {
+        let u = (t.clamp(0.0, 1.2) * (4096.0 / 1.2)).min(4096.0);
+        let i = u as usize;
+        let f = u - i as f32;
+        table[i] + (table[i + 1] - table[i]) * f
+    };
     let px = r.data.as_chunks::<3>().0;
     let lab: Vec<[f32; 3]> = px
         .par_chunks((w * 8).max(1))
@@ -52,7 +63,7 @@ pub fn to_lab(r: &Raster) -> Lab {
                 let x = (0.412_456_4 * rl + 0.357_576_1 * gl + 0.180_437_5 * bl) / 0.950_47;
                 let y = 0.212_672_9 * rl + 0.715_152_2 * gl + 0.072_175 * bl;
                 let z = (0.019_333_9 * rl + 0.119_192 * gl + 0.950_304_1 * bl) / 1.088_83;
-                let (fx, fy, fz) = (f_lab(x), f_lab(y), f_lab(z));
+                let (fx, fy, fz) = (flut(x), flut(y), flut(z));
                 [116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz)]
             })
         })

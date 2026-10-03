@@ -294,8 +294,8 @@ pub fn detect_items(src: &Raster, opts: &ItemsOptions) -> ItemsDetection {
 }
 
 /// [`detect_items`] that also appends the cumulative milliseconds at the end of each stage to
-/// `timings` (`proxy`, `frame`, `lab`, `model`, `prepare`, `segment`, `blobs`, `gaps`, `stability`,
-/// `residual`, `finish`), for benchmarks (ROADMAP M10.61). The detection itself does not depend on
+/// `timings` (`proxy`, `frame`, `lab`, `model`, `prepare`, `segment`, `blobs`, `gaps`, `residual`,
+/// `stability`), for benchmarks (ROADMAP M10.61). The detection itself does not depend on
 /// the clock.
 pub fn detect_items_timed(
     src: &Raster,
@@ -449,33 +449,8 @@ fn detect_in(
         }
     }
 
-    // Stability re-runs.
-    mark("gaps");
-    let mut stable = true;
-    if opts.stability_check && !work.is_empty() {
-        let base: Vec<[P; 4]> = seg.blobs.iter().map(|b| rect_quad(&b.rect)).collect();
-        for gain in [0.7f32, 1.4] {
-            let alt = segment::segment(&planes, gain, opts.min_area_frac);
-            let alt_q: Vec<[P; 4]> = alt.blobs.iter().map(|b| rect_quad(&b.rect)).collect();
-            if alt_q.len() != base.len() {
-                stable = false;
-                break;
-            }
-            let all_match = base
-                .iter()
-                .all(|b| alt_q.iter().any(|a| convex_iou(&b[..], &a[..]) >= 0.9));
-            if !all_match {
-                stable = false;
-                break;
-            }
-        }
-        if !stable {
-            scan_reasons.push(reason(ReasonCode::SplitUnstable));
-        }
-    }
-
     // Crisp structure that no item explains (a missed low-contrast item, a hairline).
-    mark("stability");
+    mark("gaps");
     let unexplained = unexplained_edge(&seg, &work, w, h);
     if unexplained > 0.35 && !work.is_empty() {
         scan_reasons.push(reason(ReasonCode::LowContrastEdge));
@@ -493,6 +468,37 @@ fn detect_in(
         .map(|wk| finish_item(wk, w, h, opts.profile))
         .collect();
     reading_order(&mut items);
+
+    // Stability re-runs (M10.10). They only matter when the scan could otherwise be accepted: a
+    // scan that is held anyway keeps its reasons, and the two extra segmentations are skipped.
+    mark("stability");
+    let mut stable = true;
+    let could_accept = opts.stability_check
+        && scan_reasons.is_empty()
+        && !items.is_empty()
+        && items.iter().all(|i| {
+            i.kind == ItemKind::Rect
+                && i.confidence.forced.is_none()
+                && i.confidence.score >= opts.good_cutoff
+        });
+    if could_accept {
+        let base: Vec<[P; 4]> = seg.blobs.iter().map(|b| rect_quad(&b.rect)).collect();
+        for gain in [0.7f32, 1.4] {
+            let alt = segment::segment(&planes, gain, opts.min_area_frac);
+            let alt_q: Vec<[P; 4]> = alt.blobs.iter().map(|b| rect_quad(&b.rect)).collect();
+            let all_match = alt_q.len() == base.len()
+                && base
+                    .iter()
+                    .all(|b| alt_q.iter().any(|a| convex_iou(&b[..], &a[..]) >= 0.9));
+            if !all_match {
+                stable = false;
+                break;
+            }
+        }
+        if !stable {
+            scan_reasons.push(reason(ReasonCode::SplitUnstable));
+        }
+    }
 
     let outcome = match items.len() {
         0 => Outcome::NoItems,
