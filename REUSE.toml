@@ -36,6 +36,7 @@ path = [
     "tools/imgproc-oracles/requirements.txt",
     "tools/imgproc-oracles/requirements.lock",
     "**/*.proptest-regressions",
+    "fuzz/regressions/**",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Auto Crop contributors"

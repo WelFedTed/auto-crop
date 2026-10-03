@@ -220,6 +220,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "auto-crop-fuzz"
+version = "0.0.0"
+dependencies = [
+ "auto-crop-codecs",
+ "auto-crop-core",
+ "auto-crop-engine",
+ "serde_json",
+]
+
+[[package]]
 name = "auto-crop-imgproc"
 version = "0.0.1"
 dependencies = [
@@ -5852,6 +5862,7 @@ dependencies = [
  "auto-crop-core",
  "auto-crop-engine",
  "auto-crop-eval",
+ "auto-crop-fuzz",
  "flate2",
  "goblin",
  "serde",

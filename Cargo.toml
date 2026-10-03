@@ -3,7 +3,7 @@
 
 [workspace]
 resolver = "3"
-exclude = ["xtask/fixtures"]
+exclude = ["xtask/fixtures", "fuzz"]
 members = [
     "crates/core",
     "crates/codecs",

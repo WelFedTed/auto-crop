@@ -1,0 +1,84 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+# cargo-fuzz targets and crash replay (ROADMAP M1.70, M1.71). Never part of the shipping workspace:
+# the `[workspace]` table below keeps it out, like the spikes. `xtask` depends on this crate with
+# `default-features = false` (no libFuzzer, so it builds on every OS) to replay `regressions/`.
+# The fuzz build itself is Linux-only and needs nightly; see docs/testing/fuzzing.md.
+[workspace]
+
+[package]
+name = "auto-crop-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Fuzz targets, seed corpus and crash replay for the codecs and the EditState parser"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[features]
+# On by default so `cargo fuzz run` finds the targets; off for the replay test in xtask.
+default = ["libfuzzer"]
+libfuzzer = ["dep:libfuzzer-sys"]
+
+[dependencies]
+# `fixtures` supplies the generated seed files and the metadata carriers of the `metadata` target.
+auto-crop-codecs = { path = "../crates/codecs", features = ["fixtures"] }
+auto-crop-core = { path = "../crates/core" }
+auto-crop-engine = { path = "../crates/engine" }
+serde_json = "1"
+libfuzzer-sys = { version = "0.4", optional = true }
+
+[lib]
+name = "auto_crop_fuzz"
+path = "src/lib.rs"
+
+# Each target is a thin wrapper around the same-named function in `src/lib.rs`, so the replay test
+# and libFuzzer run identical code.
+[[bin]]
+name = "probe"
+path = "fuzz_targets/probe.rs"
+test = false
+doc = false
+bench = false
+required-features = ["libfuzzer"]
+
+[[bin]]
+name = "limits"
+path = "fuzz_targets/limits.rs"
+test = false
+doc = false
+bench = false
+required-features = ["libfuzzer"]
+
+[[bin]]
+name = "metadata"
+path = "fuzz_targets/metadata.rs"
+test = false
+doc = false
+bench = false
+required-features = ["libfuzzer"]
+
+[[bin]]
+name = "editstate_json"
+path = "fuzz_targets/editstate_json.rs"
+test = false
+doc = false
+bench = false
+required-features = ["libfuzzer"]
+
+# Writes the seed corpus (generated fixtures, the hostile corpus, the EditState fixtures).
+[[bin]]
+name = "make-seeds"
+path = "src/bin/make_seeds.rs"
+
+# A blind mutation fuzzer over the seeds for machines without libFuzzer (Windows, macOS).
+[[bin]]
+name = "mutate"
+path = "src/bin/mutate.rs"
+
+[profile.release]
+panic = "unwind"
+debug = 1

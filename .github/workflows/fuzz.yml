@@ -1,0 +1,168 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+# cargo-fuzz targets (ROADMAP M1.70, M1.71; docs/testing/fuzzing.md). Linux and nightly only.
+#   pull request: 60 s per target when the PR touches codecs, core, fuzz/ or this file. The path
+#                 filter is a step inside the job, so the check always reports (a `paths:` filter on
+#                 the trigger would leave a required check pending forever; docs/policy/ci-guards.md).
+#   nightly:      1 h per target; the corpus persists in the Actions cache so the hours accumulate.
+#   manual:       `seconds` per target (default 300, the M1.70 acceptance run) and a target list.
+# Crashers become plain tests under fuzz/regressions/, replayed on all three OSes by
+# xtask/tests/fuzz_regressions.rs (part of the normal test run).
+name: Fuzz
+
+on:
+  pull_request:
+  schedule:
+    - cron: "23 2 * * *"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: "Fuzzing time per target, in seconds"
+        default: "300"
+        type: string
+      targets:
+        description: "Comma-separated target names, or all"
+        default: "all"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  # Nightly is pinned to a date so a nightly regression cannot turn the check red on its own.
+  FUZZ_NIGHTLY: nightly-2026-10-01
+
+jobs:
+  fuzz:
+    name: fuzz (${{ matrix.target }})
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [probe, limits, metadata, editstate_json]
+    env:
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Plan (path filter, duration, target selection)
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          SECONDS_INPUT: ${{ inputs.seconds }}
+          TARGETS_INPUT: ${{ inputs.targets }}
+        run: |
+          run=true
+          secs=60
+          case "$EVENT" in
+            pull_request)
+              # HEAD is the merge of the PR into its base: HEAD^1 is the base, so this is the PR's diff.
+              if files=$(git diff --name-only HEAD^1 HEAD 2>/dev/null); then
+                if ! printf '%s\n' "$files" | grep -Eq '^(crates/(codecs|core)/|fuzz/|\.github/workflows/fuzz\.yml$)'; then
+                  run=false
+                fi
+              fi
+              ;;
+            schedule)
+              secs=3600
+              ;;
+            workflow_dispatch)
+              secs="$SECONDS_INPUT"
+              case "$secs" in ''|*[!0-9]*) echo "seconds must be a number" >&2; exit 1 ;; esac
+              if [ "$TARGETS_INPUT" != "all" ] && ! printf ',%s,' "$TARGETS_INPUT" | tr -d ' ' | grep -Fq ",$TARGET,"; then
+                run=false
+              fi
+              ;;
+          esac
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "seconds=$secs" >> "$GITHUB_OUTPUT"
+          echo "fuzz $TARGET: run=$run seconds=$secs"
+
+      - name: Install the pinned nightly toolchain
+        if: steps.plan.outputs.run == 'true'
+        run: |
+          rustup toolchain install "$FUZZ_NIGHTLY" --profile minimal --no-self-update
+          cargo "+$FUZZ_NIGHTLY" --version
+
+      - name: Install cargo-fuzz
+        if: steps.plan.outputs.run == 'true'
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        with:
+          tool: cargo-fuzz@0.13
+
+      - name: Build cache
+        if: steps.plan.outputs.run == 'true'
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: fuzz
+          key: ${{ env.FUZZ_NIGHTLY }}
+          save-if: ${{ github.event_name != 'pull_request' }}
+
+      - name: Restore the corpus
+        if: steps.plan.outputs.run == 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+
+      - name: Build against the locked dependency versions, then write the seeds
+        if: steps.plan.outputs.run == 'true'
+        run: |
+          # The fuzzers must exercise the versions that ship: start from the workspace lock file.
+          cp Cargo.lock fuzz/Cargo.lock
+          cargo "+$FUZZ_NIGHTLY" run --release --manifest-path fuzz/Cargo.toml --bin make-seeds -- fuzz/seeds
+          mkdir -p "fuzz/corpus/$TARGET"
+          echo "corpus: $(find "fuzz/corpus/$TARGET" -type f | wc -l) files, seeds: $(find "fuzz/seeds/$TARGET" -type f | wc -l) files"
+
+      - name: Fuzz
+        if: steps.plan.outputs.run == 'true'
+        shell: bash
+        env:
+          SECONDS_TO_RUN: ${{ steps.plan.outputs.seconds }}
+        run: |
+          cargo "+$FUZZ_NIGHTLY" fuzz run "$TARGET" "fuzz/corpus/$TARGET" "fuzz/seeds/$TARGET" -- \
+            -max_total_time="$SECONDS_TO_RUN" -max_len=1048576 -rss_limit_mb=2048 -timeout=20 \
+            -print_final_stats=1 2>&1 | tee "fuzz-$TARGET.log"
+          # `shell: bash` runs with pipefail, so a crash (cargo-fuzz exits non-zero) fails the step
+          # before the summary below, which is informational only.
+          {
+            echo "### fuzz $TARGET (${SECONDS_TO_RUN} s)"
+            echo '```'
+            grep -E "^(stat::|#[0-9]+.*(DONE|REDUCE))" "fuzz-$TARGET.log" | tail -n 12 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save the corpus
+        if: always() && steps.plan.outputs.run == 'true' && github.event_name != 'pull_request'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+
+      - name: Show the crashing input
+        if: failure() && steps.plan.outputs.run == 'true'
+        run: |
+          for f in "fuzz/artifacts/$TARGET"/*; do
+            [ -f "$f" ] || continue
+            echo "== $f ($(wc -c < "$f") bytes, sha256 $(sha256sum "$f" | cut -c1-16))"
+            head -c 4096 "$f" | base64 -w0; echo
+          done
+
+      - name: Upload the crash artifacts
+        if: failure() && steps.plan.outputs.run == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}
+          if-no-files-found: ignore

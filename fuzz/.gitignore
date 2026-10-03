@@ -1,0 +1,8 @@
+/target/
+/corpus/
+/seeds/
+/artifacts/
+/coverage/
+# CI copies the workspace Cargo.lock here so the fuzzers build the dependency versions that ship.
+/Cargo.lock
+/artifacts-local/
