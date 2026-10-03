@@ -424,7 +424,9 @@ mod tests {
         let ok = "DAV1D_INCLUDE_DIR:PATH=/p/include\nDAV1D_LIBRARY:FILEPATH=/p/lib/libdav1d.so\n";
         assert!(dav1d_found(ok));
         assert!(dav1d_found("DAV1D_LIBRARY:FILEPATH=C:/p/lib/dav1d.lib\r\n"));
-        assert!(!dav1d_found("DAV1D_LIBRARY:FILEPATH=DAV1D_LIBRARY-NOTFOUND\n"));
+        assert!(!dav1d_found(
+            "DAV1D_LIBRARY:FILEPATH=DAV1D_LIBRARY-NOTFOUND\n"
+        ));
         assert!(!dav1d_found("DAV1D_LIBRARY:FILEPATH=\n"));
         assert!(!dav1d_found("WITH_DAV1D:BOOL=ON\n"));
         assert!(!dav1d_found(""));
