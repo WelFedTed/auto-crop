@@ -392,15 +392,22 @@ fn crops_snap_to_the_imcu_grid_and_report_the_realised_rectangle() {
         .transform(&src, Op::Crop(aligned), Policy::Perfect, &limits())
         .unwrap();
     assert!(t.perfect && t.rect == aligned && (t.width, t.height) == (32, 32));
-    // The cropped pixels are the source pixels of the rectangle, exactly (same coefficients).
+    // Same coefficients as the safe-Rust crop, so the decoded pixels are identical; against the
+    // source pixels only the chroma upsampling at the new border differs (mean <= 1 LSB).
     let (base, got) = (decode(&src).unwrap(), decode(&t.bytes).unwrap());
+    let safe =
+        jpeg_lossless::transform(&src, Op::Crop(aligned), Policy::Perfect, &limits()).unwrap();
+    assert_eq!(decode(&safe.bytes).unwrap().raster, got.raster);
+    let mut want = Vec::new();
     for y in 0..32usize {
-        let (a, b) = ((y + 16) * 96 + 16, y * 32);
-        assert_eq!(
-            &base.raster.data[a * 3..(a + 32) * 3],
-            &got.raster.data[b * 3..(b + 32) * 3]
-        );
+        let a = (y + 16) * 96 + 16;
+        want.extend_from_slice(&base.raster.data[a * 3..(a + 32) * 3]);
     }
+    assert!(
+        mad(&got.raster.data, &want) <= 1.0,
+        "mean {}",
+        mad(&got.raster.data, &want)
+    );
     let off = Rect {
         x: 20,
         y: 10,

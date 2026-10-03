@@ -6,6 +6,9 @@
 //! DCT-scaled decode (when installed) validates the 35 dB PSNR bound that the feature's own tests
 //! check against the pinned library in CI.
 
+// Two of the tests below describe the safe-Rust fallback and are compiled out with the feature.
+#![cfg_attr(feature = "turbojpeg", allow(unused_imports, dead_code))]
+
 use crate::fixtures::{JpegSpec, orient_reference, photo, png_rgb, psnr};
 use crate::scaled::block_mean;
 use crate::{DecodeLimits, decode, decode_scaled};
@@ -38,6 +41,9 @@ fn the_reduction_and_the_oriented_size_follow_the_request() {
     assert_eq!((r.decoded.raster.width, r.decoded.raster.height), (31, 49));
 }
 
+// Exact equality with `decode` holds for the safe-Rust path; libjpeg-turbo differs by a few LSB
+// (checked by the feature's own tests).
+#[cfg(not(feature = "turbojpeg"))]
 #[test]
 fn full_and_oversized_requests_return_the_full_decode_and_never_upscale() {
     let bytes = jpeg(80, 48, Some(3));
@@ -61,6 +67,7 @@ fn formats_without_a_native_reduction_come_back_at_full_size() {
     assert_eq!(r.decoded.raster, decode(&png).unwrap().raster);
 }
 
+#[cfg(not(feature = "turbojpeg"))]
 #[test]
 fn the_fallback_is_the_block_average_of_the_stored_pixels_then_turned() {
     let (w, h) = (97u32, 61u32);
