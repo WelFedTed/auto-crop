@@ -23,7 +23,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 |---|---|---|---|---|---|
 | P | Planning | none | documents | - | 4 / 5 (80%) |
 | M0 | Foundations and week-1 spikes | none | CI only (Windows, macOS, Linux) | XL | 49 / 94 (52%) |
-| M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 35 / 94 (37%) |
+| M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 38 / 94 (40%) |
 | M2 | Classical pipeline, safe writes and CLI | v0.1.0 | Windows 10/11 x64 | L | 0 / 93 (0%) |
 | M3 | GUI alpha: single-image editor | v0.2.0 | Windows 10/11 x64 | XL | 0 / 94 (0%) |
 | M4 | ML detection, orientation and calibrated confidence | v0.3.0 | Windows 10/11 x64 | XL | 0 / 90 (0%) |
@@ -39,7 +39,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | X | Continuous and cross-cutting | - | - | - | 0 / 42 (0%) |
 | X | Post-1.0 backlog (1.x) | - | - | - | 0 / 43 (0%) |
 | X | Spikes and open decisions | - | - | - | 0 / 28 (0%) |
-| **Total** | | | | | **88 / 1407 (6%)** |
+| **Total** | | | | | **91 / 1407 (6%)** |
 <!-- progress:end -->
 
 ## Why this order
@@ -271,7 +271,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [ ] **M1.55 Analysis stand-ins** - Time equivalent work labelled STAND-IN until M2/M4: (a) a public 256x256 MobileNetV3-class net (random weights) via the M0.35 ADR runtime; (b) Canny and contours on the 1024 px proxy with `imageproc`; the budget table shows a separate stand-in column.
 - [ ] **M1.56 Decode and resize benchmarks** - criterion 0.8: turbojpeg (full, scaled) vs zune-jpeg, plus PNG/TIFF/WebP; `fast_image_resize` vs `image::imageops::resize` and `pic-scale`, with PSNR/SSIM. ADR `docs/adr/NNNN-codec-kernel-choices.md` picks the decoder, resizer and linear-light rule. Status: benches exist in `crates/imgproc-bench`; the codec-kernel-choices ADR is not written, and turbojpeg/pic-scale are not benchmarked.
 - [ ] **M1.57 Kernel and encode benchmarks** - criterion: warp from 12/48/100 MP to 2480x3508 and to a heavy-minification output (M2.15 gate: <= 90 ms at 8 threads); Otsu, Sauvola, NICK at windows 31/51/101; JPEG q90 (turbojpeg vs `jpeg-encoder`) and PNG encode; 1 and N threads. Status: warp, threshold and encode benches exist (`docs/perf/kernels.md`); the 90 ms gate needs an idle-machine run.
-- [ ] **M1.58 gungraun gate** - gungraun 0.20 (Valgrind, Linux only) on small fixed inputs for decode, resize, warp, threshold kernels per SIMD level (scalar, SSE4.1, AVX2); `main` and PR head in one job; > 5% worse blocks, 2% warns. Acceptance: an injected 10% regression fails. _(gate: > 5%)_
+- [x] **M1.58 gungraun gate** - gungraun 0.20 (Valgrind, Linux only) on small fixed inputs for decode, resize, warp, threshold kernels per SIMD level (scalar, SSE4.1, AVX2); `main` and PR head in one job; > 5% worse blocks, 2% warns. Acceptance: an injected 10% regression fails. _(gate: > 5%)_ Verified: 19 unit tests of `tools/perf_gate/compare.py`; no-op run 0 failing, injected +10% canary run FAILs at all three levels (`--expect-fail`). Limit: the injection is a canary env var, not a real kernel diff on a branch (no scratch branches); not a required check. `docs/perf/instruction-gate.md`.
 - [ ] **M1.59 Nightly wall-clock** - hyperfine (`--warmup 3 --runs 20`) on the dev-pipeline for 12/48/100 MP on the Tier-M laptop as the private repo's self-hosted runner (AC power; binary built on a hosted runner); an issue opens when p50 or peak RSS regresses > 10%; never gates a PR.
 - [ ] **M1.60 Memory profile and batch throughput** - DHAT or heaptrack peak heap at 12/48/100 MP vs 3x decoded RGB8 + 64 MB (175 MB, 500 MB, 1.0 GB; PROVISIONAL); 200 x 12 MP batch on cores - 1 workers under `MemoryBudget` at 1-8 workers: images/s, scaling efficiency (70% checked), peak RSS. Status: peak heap measured (0.34-0.58 of the bound; 67 MB at 12 MP) and asserted in a test; batch throughput numbers are NOISY (loaded host), so scaling efficiency is not established. Re-run on an idle machine.
 - [ ] **M1.61 Tier-M x86 baseline** - Full matrix (decode, resize, warp, threshold, encode, dev-pipeline, batch) on the Windows Tier-M machine (6C/12T AVX2, 16 GB, NVMe, AC; record the model) with a host fingerprint JSON; published as `host.tier = M` on `metrics`.
@@ -280,8 +280,8 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [ ] **M1.64 Metrics branch and dashboard** - Orphan `metrics` branch (`auto-crop-metrics/1`) and a uPlot Pages site: per-slice trends, latency vs failure Pareto, stage times vs budget, gate table; built by the single `pages.yml` created here (M9.19, M13.77 extend it); aggregates only.
 
 ### Enhancement
-- [ ] **M1.65 Flatten spike** - Throwaway `spikes/enhance/`: ~1.5 MP proxy, per-block 85-90th percentile luma, barcode/black-band blocks inpainted, gain <= 3x. Acceptance: residual shading <= 3% of paper on synthetic gradients (PROVISIONAL); no barcode ghosts.
-- [ ] **M1.66 Tesseract oracle** - Dev-only `tools/ocr_oracle/` runs Tesseract 5.x (version recorded, settings fixed and logged, notably `thresholding_method`) and computes CER and numeric-token accuracy. Acceptance: clean synthetic receipts CER <= 5% (PROVISIONAL); a blurred copy is worse.
+- [x] **M1.65 Flatten spike** - Throwaway `spikes/enhance/`: ~1.5 MP proxy, per-block 85-90th percentile luma, barcode/black-band blocks inpainted, gain <= 3x. Acceptance: residual shading <= 3% of paper on synthetic gradients (PROVISIONAL); no barcode ghosts. Result (`spikes/enhance/`): residual 0.12-2.0% of paper level (bar 3%), max gain 2.2x, no barcode ghosts (control without rejection shows 9%). Limits: luma only, steep shadow edges 3.4-4.8%, hard shadows 32%, 80-190 ms on a loaded host.
+- [x] **M1.66 Tesseract oracle** - Dev-only `tools/ocr_oracle/` runs Tesseract 5.x (version recorded, settings fixed and logged, notably `thresholding_method`) and computes CER and numeric-token accuracy. Acceptance: clean synthetic receipts CER <= 5% (PROVISIONAL); a blurred copy is worse. Result: Tesseract 5.5.1 in CI, clean synthetic receipts CER 0.16% (bar 5%), blurred copy 1.58%; '-----' rule lines are stripped from both texts before scoring. Real receipts untested (M1.67/M1.68 need the owner's set).
 - [ ] **M1.67 Transcribe golden receipts** - Hand-transcribe >= 30 of the >= 40 golden receipts (PROVISIONAL), covering > 4:1, thermal-fade and partial-frame cases, every amount and decimal point exact; transcripts stay private; 20% checked by a second reader.
 - [ ] **M1.68 Enhance sweep** - On rectified golden receipts: grey vs flatten + Otsu/Sauvola/NICK, windows 21-201 (PROVISIONAL), no-flatten ablation; CER change, share worse > 1 pt. ADR `docs/adr/NNNN-enhance-feasibility.md` (aggregates only) names the M7 default or "inconclusive". _(gate: CER)_
 
