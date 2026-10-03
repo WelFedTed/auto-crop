@@ -23,7 +23,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 |---|---|---|---|---|---|
 | P | Planning | none | documents | - | 4 / 5 (80%) |
 | M0 | Foundations and week-1 spikes | none | CI only (Windows, macOS, Linux) | XL | 49 / 94 (52%) |
-| M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 44 / 94 (46%) |
+| M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 50 / 94 (53%) |
 | M2 | Classical pipeline, safe writes and CLI | v0.1.0 | Windows 10/11 x64 | L | 0 / 93 (0%) |
 | M3 | GUI alpha: single-image editor | v0.2.0 | Windows 10/11 x64 | XL | 0 / 94 (0%) |
 | M4 | ML detection, orientation and calibrated confidence | v0.3.0 | Windows 10/11 x64 | XL | 0 / 90 (0%) |
@@ -39,7 +39,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | X | Continuous and cross-cutting | - | - | - | 0 / 42 (0%) |
 | X | Post-1.0 backlog (1.x) | - | - | - | 0 / 43 (0%) |
 | X | Spikes and open decisions | - | - | - | 0 / 28 (0%) |
-| **Total** | | | | | **97 / 1407 (6%)** |
+| **Total** | | | | | **103 / 1407 (7%)** |
 <!-- progress:end -->
 
 ## Why this order
@@ -236,12 +236,12 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [ ] **M1.29 Baseline adapters** - Dev-only adapters: `tools/baselines/cv_quad.py` (written from scratch), ImageMagick `-deskew`, `unpaper` (GPL-2; external process, never linked or bundled). Acceptance: per-slice table in `docs/perf/baselines.md`; oracle > cv_quad > full-frame on tilt > 30 deg.
 
 ### Corpus and labelling
-- [ ] **M1.30 Synthetic generator** - `tools/synth/` (Python, hashed `requirements.lock`, Augraphy 8.2.6 behind a `degrade.py` seam; AlbumentationsX banned, AGPL): `python -m synth --seed S --count N`, `manifest.jsonl` v1. Acceptance: the same seed gives identical manifests and hashes on Linux.
-- [ ] **M1.31 Known-text pages and receipts** - OFL fonts, public-domain text, generated line items (prices, decimals), barcodes and QR; Letter/A4 pages and receipts incl. aspect > 4:1 and > 8:1, plus transcripts and renders. Acceptance: Tesseract 5 CER <= 5% on the clean render (PROVISIONAL).
-- [ ] **M1.32 Camera geometry, ground truth** - Pinhole homography (pitch/yaw to +-45 deg; tagged partial framing and curl), analytic ground truth from the f64 matrix. Acceptance: inverse warp matches the clean render at SSIM >= 0.98 (PROVISIONAL); CI fails if `tools/synth` imports app code.
-- [ ] **M1.33 Backgrounds and degradations** - CC0 or procedural backgrounds only (DTD excluded; licence in the manifest); clutter, shadows, colour casts, blur, noise, JPEG q40-95, thermal fade; lighting and clutter tags. Acceptance: tag histogram meets quotas; 100-image contact sheet reviewed.
-- [ ] **M1.34 Format, EXIF and ICC variants** - JPEG, PNG, TIFF, WebP outputs; orientation 1-8 variants with pre-rotated pixels so ground truth stays valid; sRGB and Display P3 variants. Acceptance: the M1 decoders reproduce the upright reference for every variant (feeds M1.17).
-- [ ] **M1.35 Synthetic suites and splits** - `xtask synth --suite smoke|full`: full >= 5,000 images, every slice cell >= 200 (rare slices 150-500; PROVISIONAL), never committed; smoke = 200 images, <= 5 MB archive, no Git LFS; `xtask check-splits` fails when a `scene_id` spans two splits.
+- [x] **M1.30 Synthetic generator** - `tools/synth/` (Python, hashed `requirements.lock`, Augraphy 8.2.6 behind a `degrade.py` seam; AlbumentationsX banned, AGPL): `python -m synth --seed S --count N`, `manifest.jsonl` v1. Acceptance: the same seed gives identical manifests and hashes on Linux. Verified: identical bytes at 1-10 workers; Augraphy 8.2.6 (MIT) only behind `degrade.py`; AlbumentationsX ban tested; smoke suite regenerated locally (200 images, 4.8 MB).
+- [x] **M1.31 Known-text pages and receipts** - OFL fonts, public-domain text, generated line items (prices, decimals), barcodes and QR; Letter/A4 pages and receipts incl. aspect > 4:1 and > 8:1, plus transcripts and renders. Acceptance: Tesseract 5 CER <= 5% on the clean render (PROVISIONAL). Tesseract 5.5.1 CER passes on Linux CI only (docs 0.87%, receipts 0.95%); receipts reach 11.5:1.
+- [x] **M1.32 Camera geometry, ground truth** - Pinhole homography (pitch/yaw to +-45 deg; tagged partial framing and curl), analytic ground truth from the f64 matrix. Acceptance: inverse warp matches the clean render at SSIM >= 0.98 (PROVISIONAL); CI fails if `tools/synth` imports app code. SSIM >= 0.994 over 48 renders, measured band-limited (raw text strokes cap SSIM near 0.93); a 1.5 px error fails.
+- [x] **M1.33 Backgrounds and degradations** - CC0 or procedural backgrounds only (DTD excluded; licence in the manifest); clutter, shadows, colour casts, blur, noise, JPEG q40-95, thermal fade; lighting and clutter tags. Acceptance: tag histogram meets quotas; 100-image contact sheet reviewed.
+- [x] **M1.34 Format, EXIF and ICC variants** - JPEG, PNG, TIFF, WebP outputs; orientation 1-8 variants with pre-rotated pixels so ground truth stays valid; sRGB and Display P3 variants. Acceptance: the M1 decoders reproduce the upright reference for every variant (feeds M1.17).
+- [x] **M1.35 Synthetic suites and splits** - `xtask synth --suite smoke|full`: full >= 5,000 images, every slice cell >= 200 (rare slices 150-500; PROVISIONAL), never committed; smoke = 200 images, <= 5 MB archive, no Git LFS; `xtask check-splits` fails when a `scene_id` spans two splits. Deviation: smoke images are 320 px with 12% lossless files to fit 5 MB. On this independent generator the improved detector scores mean IoU 0.60-0.63 and fails 44-46% (it was tuned on the Rust stand-in: 0.98); see `docs/perf/detector-baseline.md`.
 - [x] **M1.36 fetch-corpus framework** - `xtask fetch-corpus [--sample] <name>`: `corpus.lock.toml` records URL, size, SHA-256, SPDX licence, attribution; verified before use, refused on mismatch; cache outside the repo, never vendored. Test: a local HTTP fixture serving bad downloads. Verified against a loopback HTTP fixture (tampered, truncated, wrong-size, redirect and hostile-archive cases); real dataset pins are `TODO-first-fetch`, so the first real fetch needs the owner's OK. Docs: `docs/testing/corpora.md`.
 - [ ] **M1.37 SmartDoc and CORD adapters** - SmartDoc 2015 Ch.1 (CC BY 4.0; cite, email the organisers; 21 MB sample first) with every Nth frame per clip and clip-level `scene_id`; CORD (CC BY 4.0) transcripts for CER. Acceptance: manifests validate; 20 quads checked on a contact sheet. Status: adapters and manifests built and fixture-tested; UNVERIFIED against the real dataset layouts (no download made), so this stays open.
 - [ ] **M1.38 MIDV, DIBCO, raw.pixls.us adapters** - MIDV-500 quads (licence checked per release); DIBCO fetch-only with binary ground truth for threshold tests; raw.pixls.us filtered to CC0-only. Acceptance: manifests validate; a mixed-licence fixture tests the CC0 filter. Status: same as M1.37; MIDV-500 is blocked until its licence is cleared.
