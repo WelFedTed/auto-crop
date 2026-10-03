@@ -202,6 +202,25 @@ impl Field {
         Some([self.rgb[i], self.rgb[i + 1], self.rgb[i + 2]])
     }
 
+    /// The blurred colour at `p` by bilinear interpolation (pixel centres at `+ 0.5`), `None` when
+    /// the neighbourhood leaves the frame.
+    pub fn colour_bilinear(&self, p: P) -> Option<[f32; 3]> {
+        let (x, y) = (p.0 - 0.5, p.1 - 0.5);
+        if x < 0.0 || y < 0.0 || x >= (self.w - 1) as f64 || y >= (self.h - 1) as f64 {
+            return None;
+        }
+        let (x0, y0) = (x as usize, y as usize);
+        let (fx, fy) = ((x - x0 as f64) as f32, (y - y0 as f64) as f32);
+        let at = |xx: usize, yy: usize, c: usize| self.rgb[(yy * self.w + xx) * 3 + c];
+        let mut out = [0.0f32; 3];
+        for (c, o) in out.iter_mut().enumerate() {
+            let top = at(x0, y0, c) * (1.0 - fx) + at(x0 + 1, y0, c) * fx;
+            let bot = at(x0, y0 + 1, c) * (1.0 - fx) + at(x0 + 1, y0 + 1, c) * fx;
+            *o = top * (1.0 - fy) + bot * fy;
+        }
+        Some(out)
+    }
+
     /// Projected gradient magnitude at the pixel under `p` along the unit vector `n`, with the signed
     /// value (positive when the brightness rises along `n`), and whether the gradient is aligned
     /// with `n` (within about 37 degrees). `None` outside the frame.
@@ -495,6 +514,34 @@ impl RLine {
         f64::from(self.cov[j] - self.cov[i]) / (hi - lo).max(1.0)
     }
 
+    /// Stretches of the line (as positions along `d`) that carry edge points, bridging gaps of up to
+    /// `gap` pixels, longest first.
+    pub fn runs(&self, gap: f64) -> Vec<(f64, f64)> {
+        let mut out: Vec<(f64, f64)> = Vec::new();
+        let mut open: Option<(usize, usize)> = None;
+        for i in 0..self.cov.len() - 1 {
+            if self.cov[i + 1] > self.cov[i] {
+                open = match open {
+                    Some((a, b)) if (i - b) as f64 <= gap => Some((a, i)),
+                    Some((a, b)) => {
+                        out.push((self.t0 + a as f64, self.t0 + b as f64 + 1.0));
+                        Some((i, i))
+                    }
+                    None => Some((i, i)),
+                };
+            }
+        }
+        if let Some((a, b)) = open {
+            out.push((self.t0 + a as f64, self.t0 + b as f64 + 1.0));
+        }
+        out.sort_by(|x, y| {
+            (y.1 - y.0)
+                .partial_cmp(&(x.1 - x.0))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        out
+    }
+
     fn intersect(&self, o: &RLine) -> Option<P> {
         let det = self.n.0 * o.n.1 - self.n.1 * o.n.0;
         if det.abs() < 1e-3 {
@@ -551,7 +598,7 @@ pub(super) fn line_quads(lines: &[RLine], w: f64, h: f64, keep: usize) -> Vec<Li
                 continue;
             }
             let (a, b) = (&lines[i], &lines[j]);
-            if (a.rho - aligned_rho(a.theta, (b.theta, b.rho))).abs() < 0.07 * span {
+            if (a.rho - aligned_rho(a.theta, (b.theta, b.rho))).abs() < 0.03 * span {
                 continue;
             }
             parmask[i] |= 1 << j;

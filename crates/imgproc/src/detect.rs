@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // SPDX-FileCopyrightText: 2026 Auto Crop contributors
 
-//! Classical page detector. Two independent sources of candidate quadrilaterals, scored by one
+//! Classical page detector. Three independent sources of candidate quadrilaterals, scored by one
 //! rule:
 //!
 //! * straight edge lines (a colour-fused gradient, thinned, voted into a Hough accumulator,
@@ -9,10 +9,15 @@
 //!   brightness relative to the desk, because only the presence of an edge counts and its polarity
 //!   may flip along a side (module `edges`);
 //! * the best bright or dark region, fitted with four lines: this still yields a page that the
-//!   frame cuts off.
+//!   frame cuts off;
+//! * long thin pages from two long edge lines whose short ends are found by colour contrast instead
+//!   of by edges, including receipts cut by the frame at one or both ends (module `strip`). These
+//!   are never auto-accepted.
 //!
 //! A candidate is scored by how much of each of its four sides is backed by an aligned edge, with a
-//! veto for edges that have paper on the far side (the text block inside a page). The result is held
+//! veto for edges that have paper on the far side (the text block inside a page). A candidate that
+//! can never be answered does not compete; a held patch inside a bigger viable quad gives way to it;
+//! a container of several separate items is held. The result is held
 //! for review, not accepted, when any side is weakly supported, when a bigger well supported quad
 //! exists, when the contrast is low or when the page is cut by the frame.
 //!
@@ -25,6 +30,7 @@ use crate::scale::resize_to_fit;
 use auto_crop_core::{Confidence, Forced, Pt, Reason, ReasonCode, Side};
 
 mod edges;
+mod strip;
 use edges::Field;
 
 /// Below this score the detector reports no quad at all (a Failed item).
@@ -44,6 +50,8 @@ const EDGE_NOISE_GAIN: f32 = 1.5;
 const MAX_LINES: usize = 64;
 /// Line quadrilaterals kept for scoring.
 const KEEP_LINE_QUADS: usize = 6;
+/// Strip candidates (two long edges, ends found by colour contrast) kept for scoring.
+const KEEP_STRIPS: usize = 4;
 
 #[derive(Debug, Clone)]
 pub struct Detection {
@@ -412,6 +420,8 @@ struct Candidate {
     weakest_side: usize,
     /// Mean edge support over the four sides, 0..1.
     mean_support: f64,
+    /// Built from two long edges with colour-confirmed ends (see `strip`).
+    from_strip: bool,
 }
 
 fn side_of(i: usize) -> Side {
@@ -439,12 +449,28 @@ const PAPER_MATCH: f32 = 4.0;
 const PAPER_EDGE_SHARE: f64 = 0.3;
 /// Mean edge strength (in edge thresholds) below which the contrast is called low.
 const LOW_STRENGTH: f64 = 1.8;
+/// Aspect ratio above which the outline is held for a look (a thin strip is still a candidate).
+const ODD_ASPECT: f64 = 20.0;
+/// Highest score of a strip candidate (see `strip`): held for review, ranked below a clean quad.
+const STRIP_SCORE_CAP: f32 = 0.8;
+/// A strip candidate competes at this share of its rank: it wins only against clearly worse ones.
+const STRIP_RANK_FACTOR: f64 = 0.85;
 /// Every side needs at least this edge support for the result to be eligible for auto-accept.
 const GOOD_SIDE_SUPPORT: f64 = 0.9;
 /// A different, bigger quad scoring at least this much makes the choice ambiguous.
 const RIVAL_SCORE: f32 = 0.75;
 /// ... or when at least three of its four sides are solid (a page whose far edge is invisible).
 const RIVAL_MEAN_SUPPORT: f64 = 0.7;
+/// Two separate quads inside the chosen one, each scoring at least this and covering between these
+/// shares of its area, make it a container of several items.
+const CHILD_SCORE: f32 = 0.9;
+const CHILD_MIN_AREA: f64 = 0.12;
+const CHILD_MAX_AREA: f64 = 0.6;
+/// A bigger viable quad containing the chosen one replaces it when it scores at least this much
+/// and at least this share of the chosen score, and is at least this many times its area.
+const PROMOTE_SCORE: f32 = 0.6;
+const PROMOTE_RATIO: f32 = 0.75;
+const PROMOTE_AREA: f64 = 1.3;
 /// ... when it is this much bigger than the chosen one.
 const RIVAL_AREA_RATIO: f64 = 1.1;
 
@@ -547,7 +573,7 @@ fn side_stats(f: &Field, a: P, b: P, paper: [f32; 3]) -> SideStat {
     }
 }
 
-fn evaluate(quad_raw: [P; 4], f: &Field) -> Candidate {
+fn evaluate(quad_raw: [P; 4], f: &Field, strip: Option<&[strip::End; 2]>) -> Candidate {
     let (w, h) = (f.w as f64, f.h as f64);
     let q = orient(quad_raw);
     let area = crate::geometry::polygon_area(&q).abs();
@@ -588,6 +614,20 @@ fn evaluate(quad_raw: [P; 4], f: &Field) -> Candidate {
     if blind.len() == 1 {
         supports[blind[0]] = 1.0;
     }
+    // A strip candidate's short ends are judged by colour contrast (or by the frame cutting them).
+    let mut by_contrast = [false; 4];
+    if let Some(ends) = strip {
+        for k in 0..4 {
+            let (a, b) = (q[k], q[(k + 1) % 4]);
+            let near = |p: P, r: P| crate::geometry::dist(p, r) < 1.5;
+            for e in ends {
+                if (near(a, e.a) && near(b, e.b)) || (near(a, e.b) && near(b, e.a)) {
+                    supports[k] = e.support;
+                    by_contrast[k] = true;
+                }
+            }
+        }
+    }
     let partial = (0..4).any(|k| sides[k].blind >= SAMPLES / 6)
         || q.iter()
             .any(|p| p.0 < 1.5 || p.1 < 1.5 || p.0 > w - 2.5 || p.1 > h - 2.5);
@@ -601,7 +641,7 @@ fn evaluate(quad_raw: [P; 4], f: &Field) -> Candidate {
     let weakest = supports[weakest_side];
     let mean_support = supports.iter().sum::<f64>() / 4.0;
     let strength = (0..4)
-        .filter(|k| !blind.contains(k))
+        .filter(|k| !blind.contains(k) && !by_contrast[*k])
         .map(|k| sides[k].strength)
         .fold(f64::MAX, f64::min);
     if strength < LOW_STRENGTH {
@@ -637,7 +677,7 @@ fn evaluate(quad_raw: [P; 4], f: &Field) -> Candidate {
         (crate::geometry::dist(q[0], q[1]) + crate::geometry::dist(q[3], q[2])) / 2.0,
         (crate::geometry::dist(q[0], q[3]) + crate::geometry::dist(q[1], q[2])) / 2.0,
     );
-    if l1.max(l2) / l1.min(l2).max(1.0) > 12.0 {
+    if l1.max(l2) / l1.min(l2).max(1.0) > ODD_ASPECT {
         reasons.push(Reason {
             code: ReasonCode::OddAspect,
             side: None,
@@ -648,6 +688,12 @@ fn evaluate(quad_raw: [P; 4], f: &Field) -> Candidate {
     let mut score = (0.30 * mean_support + 0.15 * angle_score + 0.55 * weakest) as f32;
     if partial {
         score = score.min(0.85);
+    }
+    if strip.is_some() {
+        // Ends confirmed by colour contrast rather than by edges: never auto-accepted, and a plain
+        // four-line quad of the same page, when one exists, outranks it.
+        score = score.min(STRIP_SCORE_CAP);
+        forced.get_or_insert(Forced::Check);
     }
     // Auto-accept needs every side well backed, not merely a good average.
     if weakest < GOOD_SIDE_SUPPORT {
@@ -667,6 +713,7 @@ fn evaluate(quad_raw: [P; 4], f: &Field) -> Candidate {
         reasons,
         weakest_side,
         mean_support,
+        from_strip: strip.is_some(),
     }
 }
 
@@ -689,7 +736,8 @@ fn dist_to_segment(a: P, b: P, p: P) -> f64 {
 fn rival_side(best: &Candidate, others: &[Candidate]) -> Option<usize> {
     let best_area = crate::geometry::polygon_area(&best.quad).abs();
     let rival = others.iter().find(|o| {
-        (o.score >= RIVAL_SCORE || o.mean_support >= RIVAL_MEAN_SUPPORT)
+        !o.from_strip
+            && (o.score >= RIVAL_SCORE || o.mean_support >= RIVAL_MEAN_SUPPORT)
             && o.forced != Some(Forced::Failed)
             && crate::geometry::polygon_area(&o.quad).abs() > RIVAL_AREA_RATIO * best_area
     })?;
@@ -718,36 +766,21 @@ fn rival_side(best: &Candidate, others: &[Candidate]) -> Option<usize> {
     })
 }
 
-/// Finds the page quad in `src`.
-pub fn detect(src: &Raster) -> Detection {
-    let failed = |score: f32| Detection {
-        quad: None,
-        confidence: Confidence {
-            score,
-            forced: Some(Forced::Failed),
-            reasons: vec![Reason {
-                code: ReasonCode::NoQuad,
-                side: None,
-            }],
-        },
-    };
-    if src.width < 16 || src.height < 16 {
-        return failed(0.0);
-    }
+/// All scored candidates for `src` and the proxy size they live in.
+fn gather(src: &Raster) -> (Vec<Candidate>, usize, usize) {
     let proxy = resize_to_fit(src, PROXY_EDGE);
     let field = Field::new(&proxy, FIELD_SIGMA, EDGE_FLOOR, EDGE_CEIL, EDGE_NOISE_GAIN);
     let (w, h) = (field.w, field.h);
-    let rank = |c: &Candidate| {
-        let area = crate::geometry::polygon_area(&c.quad).abs() / (w * h) as f64;
-        f64::from(c.score) * (0.4 + area.min(0.9))
-    };
-
     let mut cands: Vec<Candidate> = Vec::new();
     // Source 1: quadrilaterals made of straight edge lines. Finds a page whatever the brightness
     // relation to the desk, since only the presence of an edge matters.
     let lines = edges::find_lines(&field, MAX_LINES);
     for lq in edges::line_quads(&lines, w as f64, h as f64, KEEP_LINE_QUADS) {
-        cands.push(evaluate(lq.q, &field));
+        cands.push(evaluate(lq.q, &field, None));
+    }
+    // Source 1b: long thin pages from two long edges, their short ends found by colour contrast.
+    for sq in strip::strip_quads(&lines, &field, KEEP_STRIPS) {
+        cands.push(evaluate(sq.q, &field, Some(&sq.ends)));
     }
     // Source 2: the best bright or dark region, as a convex hull fitted with four lines. Still the
     // way to get a page that is cut by the frame, whose edge along the frame is no edge at all.
@@ -794,17 +827,194 @@ pub fn detect(src: &Raster) -> Detection {
             let Some(quad) = quad_from_hull(&hull) else {
                 continue;
             };
-            cands.push(evaluate(quad, &field));
+            cands.push(evaluate(quad, &field, None));
         }
     }
-    let Some(best_i) = (0..cands.len()).max_by(|a, b| {
-        rank(&cands[*a])
-            .partial_cmp(&rank(&cands[*b]))
+    (cands, w, h)
+}
+
+/// One scored candidate, for diagnostics.
+#[doc(hidden)]
+pub struct TraceCandidate {
+    /// TL, TR, BR, BL in normalised coordinates.
+    pub quad: [Pt; 4],
+    pub score: f32,
+    pub forced: Option<Forced>,
+    pub rank: f64,
+}
+
+/// Every candidate the detector scored, best rank first (diagnostics for the evaluation tools).
+#[doc(hidden)]
+pub fn trace(src: &Raster) -> Vec<TraceCandidate> {
+    if src.width < 16 || src.height < 16 {
+        return Vec::new();
+    }
+    let (cands, w, h) = gather(src);
+    let mut out: Vec<TraceCandidate> = cands
+        .iter()
+        .map(|c| TraceCandidate {
+            quad: std::array::from_fn(|i| Pt::new(c.quad[i].0 / w as f64, c.quad[i].1 / h as f64)),
+            score: c.score,
+            forced: c.forced,
+            rank: rank(c, w, h),
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        b.rank
+            .partial_cmp(&a.rank)
             .unwrap_or(std::cmp::Ordering::Equal)
-    }) else {
+    });
+    out
+}
+
+/// The straight lines found and the thinned edge points, in normalised coordinates (diagnostics).
+#[doc(hidden)]
+pub fn trace_lines(src: &Raster) -> (Vec<[Pt; 2]>, Vec<Pt>) {
+    let proxy = resize_to_fit(src, PROXY_EDGE);
+    let field = Field::new(&proxy, FIELD_SIGMA, EDGE_FLOOR, EDGE_CEIL, EDGE_NOISE_GAIN);
+    let (w, h) = (field.w as f64, field.h as f64);
+    let lines = edges::find_lines(&field, MAX_LINES);
+    let segs = lines
+        .iter()
+        .map(|l| {
+            let p = (l.n.0 * l.rho, l.n.1 * l.rho);
+            let far = w.hypot(h);
+            [
+                Pt::new((p.0 - l.d.0 * far) / w, (p.1 - l.d.1 * far) / h),
+                Pt::new((p.0 + l.d.0 * far) / w, (p.1 + l.d.1 * far) / h),
+            ]
+        })
+        .collect();
+    let pts = field
+        .points
+        .iter()
+        .map(|p| Pt::new(p.x / w, p.y / h))
+        .collect();
+    (segs, pts)
+}
+
+fn rank(c: &Candidate, w: usize, h: usize) -> f64 {
+    let area = crate::geometry::polygon_area(&c.quad).abs() / (w * h) as f64;
+    let r = f64::from(c.score) * (0.4 + area.min(0.9));
+    if c.from_strip {
+        r * STRIP_RANK_FACTOR
+    } else {
+        r
+    }
+}
+
+/// Share of a 10 x 10 grid of points over `a` that lies inside `b`.
+fn overlap_share(a: &[P; 4], b: &[P; 4]) -> f64 {
+    let mut hit = 0;
+    for i in 0..10 {
+        for j in 0..10 {
+            let (u, v) = ((i as f64 + 0.5) / 10.0, (j as f64 + 0.5) / 10.0);
+            let top = (
+                a[0].0 + (a[1].0 - a[0].0) * u,
+                a[0].1 + (a[1].1 - a[0].1) * u,
+            );
+            let bot = (
+                a[3].0 + (a[2].0 - a[3].0) * u,
+                a[3].1 + (a[2].1 - a[3].1) * u,
+            );
+            let p = (top.0 + (bot.0 - top.0) * v, top.1 + (bot.1 - top.1) * v);
+            if inside(b, p) {
+                hit += 1;
+            }
+        }
+    }
+    f64::from(hit) / 100.0
+}
+
+/// The chosen quad is a container: two or more separate, well supported quads lie inside it (a
+/// mat or a scanner bed with several photos on it). A single-page answer is then wrong, or at best
+/// not what the user wants; multi-item splitting is a later milestone, so hold it.
+fn holds_several(best: &Candidate, others: &[Candidate]) -> bool {
+    let best_area = crate::geometry::polygon_area(&best.quad).abs();
+    let kids: Vec<&Candidate> = others
+        .iter()
+        .filter(|o| {
+            let a = crate::geometry::polygon_area(&o.quad).abs();
+            o.score >= CHILD_SCORE
+                && o.forced != Some(Forced::Failed)
+                && a >= CHILD_MIN_AREA * best_area
+                && a <= CHILD_MAX_AREA * best_area
+                && overlap_share(&o.quad, &best.quad) >= 0.9
+        })
+        .collect();
+    (0..kids.len()).any(|i| {
+        (i + 1..kids.len()).any(|j| {
+            overlap_share(&kids[i].quad, &kids[j].quad) < 0.3
+                && overlap_share(&kids[j].quad, &kids[i].quad) < 0.3
+        })
+    })
+}
+
+/// Finds the page quad in `src`.
+pub fn detect(src: &Raster) -> Detection {
+    let failed = |score: f32| Detection {
+        quad: None,
+        confidence: Confidence {
+            score,
+            forced: Some(Forced::Failed),
+            reasons: vec![Reason {
+                code: ReasonCode::NoQuad,
+                side: None,
+            }],
+        },
+    };
+    if src.width < 16 || src.height < 16 {
+        return failed(0.0);
+    }
+    let (mut cands, w, h) = gather(src);
+    // A candidate that could never be answered (implausible, or under the Failed score) does not
+    // compete: it must not push a usable one off the top.
+    let viable = |c: &Candidate| c.score >= MIN_QUAD_SCORE && c.forced != Some(Forced::Failed);
+    let any_viable = cands.iter().any(viable);
+    let Some(best_i) = (0..cands.len())
+        .filter(|i| !any_viable || viable(&cands[*i]))
+        .max_by(|a, b| {
+            rank(&cands[*a], w, h)
+                .partial_cmp(&rank(&cands[*b], w, h))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+    else {
         return failed(0.2);
     };
     let mut c = cands.swap_remove(best_i);
+    // The chosen quad may be a patch inside the page (a table, a text block, the lower half of a
+    // receipt whose top is faint): when a bigger, well supported viable quad contains it, that one
+    // is the page. It stays held, since the two disagree.
+    let held = c.forced.is_some();
+    let promote = (0..cands.len())
+        .filter(|_| held)
+        .filter(|i| {
+            let o = &cands[*i];
+            o.score >= PROMOTE_SCORE
+                && o.score >= PROMOTE_RATIO * c.score
+                && o.forced != Some(Forced::Failed)
+                && crate::geometry::polygon_area(&o.quad).abs()
+                    >= PROMOTE_AREA * crate::geometry::polygon_area(&c.quad).abs()
+                && overlap_share(&c.quad, &o.quad) >= 0.9
+        })
+        .max_by(|a, b| {
+            cands[*a]
+                .score
+                .partial_cmp(&cands[*b].score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+    if let Some(i) = promote {
+        let mut o = cands.swap_remove(i);
+        o.forced.get_or_insert(Forced::Check);
+        if o.reasons.is_empty() {
+            o.reasons.push(Reason {
+                code: ReasonCode::WeakEdge,
+                side: Some(side_of(o.weakest_side)),
+            });
+        }
+        cands.push(c);
+        c = o;
+    }
     // PLAN 6.2.4: below 0.60 is Failed in every mode, and a Failed item has no crop to apply.
     if c.score < MIN_QUAD_SCORE || c.forced == Some(Forced::Failed) {
         let mut d = failed(c.score);
@@ -823,6 +1033,13 @@ pub fn detect(src: &Raster) -> Detection {
         c.reasons.push(Reason {
             code: ReasonCode::WeakEdge,
             side: Some(side_of(k)),
+        });
+    }
+    if c.forced.is_none() && holds_several(&c, &cands) {
+        c.forced = Some(Forced::Check);
+        c.reasons.push(Reason {
+            code: ReasonCode::WeakEdge,
+            side: Some(side_of(c.weakest_side)),
         });
     }
     let (wf, hf) = (w as f64, h as f64);
@@ -902,6 +1119,103 @@ mod tests {
         let d = detect(&render_scene(&s));
         let q = d.quad.expect("a quad");
         assert!(corner_error(&q, &s.corners, 960.0, 720.0) < 0.02, "{q:?}");
+    }
+
+    /// A page about 11:1 (a long till receipt), 70 px wide in a 960 x 720 picture, tilted a little.
+    fn long_receipt(tilt: f64) -> [(f64, f64); 4] {
+        // Normalised corners of a 70 x 640 px strip centred at (480, 360) rolled by `tilt` degrees.
+        let (s, c) = tilt.to_radians().sin_cos();
+        let pts = [
+            (-35.0, -320.0),
+            (35.0, -320.0),
+            (35.0, 320.0),
+            (-35.0, 320.0),
+        ];
+        std::array::from_fn(|i| {
+            let (x, y) = pts[i];
+            (
+                (480.0 + x * c - y * s) / 960.0,
+                (360.0 + x * s + y * c) / 720.0,
+            )
+        })
+    }
+
+    #[test]
+    fn a_long_thin_receipt_is_found_whole() {
+        for tilt in [0.0, 6.0, -9.0] {
+            let truth = long_receipt(tilt);
+            let d = detect(&render_scene(&scene(PaperKind::Receipt, truth)));
+            let q = d.quad.expect("a quad");
+            assert!(
+                corner_error(&q, &truth, 960.0, 720.0) < 0.012,
+                "tilt {tilt}: {q:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_long_thin_receipt_on_a_mid_grey_desk_is_found_or_held_never_silently_wrong() {
+        let truth = long_receipt(5.0);
+        let mut s = scene(PaperKind::Receipt, truth);
+        s.background = [196, 190, 182];
+        s.paper = [228, 224, 216];
+        s.shadow = false;
+        let d = detect(&render_scene(&s));
+        let accepted = d.confidence.forced.is_none() && d.confidence.score >= 0.9;
+        match d.quad {
+            Some(q) if corner_error(&q, &truth, 960.0, 720.0) < 0.015 => {}
+            Some(q) => assert!(!accepted, "silent failure {q:?}"),
+            None => {}
+        }
+    }
+
+    #[test]
+    fn a_long_receipt_running_out_of_both_ends_of_the_frame_is_held_with_its_visible_part() {
+        // Corners well outside the frame at top and bottom: only the middle stretch is visible.
+        let truth = [(0.40, -0.30), (0.49, -0.30), (0.50, 1.30), (0.41, 1.30)];
+        let d = detect(&render_scene(&scene(PaperKind::Receipt, truth)));
+        let q = d.quad.expect("a quad for the visible part");
+        // The two long sides are where the page edges are; the ends sit on the frame.
+        let (left, right) = ((q[0].x + q[3].x) / 2.0, (q[1].x + q[2].x) / 2.0);
+        assert!(
+            (left - 0.405).abs() < 0.012 && (right - 0.495).abs() < 0.012,
+            "{q:?}"
+        );
+        assert!(q.iter().all(|p| p.y < 0.02 || p.y > 0.98), "{q:?}");
+        assert!(
+            d.confidence
+                .reasons
+                .iter()
+                .any(|r| r.code == ReasonCode::PartialFrame)
+        );
+        assert_eq!(d.confidence.forced, Some(Forced::Check));
+    }
+
+    #[test]
+    fn a_container_of_several_items_is_recognised_a_page_with_one_block_is_not() {
+        let container = [(0.0, 0.0), (300.0, 0.0), (300.0, 200.0), (0.0, 200.0)];
+        let kid_a = [(20.0, 20.0), (130.0, 20.0), (130.0, 120.0), (20.0, 120.0)];
+        let kid_b = [(160.0, 40.0), (280.0, 40.0), (280.0, 180.0), (160.0, 180.0)];
+        let outside = [(400.0, 0.0), (500.0, 0.0), (500.0, 100.0), (400.0, 100.0)];
+        let best = cand(container, 0.97, 0);
+        assert!(holds_several(
+            &best,
+            &[cand(kid_a, 0.95, 0), cand(kid_b, 0.95, 0)]
+        ));
+        assert!(!holds_several(&best, &[cand(kid_a, 0.95, 0)]));
+        // Weak children, children elsewhere, or a child that is nearly the whole thing do not count.
+        assert!(!holds_several(
+            &best,
+            &[cand(kid_a, 0.6, 0), cand(kid_b, 0.6, 0)]
+        ));
+        assert!(!holds_several(
+            &best,
+            &[cand(kid_a, 0.95, 0), cand(outside, 0.95, 0)]
+        ));
+        assert!(!holds_several(
+            &best,
+            &[cand(container, 0.95, 0), cand(kid_a, 0.95, 0)]
+        ));
     }
 
     #[test]
@@ -1041,6 +1355,7 @@ mod tests {
             reasons: Vec::new(),
             weakest_side,
             mean_support: f64::from(score),
+            from_strip: false,
         }
     }
 
