@@ -22,6 +22,7 @@ mod profiles;
 mod provenance;
 mod register;
 mod roadmap;
+mod synth;
 
 use std::process::ExitCode;
 
@@ -94,9 +95,24 @@ Commands:
         cargo run --release -p xtask -- perf stages --mp 12
         (stages [--mp 12,48,100] [--runs N] [--threads all|N] [--json F]; memory; batch
         [--count 200] [--workers 1,..,8]; gen; host. Run `perf` alone for the full list.)
-  synth --suite smoke|full [--out DIR] [--seed N] [--count N] [--max-edge N]
-        Write a STAND-IN synthetic suite (images + manifest.jsonl) under target/synth/<suite> by
-        default. Never committed. Wraps `auto-crop-eval synth`.
+  synth --suite smoke|full [--generator python|rust] [--out DIR] [--seed N] [--count N]
+        [--max-edge N] [--jobs N] [--truth none|text|full]
+        Write a synthetic suite (images + manifest.jsonl) under target/synth/<suite>; never
+        committed. The default generator is the Python tool in tools/synth (known-text pages and
+        receipts, pinhole camera, procedural backgrounds, Augraphy degradations, JPEG/PNG/TIFF/WebP,
+        EXIF 1-8, sRGB and Display P3). --generator rust is the old STAND-IN writer in
+        auto-crop-eval (output under target/synth/<suite>-rust).
+  synth-setup
+        Create target/synth-venv and install tools/synth/requirements.lock with
+        --require-hashes (needs Python 3.12 or newer). Nothing else installs Python packages.
+  synth-check [tests|geometry|variants|ocr|all] [args]
+        The generator's acceptance checks: Python unit tests, inverse-warp SSIM of the ground
+        truth, every format x EXIF x colour-space variant decoded by the Rust decoders, and the
+        Tesseract CER on the clean render (skipped, loudly, where tesseract is missing; pass
+        `ocr --require` to fail instead).
+  check-splits [MANIFEST...]
+        Fail when a scene_id, scene_seed or similar group appears in two splits (default:
+        every target/synth/*/manifest.jsonl).
   eval <auto-crop-eval args>
         Run the accuracy harness (run, compare, noise-floor, publish, validate-manifest,
         self-check). Example: cargo xtask eval self-check
@@ -128,7 +144,10 @@ fn main() -> ExitCode {
         "fetch-corpus" => corpus::run_fetch(&rest),
         "corpus-ingest" => corpus::run_ingest(&rest),
         "perf" => perf::run(&rest),
-        "synth" => eval::run_synth(&rest),
+        "synth" => synth::run_synth(&rest),
+        "synth-setup" => synth::run_setup(&rest),
+        "synth-check" => synth::run_check(&rest),
+        "check-splits" => synth::run_check_splits(&rest),
         "eval" => eval::run_eval(&rest),
         "" | "help" | "--help" | "-h" => {
             print!("{HELP}");

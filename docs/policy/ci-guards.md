@@ -1,6 +1,6 @@
 # CI policy guards
 
-Roadmap: M1.72 (`cargo xtask ci-guards`), M1.73 (licence gates), M1.80 (workflow hardening), M1.36 (dataset-bytes guard); extends M0.31 (`check-profiles` owns the `panic = "abort"` ban). Decisions: B2 (licences), B12 (no GPL encoders, sandboxed C parsers), B18 and C4 (offline, no telemetry). Code: `xtask/src/ci_guards/`.
+Roadmap: M1.72 (`cargo xtask ci-guards`), M1.73 (licence gates), M1.80 (workflow hardening), M1.36 (dataset-bytes guard), M1.32 (synthetic generator independence); extends M0.31 (`check-profiles` owns the `panic = "abort"` ban). Decisions: B2 (licences), B12 (no GPL encoders, sandboxed C parsers), B18 and C4 (offline, no telemetry). Code: `xtask/src/ci_guards/`.
 
 `cargo xtask ci-guards` runs in the `repo checks` job of `ci.yml`; `cargo xtask ci-guards --selftest` runs next to it. A guard that is not proven red is not a guard, so every rule below has planted violations (the `CASES` tables in each module) that must be detected, plus controls that must pass. The same cases run under `cargo test -p xtask`.
 
@@ -62,3 +62,16 @@ The planted cases (`corpus_guard::cases()`: a SmartDoc tarball, a CORD parquet, 
 ### What xtask may use for the network
 
 `xtask` is a developer tool and is never shipped, so the shipped-crate ban of section 2 does not apply to it, but it still carries **no HTTP or TLS crate**: `fetch-corpus` and `build-native` shell out to the system `curl` as a separate program. `fetch-corpus` runs it with `--proto` pinned to the URL's scheme (https, ftp, or http for a loopback host only, which is how the tests serve fixtures), `--proto-redir =https` (a redirect may only lead to https), `--max-filesize` set to the pinned size and `--fail`, and it never moves a download into the cache until the SHA-256 and size match the lock. Adding an HTTP crate to xtask needs the owner's agreement and a row here.
+
+## 6. The synthetic generator shares no code with the app (M1.32)
+
+`synth_guard.rs` scans every `*.py` under `tools/synth` (not `__pycache__` or a virtual environment). The generator exists to produce ground truth that cannot share a failure mode with the warp, detector or codecs it checks, so it may not depend on them. The application is Rust, so a Python tool can only reach it by importing a built extension, running cargo or its binaries, or reading its sources:
+
+- an `import` or `from ... import` of `auto_crop`, `autocrop`, `imgproc` or `auto_crop_eval` fails;
+- a single-line string literal containing `cargo`, `auto-crop`, `auto_crop`, `crates/`, `target/release` or `target/debug` fails.
+
+Comments and triple-quoted strings are prose (a docstring may say what the tool does not do) and are not scanned. The planted cases (`synth_guard::cases()`: an import, a from-import, an indented import, a subprocess call to cargo, a path into `crates/`, the harness binary path, controls for numpy, docstrings and comments) run in `cargo xtask ci-guards --selftest` and under `cargo test -p xtask`. `tools/synth/tests/test_independence.py` is the Python-side twin: it checks the AST of the whole tool (only vetted modules imported, Augraphy only in `degrade.py`, no AlbumentationsX in the lock).
+
+| Allow-listed file | Why |
+|---|---|
+| `tools/synth/tests/test_independence.py` | carries the forbidden patterns as data for its own checks |
