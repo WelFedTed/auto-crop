@@ -131,7 +131,10 @@ jobs:
         env:
           SECONDS_TO_RUN: ${{ steps.plan.outputs.seconds }}
         run: |
-          cargo "+$FUZZ_NIGHTLY" fuzz run "$TARGET" "fuzz/corpus/$TARGET" "fuzz/seeds/$TARGET" -- \
+          # The prebuilt cargo-fuzz is a musl binary and defaults to the musl target, which cannot use
+          # a sanitizer: name the host target.
+          cargo "+$FUZZ_NIGHTLY" fuzz run --target x86_64-unknown-linux-gnu \
+            "$TARGET" "fuzz/corpus/$TARGET" "fuzz/seeds/$TARGET" -- \
             -max_total_time="$SECONDS_TO_RUN" -max_len=1048576 -rss_limit_mb=2048 -timeout=20 \
             -print_final_stats=1 2>&1 | tee "fuzz-$TARGET.log"
           # `shell: bash` runs with pipefail, so a crash (cargo-fuzz exits non-zero) fails the step
