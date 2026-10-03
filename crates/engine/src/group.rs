@@ -187,10 +187,77 @@ pub struct JRetire {
     pub stored: String,
 }
 
+/// The process that is running a group commit: recovery in another process leaves a live
+/// owner's journal alone (a CLI starting while the GUI is saving must not roll the GUI's
+/// half-finished group back).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Owner {
+    pub pid: u32,
+    /// The process start time (seconds since the epoch) so a reused pid is not mistaken for it.
+    pub started: u64,
+}
+
+/// When process `pid` started, if it is running (`None` if it is not).
+pub fn process_started(pid: u32) -> Option<u64> {
+    let mut sys = sysinfo::System::new();
+    let p = sysinfo::Pid::from_u32(pid);
+    sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[p]), true);
+    sys.process(p).map(|p| p.start_time())
+}
+
+/// This process's own start time, read once (looking a process up is not free).
+fn own_owner() -> Owner {
+    static OWN: std::sync::OnceLock<Owner> = std::sync::OnceLock::new();
+    OWN.get_or_init(|| {
+        let pid = std::process::id();
+        Owner {
+            pid,
+            started: process_started(pid).unwrap_or(0),
+        }
+    })
+    .clone()
+}
+
+/// Journals of commits running in THIS process (a second `Engine` in the same process must not
+/// recover them either).
+static ACTIVE: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+struct ActiveGuard(String);
+
+impl ActiveGuard {
+    fn new(id: &str) -> Self {
+        ACTIVE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(id.to_owned());
+        Self(id.to_owned())
+    }
+}
+
+impl Drop for ActiveGuard {
+    fn drop(&mut self) {
+        ACTIVE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|i| *i != self.0);
+    }
+}
+
+fn is_active_here(id: &str) -> bool {
+    ACTIVE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .any(|i| i == id)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Journal {
     pub schema: u32,
     pub id: String,
+    /// Who is committing; absent in a journal that nobody is working on any more.
+    #[serde(default)]
+    pub owner: Option<Owner>,
     pub phase: Phase,
     pub created_at: i64,
     pub source: SourceRec,
@@ -471,6 +538,7 @@ pub fn commit_group(
 #[derive(Default)]
 struct RunState {
     journal: Option<Journal>,
+    active: Option<ActiveGuard>,
 }
 
 fn run(
@@ -519,9 +587,12 @@ fn run(
 
     // 2. The journal, before the backup or the first temp exists.
     let jid = new_id();
+    // Held in `st`, so it outlives `run` and covers a rollback in `commit_group` too.
+    st.active = Some(ActiveGuard::new(&jid));
     let mut j = Journal {
         schema: JOURNAL_SCHEMA,
         id: jid.clone(),
+        owner: Some(own_owner()),
         phase: Phase::Writing,
         created_at: now_secs(),
         source: SourceRec {
@@ -896,6 +967,8 @@ fn rollback(store: &Store, j: &Journal) -> Result<(), ErrKind> {
 pub struct RecoveryReport {
     pub rolled_forward: Vec<String>,
     pub rolled_back: Vec<String>,
+    /// Journals of a commit that is still running (this process or another): left alone.
+    pub busy: Vec<String>,
     /// Journals that could not be read (left alone) or rolled back (kept for the next start).
     pub left: Vec<String>,
 }
@@ -919,6 +992,16 @@ pub fn recover(store: &Store, hook: &dyn FaultHook) -> RecoveryReport {
             report.left.push(path.to_string_lossy().into_owned());
             continue;
         };
+        // A commit that is running right now is not ours to recover.
+        let busy = match &j.owner {
+            Some(o) if o.pid == std::process::id() => is_active_here(&j.id),
+            Some(o) => process_started(o.pid) == Some(o.started),
+            None => false,
+        };
+        if busy {
+            report.busy.push(j.id.clone());
+            continue;
+        }
         let complete = j.phase == Phase::Committing
             && j.outputs.iter().all(|o| {
                 let fin = Path::new(&o.final_path);

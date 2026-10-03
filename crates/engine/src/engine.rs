@@ -262,6 +262,8 @@ pub(crate) struct Inner {
     pub(crate) detector: Mutex<Arc<dyn ItemDetector>>,
     /// Output names of split saves in flight, so two scans never plan the same file (M10.22).
     pub(crate) reserved: Mutex<ReservedKeys>,
+    /// Commands that touched several images at once (a split preset on 20 scans): one undo.
+    pub(crate) session: Mutex<auto_crop_core::SessionHistory<u32>>,
 }
 
 /// A cheap-to-clone handle on the engine.
@@ -313,6 +315,7 @@ impl Engine {
                 workers: AtomicUsize::new(0),
                 detector: Mutex::new(Arc::new(NoSplit)),
                 reserved: Mutex::new(ReservedKeys::default()),
+                session: Mutex::new(auto_crop_core::SessionHistory::new()),
             }),
         };
         // A crash may have interrupted a split save: finish or undo it before anything is opened

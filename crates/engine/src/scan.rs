@@ -116,7 +116,7 @@ pub(crate) fn crop_views(img: &Image, st: &EditState) -> (Vec<CropView>, Option<
                 edited: baseline
                     .is_none_or(|b| b.geometry != it.geometry || b.include != it.include),
                 output_name,
-                render_key: format!("{:016x}", st.item_render_hash(it.id).unwrap_or(0)),
+                render_key: format!("{:016x}", crop_key(st, it.id).unwrap_or(0)),
             }
         })
         .collect();
@@ -130,6 +130,13 @@ pub(crate) fn crop_views(img: &Image, st: &EditState) -> (Vec<CropView>, Option<
         included: total,
     };
     (crops, Some(split))
+}
+
+/// The cache key of one crop's pixels (M10.28): what decides them (`item_render_hash`) mixed with
+/// the crop's id, so the key changes when this crop is edited and only then.
+fn crop_key(st: &EditState, id: ItemId) -> Option<u64> {
+    let h = st.item_render_hash(id)?;
+    Some(h.rotate_left(17) ^ u64::from(id.0).wrapping_mul(0x9E37_79B9_7F4A_7C15))
 }
 
 /// "Move corner (item 2)": the history label names the item (M10.19). The number is the item's
@@ -443,11 +450,64 @@ impl Engine {
         )
     }
 
-    /// The same split change for several images (the grid menu and batch actions, M10.40).
+    /// The same split change for several images (the grid menu and batch actions, M10.40), as ONE
+    /// undo step of the session: [`Engine::session_undo`] reverts all of them (M10.19).
     pub fn redetect_many(&self, ids: &[u32], patch: SplitPatch) -> Vec<(u32, Result<ItemView>)> {
-        ids.iter()
-            .map(|id| (*id, self.redetect(*id, patch)))
-            .collect()
+        let label = match patch.policy {
+            Some(SplitPolicy::Never) => "Treat as one item",
+            Some(_) => "Split into items",
+            None => "Re-detect items",
+        };
+        let mut cmd = auto_crop_core::SessionCmd::new(format!("{label} ({} images)", ids.len()));
+        let results: Vec<(u32, Result<ItemView>)> = ids
+            .iter()
+            .map(|id| {
+                let before = self.item_view(*id).map(|v| v.history_position);
+                let r = self.redetect(*id, patch);
+                if let (Some(b), Ok(v)) = (before, &r) {
+                    cmd.mark(*id, b, v.history_position);
+                }
+                (*id, r)
+            })
+            .collect();
+        lock(&self.inner.session).push(cmd);
+        results
+    }
+
+    /// Undoes the last multi-image command: every affected image goes back to the history
+    /// position it had before it. Returns the command's label and the new views.
+    pub fn session_undo(&self) -> Option<(String, Vec<ItemView>)> {
+        self.session_step(true)
+    }
+
+    pub fn session_redo(&self) -> Option<(String, Vec<ItemView>)> {
+        self.session_step(false)
+    }
+
+    fn session_step(&self, undo: bool) -> Option<(String, Vec<ItemView>)> {
+        let mut moves: Vec<(u32, usize)> = Vec::new();
+        let label = {
+            let mut s = lock(&self.inner.session);
+            let l = if undo {
+                s.undo(|id, pos| moves.push((*id, pos)))
+            } else {
+                s.redo(|id, pos| moves.push((*id, pos)))
+            };
+            l.map(str::to_owned)?
+        };
+        let views = moves
+            .into_iter()
+            .filter_map(|(id, pos)| {
+                self.with_history(id, |it| {
+                    if it.history.as_mut().expect("checked").seek(pos) {
+                        it.generation += 1;
+                    }
+                    it.view()
+                })
+                .ok()
+            })
+            .collect();
+        Some((label, views))
     }
 
     /// The user looked at this scan and accepts it as it is now (M10.29): a split scan that
@@ -500,7 +560,7 @@ impl Engine {
             .and_then(|i| i.geometry.quad())
             .cloned()
             .ok_or(ErrKind::NoCrop)?;
-        let hash = state.item_render_hash(c).ok_or(ErrKind::NoCrop)?;
+        let hash = crop_key(&state, c).ok_or(ErrKind::NoCrop)?;
         let key = (id, 0x40 | kind as u8, hash);
         if let Some(b) = lock(&self.inner.renders).get(&key) {
             return Ok((b, "image/jpeg"));
@@ -568,7 +628,23 @@ impl Engine {
         self.save_dispatch_with(id, target, run_id, run_name, &NoFaults)
     }
 
+    /// A panic anywhere in a save fails that scan only (M10.67). What it interrupted is finished or
+    /// undone from the journal at the next start; the folder is never left half-written.
     pub(crate) fn save_dispatch_with(
+        &self,
+        id: u32,
+        target: SaveTarget,
+        run_id: &str,
+        run_name: &str,
+        hook: &dyn FaultHook,
+    ) -> SaveOutcome {
+        crate::run_isolated(std::panic::AssertUnwindSafe(|| {
+            self.save_dispatch_inner(id, target, run_id, run_name, hook)
+        }))
+        .unwrap_or_else(|_| SaveOutcome::failed(id, ErrKind::InternalPanic))
+    }
+
+    fn save_dispatch_inner(
         &self,
         id: u32,
         target: SaveTarget,

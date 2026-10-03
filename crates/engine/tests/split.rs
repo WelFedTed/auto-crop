@@ -67,18 +67,22 @@ fn inside(poly: &[(f64, f64); 4], x: f64, y: f64) -> bool {
 /// A scanner bed with one colour per item painted inside its quad. `colours[i]` belongs to
 /// `quads[i]`. The bed is a light grey.
 fn scene(quads: &[Quad], colours: &[[u8; 3]]) -> Raster {
-    let mut r = Raster::filled(W, H, [236, 236, 232]);
+    scene_sized(quads, colours, W, H)
+}
+
+fn scene_sized(quads: &[Quad], colours: &[[u8; 3]], w: u32, h: u32) -> Raster {
+    let (fw, fh) = (f64::from(w), f64::from(h));
+    let mut r = Raster::filled(w, h, [236, 236, 232]);
     for (qd, col) in quads.iter().zip(colours) {
-        let poly: [(f64, f64); 4] =
-            std::array::from_fn(|i| (qd[i].x * f64::from(W), qd[i].y * f64::from(H)));
+        let poly: [(f64, f64); 4] = std::array::from_fn(|i| (qd[i].x * fw, qd[i].y * fh));
         let (x0, x1) = poly
             .iter()
             .fold((f64::MAX, f64::MIN), |a, p| (a.0.min(p.0), a.1.max(p.0)));
         let (y0, y1) = poly
             .iter()
             .fold((f64::MAX, f64::MIN), |a, p| (a.0.min(p.1), a.1.max(p.1)));
-        for y in (y0.floor() as u32)..(y1.ceil() as u32).min(H) {
-            for x in (x0.floor() as u32)..(x1.ceil() as u32).min(W) {
+        for y in (y0.floor() as u32)..(y1.ceil() as u32).min(h) {
+            for x in (x0.floor() as u32)..(x1.ceil() as u32).min(w) {
                 if inside(&poly, f64::from(x) + 0.5, f64::from(y) + 0.5) {
                     // A light texture so the pixels are not flat.
                     let t = ((x / 9 + y / 9) % 2) as u8 * 6;
@@ -177,8 +181,12 @@ impl Env {
 
     /// Writes a scene as `name` (JPEG or PNG by extension), opens and analyses it.
     fn open(&self, name: &str, quads: &[Quad]) -> ItemView {
+        self.open_sized(name, quads, W, H)
+    }
+
+    fn open_sized(&self, name: &str, quads: &[Quad], w: u32, h: u32) -> ItemView {
         let colours: Vec<[u8; 3]> = (0..quads.len()).map(|i| COLOURS[i % 6]).collect();
-        let raster = scene(quads, &colours);
+        let raster = scene_sized(quads, &colours, w, h);
         let fmt = if name.ends_with(".png") {
             Format::Png
         } else {
@@ -1242,4 +1250,163 @@ fn a_failure_in_the_commit_writes_nothing_and_is_reported() {
     assert!(e.engine.list_backups().runs.is_empty());
     // And the image can be saved after the cause is gone.
     assert!(e.save(v.id, SaveTarget::Replace).ok);
+}
+
+// ------------------------------------------------------------------ determinism, panics, session
+
+#[test]
+fn a_crop_renders_to_identical_bytes_on_one_thread_and_on_eight() {
+    let render = |threads: usize| {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build()
+            .unwrap();
+        pool.install(|| {
+            let e = env();
+            e.engine.set_item_detector(Stub::new(&grid4()));
+            let v = e.open("scan.jpg", &grid4());
+            v.crops
+                .iter()
+                .map(|c| {
+                    let (b, _) = e
+                        .engine
+                        .crop_image_bytes(v.id, c.id, CropImage::Result)
+                        .unwrap();
+                    b.as_ref().clone()
+                })
+                .collect::<Vec<_>>()
+        })
+    };
+    assert_eq!(render(1), render(8));
+}
+
+/// Panics on the scene whose top-left pixel is red 7, answers normally otherwise.
+struct Panicky(Arc<Stub>);
+
+impl ItemDetector for Panicky {
+    fn detect(
+        &self,
+        r: &Raster,
+        p: auto_crop_core::SplitPolicy,
+        q: auto_crop_core::SplitProfile,
+    ) -> Option<SplitDetection> {
+        assert!(r.pixel(0, 0)[0] != 7, "a detector bug on this scan");
+        self.0.detect(r, p, q)
+    }
+}
+
+#[test]
+fn a_panic_while_analysing_one_scan_fails_only_that_scan() {
+    let e = env();
+    e.engine
+        .set_item_detector(Arc::new(Panicky(Stub::new(&grid4()))));
+    // Two scenes; the first has a marker pixel that makes the detector panic.
+    let bad = e.dir.join("bad.png");
+    let mut r = scene(&grid4(), &[COLOURS[0], COLOURS[1], COLOURS[2], COLOURS[3]]);
+    r.set_pixel(0, 0, [7, 7, 7]);
+    fs::write(&bad, encode(&r, Format::Png, 90, None).unwrap()).unwrap();
+    let good = e.open("good.jpg", &grid4());
+    assert_eq!(good.crops.len(), 4);
+    let s = e.engine.open_paths(std::slice::from_ref(&bad), false);
+    let v = e.engine.analyse(s.ids[0]).unwrap();
+    assert_eq!(v.status, auto_crop_engine::ItemStatus::Error);
+    assert_eq!(v.error, Some(ErrKind::Internal));
+    assert_eq!(
+        fs::read(&bad).unwrap(),
+        encode(&r, Format::Png, 90, None).unwrap()
+    );
+    // The engine and the other scan are fine.
+    assert_eq!(e.engine.item_view(good.id).unwrap().crops.len(), 4);
+}
+
+#[test]
+fn one_undo_reverts_a_preset_applied_to_twenty_scans() {
+    let e = env();
+    e.engine.set_item_detector(Stub::new(&grid4()));
+    let ids: Vec<u32> = (0..20)
+        .map(|i| {
+            e.open_sized(&format!("s{i:02}.jpg", i = i), &grid4(), 480, 360)
+                .id
+        })
+        .collect();
+    let before: Vec<_> = ids
+        .iter()
+        .map(|id| e.engine.item_view(*id).unwrap())
+        .collect();
+    assert!(before.iter().all(|v| v.crops.len() == 4));
+    let results = e.engine.redetect_many(
+        &ids,
+        SplitPatch {
+            policy: Some(auto_crop_core::SplitPolicy::Never),
+            profile: None,
+        },
+    );
+    assert!(results.iter().all(|(_, r)| r.is_ok()));
+    assert!(
+        ids.iter()
+            .all(|id| e.engine.item_view(*id).unwrap().crops.len() <= 1)
+    );
+    // One undo, all twenty back, every crop identical to before.
+    let (label, views) = e.engine.session_undo().expect("a session step");
+    assert_eq!(label, "Treat as one item (20 images)");
+    assert_eq!(views.len(), 20);
+    for (id, b) in ids.iter().zip(&before) {
+        assert_eq!(e.engine.item_view(*id).unwrap().crops, b.crops);
+    }
+    assert!(e.engine.session_undo().is_none());
+    // And redo takes them all forward again.
+    let (_, forward) = e.engine.session_redo().expect("redo");
+    assert_eq!(forward.len(), 20);
+    assert!(forward.iter().all(|v| v.crops.len() <= 1));
+}
+
+#[test]
+fn a_panic_in_the_middle_of_a_save_fails_that_scan_and_the_next_start_repairs_the_folder() {
+    let e = env();
+    e.engine.set_item_detector(Stub::new(&grid4()));
+    let v = e.open("scan.jpg", &grid4());
+    let other = e.open("other.jpg", &grid4());
+    let scan = fs::read(e.dir.join("scan.jpg")).unwrap();
+    e.engine.accept_scan(v.id).unwrap();
+    e.engine.accept_scan(other.id).unwrap();
+    // The commit panics after the first output is in place.
+    let hook = |s: &Step| {
+        if *s == Step::AfterRename(0) {
+            panic!("a bug in the middle of a save");
+        }
+        Fault::Pass
+    };
+    let o = e
+        .engine
+        .save_items_with_faults(&[v.id], SaveTarget::Replace, "r", &hook);
+    assert_eq!(o[0].error, Some(ErrKind::InternalPanic));
+    // The engine is alive and the other scan saves normally.
+    assert!(e.save(other.id, SaveTarget::Replace).ok);
+    // The next start finishes the interrupted group (it had reached the committing phase), so the
+    // folder holds the complete set or the scan, never a partial set.
+    let e2 = Engine::new(e.paths());
+    let files = e.files();
+    let set: Vec<String> = (1..=4).map(|n| format!("scan_{n:02}.jpg")).collect();
+    let partial = files
+        .iter()
+        .filter(|f| f.starts_with("scan_") || *f == "scan.jpg")
+        .cloned()
+        .collect::<Vec<_>>();
+    assert!(partial == set || partial == ["scan.jpg"], "{files:?}");
+    if partial == set {
+        let r = e2.restore_file_derived(
+            &e2.list_backups()
+                .runs
+                .iter()
+                .flat_map(|r| r.files.iter())
+                .find(|f| f.name == "scan.jpg")
+                .unwrap()
+                .id,
+            RestoreMode::Auto,
+            DerivedAction::Remove,
+            &nop,
+        );
+        assert!(r.ok, "{r:?}");
+        assert_eq!(fs::read(e.dir.join("scan.jpg")).unwrap(), scan);
+    }
 }

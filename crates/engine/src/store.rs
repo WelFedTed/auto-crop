@@ -430,6 +430,50 @@ mod tests {
         assert!(store.entry_dir("zzzzzzzzzzzzzzzzzzzzzzzzzzzz").is_none());
     }
 
+    /// M10.25: a manifest written before the 1-to-N fields (kind, per-output item id and index,
+    /// moved derived files) still loads, as a one-to-one backup, and restores as before.
+    #[test]
+    fn a_manifest_written_before_m10_loads_as_one_to_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::new(tmp.path().join("backups"));
+        let id = "0123456789abcdef0123456789ab";
+        let dir = tmp.path().join("backups").join(id);
+        fs::create_dir_all(&dir).unwrap();
+        let old = serde_json::json!({
+            "schema": 1, "id": id, "run_id": "r1", "run_name": "Old run", "created_at": 1_790_000_000,
+            "original_path": "C:\\photos\\a.jpg", "original_name": "a.jpg",
+            "original_file": "original.jpg", "original_blake3": "00", "original_size": 5,
+            "original_mtime_ms": 1000, "format": "jpg",
+            "outputs": [{"path": "C:\\photos\\a.jpg", "blake3": "ff", "size": 3, "mtime_ms": 1000}],
+            "state": "Saved", "pinned": false, "purge_after": null, "engine_version": "0.0.1",
+            "edit": {"version": 1, "items": [{"id": 1, "include": true,
+                "geometry": {"type": "quad", "corners": [{"x":0.1,"y":0.1},{"x":0.9,"y":0.1},{"x":0.9,"y":0.9},{"x":0.1,"y":0.9}], "quarterTurns": 0, "fineDeg": 0.0},
+                "origin": {"kind": "manual"}}]},
+            "restored_at": null
+        });
+        fs::write(dir.join("manifest.json"), serde_json::to_vec(&old).unwrap()).unwrap();
+        let m = store.read(id).expect("the old manifest loads");
+        assert_eq!(m.kind, BackupKind::OneToOne);
+        assert_eq!(m.outputs.len(), 1);
+        assert_eq!((m.outputs[0].item_id, m.outputs[0].index), (None, None));
+        assert!(m.derived_moved.is_empty());
+        assert_eq!(
+            m.edit.as_ref().unwrap().version,
+            auto_crop_core::EDIT_STATE_VERSION
+        );
+        assert_eq!(m.edit.as_ref().unwrap().items.len(), 1);
+        // A one-to-one manifest written now has no trace of the new fields in its outputs, so an
+        // older build reads it unchanged.
+        let json = serde_json::to_value(&m).unwrap();
+        assert!(json["outputs"][0].get("item_id").is_none());
+        // The guard finds an output by hash, in any backup.
+        assert_eq!(
+            store.find_output("ff").map(|(m, i)| (m.id, i)),
+            Some((id.to_owned(), 0))
+        );
+        assert!(store.find_output("nope").is_none());
+    }
+
     #[test]
     fn a_newer_manifest_schema_is_refused() {
         let tmp = tempfile::tempdir().unwrap();

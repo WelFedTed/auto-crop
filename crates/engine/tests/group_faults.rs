@@ -797,6 +797,91 @@ fn a_rollback_puts_the_scan_back_from_the_backup_when_it_is_gone() {
     );
 }
 
+/// A child that only waits: it stands in for another instance of the app in the middle of a
+/// commit.
+#[test]
+fn child_sleep() {
+    if std::env::var("AC_FAULT_SLEEP").is_ok() {
+        std::thread::sleep(Duration::from_secs(60));
+    }
+}
+
+#[test]
+fn recovery_leaves_the_journal_of_a_commit_running_in_another_process_alone() {
+    let fx = Fx::new(Mode::Replace, 3);
+    // The commit "dies" after one rename, leaving a journal and one placed output.
+    let _ = fx.commit(&|s: &Step| {
+        if *s == Step::AfterRename(0) {
+            Fault::Crash
+        } else {
+            Fault::Pass
+        }
+    });
+    // Make the journal belong to a live process: a child of this test binary.
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "child_sleep", "--nocapture"])
+        .env("AC_FAULT_SLEEP", "1")
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let started = (0..100)
+        .find_map(|_| {
+            std::thread::sleep(Duration::from_millis(50));
+            auto_crop_engine::group::process_started(child.id())
+        })
+        .expect("the child is running");
+    let jpath = fs::read_dir(fx.store.groups_dir())
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|x| x == "json"))
+        .unwrap();
+    let mut j: serde_json::Value = serde_json::from_slice(&fs::read(&jpath).unwrap()).unwrap();
+    j["owner"] = serde_json::json!({"pid": child.id(), "started": started});
+    fs::write(&jpath, serde_json::to_vec(&j).unwrap()).unwrap();
+
+    let report = recover(&fx.store, &NoFaults);
+    assert_eq!(report.busy.len(), 1, "{report:?}");
+    assert!(report.rolled_back.is_empty() && report.rolled_forward.is_empty());
+    assert_eq!(
+        pending_journals(&fx.store),
+        1,
+        "the live owner's journal is untouched"
+    );
+    assert_eq!(
+        fx.files_in_outputs_dir().len(),
+        1,
+        "and so is its half-placed set"
+    );
+
+    // Once that process is gone the journal is nobody's: recovery finishes the group.
+    child.kill().unwrap();
+    child.wait().unwrap();
+    let report = recover(&fx.store, &NoFaults);
+    assert_eq!(report.rolled_forward.len(), 1, "{report:?}");
+    assert_eq!(fx.check("after the owner died"), Which::New);
+}
+
+#[test]
+fn recovery_in_the_same_process_does_not_touch_a_commit_that_is_still_running() {
+    // A second engine starting up inside the commit's own process (here: a hook that runs
+    // recovery in the middle of the renames) must leave the running group alone.
+    let fx = Fx::new(Mode::Replace, 3);
+    let store = Store::new(fx.store.dir().to_path_buf());
+    let during = RefCell::new(None);
+    let hook = |s: &Step| {
+        if *s == Step::AfterRename(0) {
+            *during.borrow_mut() = Some(recover(&store, &NoFaults));
+        }
+        Fault::Pass
+    };
+    let saved = fx.commit(&hook).unwrap();
+    assert_eq!(saved.outputs.len(), 3);
+    let report = during.into_inner().expect("the hook ran");
+    assert_eq!(report.busy.len(), 1, "{report:?}");
+    assert_eq!(fx.check("a running commit"), Which::New);
+}
+
 #[test]
 fn a_scan_that_cannot_be_removed_keeps_the_set_and_says_so() {
     let fx = Fx::new(Mode::Replace, 3);
@@ -1013,4 +1098,57 @@ fn killing_the_process_at_every_step_never_leaves_a_partial_set() {
             assert!(in_backup, "{step}");
         }
     }
+}
+
+/// Many random faults in a row (the in-process stand-in for the nightly kill loop): each run picks
+/// a scenario, a step and a kind of fault, recovers, checks the invariant, and then proves the
+/// scan can still be saved afterwards.
+#[test]
+fn random_faults_across_many_runs_never_leave_a_partial_set() {
+    let scs = scenarios();
+    let steps: Vec<Vec<Step>> = scs
+        .iter()
+        .map(|(_, make)| make().recorded_steps())
+        .collect();
+    let mut rng = 0x1234_5678_9ABC_DEF1u64;
+    let mut next = move || {
+        rng ^= rng << 13;
+        rng ^= rng >> 7;
+        rng ^= rng << 17;
+        rng
+    };
+    let mut completed = 0;
+    for run in 0..150 {
+        let k = (next() % scs.len() as u64) as usize;
+        let (label, make) = &scs[k];
+        let step = steps[k][(next() % steps[k].len() as u64) as usize];
+        let crash = next() % 2 == 0;
+        let fx = make();
+        let fault = if crash {
+            Fault::Crash
+        } else if next() % 2 == 0 {
+            Fault::Fail(ErrKind::DiskFull)
+        } else {
+            Fault::Fail(ErrKind::FileInUse)
+        };
+        let result = fx.commit(&move |s: &Step| if *s == step { fault } else { Fault::Pass });
+        let kind = if crash { "crash" } else { "fail" };
+        let ctx = format!("run {run}: {label}: {kind} at {step:?}");
+        if crash {
+            assert_eq!(result.unwrap_err(), GroupError::Crashed, "{ctx}");
+        }
+        recover(&fx.store, &NoFaults);
+        let which = fx.check_with(&ctx, !crash && matches!(step, Step::Retired(_)));
+        if which == Which::Old {
+            // Nothing was lost and nothing is stuck: the same save now goes through.
+            fx.commit(&NoFaults)
+                .unwrap_or_else(|e| panic!("{ctx}: retry {e:?}"));
+            assert_eq!(fx.check(&format!("{ctx} (retry)")), Which::New);
+            completed += 1;
+        }
+    }
+    assert!(
+        completed > 20,
+        "only {completed} runs were rolled back and retried"
+    );
 }
