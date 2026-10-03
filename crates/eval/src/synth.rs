@@ -432,6 +432,7 @@ pub fn generate(spec: &SuiteSpec, out: &Path) -> Result<Generated, String> {
                     width: p.width,
                     height: p.height,
                     quad,
+                    items: Vec::new(),
                     tags,
                 },
                 bytes.len() as u64,

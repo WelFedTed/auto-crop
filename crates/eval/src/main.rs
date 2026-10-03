@@ -4,7 +4,8 @@
 //! `auto-crop-eval`: the accuracy harness command line. See `--help`.
 
 use auto_crop_eval::compare::{CompareConfig, Verdict, compare, render_text};
-use auto_crop_eval::detector::DetectorPredictor;
+use auto_crop_eval::detector::{DetectorPredictor, ItemsDetectorPredictor};
+use auto_crop_eval::multi::{self, MultiOracle, MultiPredictor, MultiRunConfig};
 use auto_crop_eval::predictor::{FullFrame, Jittered, JsonLines, Oracle, Predictor};
 use auto_crop_eval::publish::{PublishableMetrics, check_no_leak};
 use auto_crop_eval::report::summary_text;
@@ -22,10 +23,13 @@ Commands:
   synth --suite smoke|full --out DIR [--seed N] [--count N] [--max-edge N]
         Write a STAND-IN synthetic suite (images + manifest.jsonl) for the harness. Never commit it.
   run --manifest FILE --predictor SPEC --out FILE [--split dev|test|all] [--threads N]
-      [--commit SHA] [--tier T] [--suite NAME]
+      [--commit SHA] [--tier T] [--suite NAME] [--multi]
         Score a predictor. SPEC is one of: full-frame | oracle | detector[:GOOD_THRESHOLD] |
         jitter:SHIFT[:SEED] | jsonl:PATH. Writes results JSON (local; per-image rows) and prints
         an aggregate summary. Wall time goes to <out>.timings.json, never into the results.
+        --multi scores several items per image (manifest `items`): item count, recall and precision
+        at IoU 0.9, silent wrong splits, routing of touching/overlapping scans. SPEC is then
+        items[:GOOD_CUTOFF] (the multi-item detector) or oracle.
   compare --base FILE --head FILE [--waiver] [--out FILE] [--min-gate-n N]
         Paired regression gate. Exit 1 when mean IoU falls 0.3 pt or the failure rate rises 0.5 pt
         (or a slice with n >= gate floor does), unless --waiver (the accuracy-waiver label).
@@ -166,7 +170,66 @@ fn cmd_synth(a: &Args) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
+fn multi_predictor_from_spec(
+    spec: &str,
+    m: &manifest::Manifest,
+) -> Result<Box<dyn MultiPredictor>, String> {
+    let (kind, arg) = spec
+        .split_once(':')
+        .map_or((spec, None), |(k, a)| (k, Some(a)));
+    match (kind, arg) {
+        ("oracle", None) => Ok(Box::new(MultiOracle::from_manifest(m))),
+        ("items", cutoff) => {
+            let mut p = ItemsDetectorPredictor::default();
+            if let Some(c) = cutoff {
+                p.opts.good_cutoff = c.parse().map_err(|_| format!("bad cutoff {c}"))?;
+            }
+            Ok(Box::new(p))
+        }
+        _ => Err(format!(
+            "unknown multi predictor spec `{spec}` (items[:CUTOFF] | oracle)"
+        )),
+    }
+}
+
+fn cmd_run_multi(a: &Args) -> Result<ExitCode, String> {
+    let split = a.value("--split")?.unwrap_or_else(|| "all".to_owned());
+    let m = manifest::load(Path::new(&a.required("--manifest")?))?.filter_split(&split);
+    if m.items.is_empty() {
+        return Err(format!("no images in split `{split}`"));
+    }
+    let predictor = multi_predictor_from_spec(&a.required("--predictor")?, &m)?;
+    let cfg = MultiRunConfig {
+        threads: a.number::<usize>("--threads")?.unwrap_or(0),
+        commit: a.value("--commit")?.unwrap_or_else(git_commit),
+        suite: a.value("--suite")?.unwrap_or_else(|| "adhoc".to_owned()),
+        split,
+    };
+    let started = Instant::now();
+    let results = multi::run(&m, predictor.as_ref(), &cfg)?;
+    let wall = started.elapsed();
+    let out = PathBuf::from(a.required("--out")?);
+    write(&out, &multi::to_json(&results))?;
+    let mut sidecar = out.clone().into_os_string();
+    sidecar.push(".timings.json");
+    write(
+        Path::new(&sidecar),
+        &format!(
+            "{{\"wall_ms\":{},\"scans\":{},\"ms_per_scan_wall\":{:.3}}}
+",
+            wall.as_millis(),
+            results.summary.scans,
+            wall.as_secs_f64() * 1000.0 / results.summary.scans as f64
+        ),
+    )?;
+    print!("{}", multi::summary_text(&results));
+    Ok(ExitCode::SUCCESS)
+}
+
 fn cmd_run(a: &Args) -> Result<ExitCode, String> {
+    if a.flag("--multi") {
+        return cmd_run_multi(a);
+    }
     let split = a.value("--split")?.unwrap_or_else(|| "all".to_owned());
     let m = manifest::load(Path::new(&a.required("--manifest")?))?.filter_split(&split);
     if m.items.is_empty() {

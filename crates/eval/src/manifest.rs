@@ -37,8 +37,24 @@ pub struct ManifestItem {
     pub width: u32,
     pub height: u32,
     pub quad: Quad,
+    /// Multi-item scenes (ROADMAP M10.51): every item's ground-truth quad, in the same convention
+    /// as `quad`. Absent or empty for single-item manifests, which are unchanged; when present
+    /// `quad` is the first of them, so a single-item reader still gets a valid quad.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub items: Vec<Quad>,
     #[serde(default)]
     pub tags: BTreeMap<String, String>,
+}
+
+impl ManifestItem {
+    /// The item quads of a multi-item scene; a single-item row is one item.
+    pub fn item_quads(&self) -> Vec<Quad> {
+        if self.items.is_empty() {
+            vec![self.quad]
+        } else {
+            self.items.clone()
+        }
+    }
 }
 
 fn default_version() -> u32 {
@@ -81,6 +97,21 @@ pub fn validate_item(it: &ManifestItem) -> Vec<String> {
         } else if !geom::quad_is_simple(&it.quad) {
             e.push("quad edges cross".to_owned());
         }
+    }
+    for (k, q) in it.items.iter().enumerate() {
+        let unit: Quad = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        if !geom::quad_is_finite(q) || geom::homography(q, &unit).is_none() {
+            e.push(format!("item {k}: non-finite or degenerate quad"));
+        } else if geom::signed_area(q) <= 0.0 {
+            e.push(format!("item {k}: quad is not clockwise from the top-left"));
+        } else if !geom::quad_is_simple(q) {
+            e.push(format!("item {k}: quad edges cross"));
+        }
+    }
+    if let Some(first) = it.items.first()
+        && *first != it.quad
+    {
+        e.push("`quad` must equal the first of `items`".to_owned());
     }
     let p = Path::new(&it.image);
     if it.image.is_empty()
@@ -190,6 +221,7 @@ mod tests {
             width: 100,
             height: 80,
             quad: [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]],
+            items: Vec::new(),
             tags: BTreeMap::new(),
         }
     }

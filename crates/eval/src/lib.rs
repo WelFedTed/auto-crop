@@ -7,7 +7,7 @@
 //! Layout:
 //!
 //! * Metric core, independent of the code it measures (imports no project crate): [`geom`],
-//!   [`metrics`], [`stats`], [`calib`].
+//!   [`metrics`], [`stats`], [`calib`], [`multi`] (multi-item metrics and the `run --multi` path).
 //! * Data and plumbing: [`manifest`], [`predictor`], [`run`], [`report`], [`compare`], [`noise`],
 //!   [`publish`] (the publishing guard type), [`splits`] (`check-splits`) and [`selfcheck`].
 //! * Adapters and data that do use the app crates: [`detector`] (the real classical detector),
@@ -24,6 +24,7 @@ pub mod detector;
 pub mod geom;
 pub mod manifest;
 pub mod metrics;
+pub mod multi;
 pub mod noise;
 pub mod predictor;
 pub mod publish;
@@ -45,6 +46,7 @@ mod independence {
             ("geom.rs", include_str!("geom.rs")),
             ("metrics.rs", include_str!("metrics.rs")),
             ("stats.rs", include_str!("stats.rs")),
+            ("multi.rs", include_str!("multi.rs")),
             ("calib.rs", include_str!("calib.rs")),
         ];
         for (name, text) in sources {

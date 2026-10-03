@@ -5,9 +5,11 @@
 //! the harness measures the code the app ships. Decoding goes through `auto-crop-codecs`, which
 //! applies the EXIF orientation once, matching the "EXIF-oriented" ground truth.
 
+use crate::multi::{MultiPrediction, MultiPredictor};
 use crate::predictor::{PredictError, PredictInput, Prediction, Predictor, Verdict};
 use auto_crop_core::Forced;
 use auto_crop_imgproc::detect::detect;
+use auto_crop_imgproc::items::{ItemsOptions, SplitProfile, detect_items};
 
 /// The interim Balanced cutoff (PLAN 7.4: 0.90 until `calibration.json` exists). The detector's
 /// score is an uncalibrated heuristic, so this only decides what counts as auto-accepted here.
@@ -51,6 +53,63 @@ impl Predictor for DetectorPredictor {
             quad,
             confidence: Some(score.clamp(0.0, 1.0)),
             verdict: Some(verdict),
+        })
+    }
+}
+
+/// Runs `imgproc::items::detect_items` (the multi-item detector) and reports every item it found.
+/// A scan counts as auto-accepted only under the preview rule (ROADMAP M10.29): every item Good
+/// at the strict cutoff and no scan-level hold.
+pub struct ItemsDetectorPredictor {
+    pub opts: ItemsOptions,
+}
+
+impl Default for ItemsDetectorPredictor {
+    /// The mixed synthetic scenes hold photos, receipts and cards, so the plausible-aspect limit
+    /// is the receipts profile's (12:1), as a user who picked "Documents and receipts" would have.
+    fn default() -> Self {
+        Self {
+            opts: ItemsOptions {
+                profile: SplitProfile::Receipts,
+                ..ItemsOptions::default()
+            },
+        }
+    }
+}
+
+impl MultiPredictor for ItemsDetectorPredictor {
+    fn name(&self) -> String {
+        format!("items-detector(good>={})", self.opts.good_cutoff)
+    }
+
+    fn predict(&self, input: &PredictInput) -> Result<MultiPrediction, PredictError> {
+        let bytes =
+            std::fs::read(&input.image).map_err(|e| PredictError::Failed(format!("read: {e}")))?;
+        let decoded = auto_crop_codecs::decode(&bytes)
+            .map_err(|e| PredictError::Failed(format!("decode: {e}")))?;
+        let det = detect_items(&decoded.raster, &self.opts);
+        let conf = det.scan_confidence();
+        let mut reasons: Vec<String> = conf
+            .reasons
+            .iter()
+            .map(|r| {
+                serde_json::to_string(&r.code).map_or_else(
+                    |_| format!("{:?}", r.code),
+                    |s| s.trim_matches('"').to_owned(),
+                )
+            })
+            .collect();
+        reasons.sort();
+        reasons.dedup();
+        Ok(MultiPrediction {
+            items: det
+                .items
+                .iter()
+                .map(|i| std::array::from_fn(|k| [i.quad[k].x, i.quad[k].y]))
+                .collect(),
+            accepted: det.auto_accept(self.opts.good_cutoff),
+            reasons,
+            confidence: Some(f64::from(conf.score).clamp(0.0, 1.0)),
         })
     }
 }

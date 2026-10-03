@@ -518,6 +518,7 @@ pub fn item(
         width: size.0,
         height: size.1,
         quad,
+        items: Vec::new(),
         tags,
     }
 }
