@@ -18,6 +18,10 @@ pub(crate) fn parse(b: &[u8], limits: &DecodeLimits) -> Result<Header, CodecErro
     let mut i = 2; // after SOI
     let mut hdr: Option<Header> = None;
     let mut scans = 0u32;
+    // A sequential frame (SOF0/SOF1) with a subsampled component, and a scan that carries fewer
+    // components than the frame (one scan per component).
+    let mut sequential_subsampled = false;
+    let mut non_interleaved = false;
     let mut eoi = false;
     let mut orientation = 1u8;
     let mut have_exif = false;
@@ -63,6 +67,13 @@ pub(crate) fn parse(b: &[u8], limits: &DecodeLimits) -> Result<Header, CodecErro
                 if comps == 0 || seg.len() < 6 + 3 * usize::from(comps) {
                     return Err(CodecError::corrupt("bad JPEG component count"));
                 }
+                sequential_subsampled = matches!(m, 0xC0 | 0xC1)
+                    && seg[6..]
+                        .as_chunks::<3>()
+                        .0
+                        .iter()
+                        .take(usize::from(comps))
+                        .any(|c| c[1] != 0x11);
                 let mut h = Header::new(Format::Jpeg, width, height);
                 h.bit_depth = precision;
                 h.channels = comps;
@@ -81,6 +92,10 @@ pub(crate) fn parse(b: &[u8], limits: &DecodeLimits) -> Result<Header, CodecErro
             }
             0xDA => {
                 scans += 1;
+                if let Some(h) = &hdr {
+                    non_interleaved |=
+                        sequential_subsampled && seg.first().is_some_and(|&ns| ns < h.channels);
+                }
                 if scans > limits.max_scans {
                     return Err(CodecError::LimitExceeded {
                         limit: Limit::Scans,
@@ -121,6 +136,13 @@ pub(crate) fn parse(b: &[u8], limits: &DecodeLimits) -> Result<Header, CodecErro
 
     let mut h = hdr.ok_or_else(|| CodecError::corrupt("JPEG has no frame header"))?;
     h.scans = scans;
+    if non_interleaved && h.unsupported.is_none() {
+        // zune-jpeg 0.5.15 panics (out-of-bounds output rows in its AVX2 IDCT and upsampler, found
+        // by the `limits` fuzz target, M1.70) on a subsampled sequential JPEG with one scan per
+        // component, so such a file is refused up front instead of failing as a caught decoder
+        // panic. Unsubsampled (4:4:4) files with one scan per component decode correctly.
+        h.unsupported = Some("non-interleaved subsampled JPEG (one scan per component)".into());
+    }
     h.orientation = orientation;
     h.truncated = !eoi;
     if !icc_chunks.is_empty() {

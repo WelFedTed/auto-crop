@@ -106,6 +106,30 @@ fn twelve_bit_arithmetic_and_lossless_jpegs_are_unsupported_features() {
     }
 }
 
+/// Found by the `limits` fuzz target (M1.70, `fuzz/regressions/limits/`): zune-jpeg 0.5.15 panics
+/// in its AVX2 IDCT on a subsampled sequential JPEG with one scan per component, so it is refused up front.
+#[test]
+fn a_non_interleaved_sequential_jpeg_is_an_unsupported_feature_not_a_decoder_panic() {
+    let base = JpegSpec {
+        sampling: (2, 2),
+        ..JpegSpec::new(24, 16)
+    }
+    .build();
+    let sos = base.windows(2).position(|w| w == [0xFF, 0xDA]).unwrap();
+    let header_len = 2 + usize::from(u16::from_be_bytes([base[sos + 2], base[sos + 3]]));
+    // One component in the scan (id 1, tables 0/0), spectral selection 0..63, no approximation.
+    let mut bytes = base[..sos].to_vec();
+    bytes.extend_from_slice(&[0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3F, 0x00]);
+    bytes.extend_from_slice(&base[sos + header_len..]);
+    assert!(
+        matches!(decode(&bytes), Err(CodecError::UnsupportedFeature(why)) if why.contains("non-interleaved")),
+        "{:?}",
+        decode(&bytes).map(|d| d.frames)
+    );
+    // The same walk must not refuse a normal interleaved file.
+    assert!(decode(&base).is_ok());
+}
+
 #[test]
 fn a_truncated_jpeg_is_refused_not_decoded_with_grey_fill() {
     let full = jpeg_baseline(64, 48);
