@@ -197,6 +197,7 @@ dependencies = [
  "blake3",
  "insta",
  "peak_alloc",
+ "proptest",
  "rayon",
  "serde",
  "serde_json",
