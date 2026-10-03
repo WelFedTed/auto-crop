@@ -20,7 +20,7 @@ pic-scale = { version = "0.7", features = ["colorspaces"] }
 
 [dev-dependencies]
 auto-crop-codecs = { path = "../codecs", features = ["fixtures"] }
-# M1.58 instruction-count benchmarks (Linux only: the bench file is empty elsewhere). The runner
+# M1.58 instruction-count benchmarks (compiled everywhere, run only on Linux/Valgrind). The runner
 # binary must have the same version: `cargo install gungraun-runner --version 0.20.0 --locked`.
 gungraun = "0.20"
 image-compare = { version = "0.5", default-features = false }
