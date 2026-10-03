@@ -1,0 +1,148 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+# The Python synthetic generator (tools/synth, ROADMAP M1.30 to M1.35).
+#
+# Per pull request (the job always reports; the path filter is a step inside it): the generator's
+# unit tests (golden ground-truth quads, determinism, independence from the app), the inverse-warp
+# SSIM of the ground truth, the Rust decoders on every format x EXIF x colour-space variant, the
+# **Tesseract 5 CER acceptance of M1.31** (the only place it runs: Tesseract is not installed on the
+# dev machines), a 200-image smoke suite, `check-splits`, the <= 5 MB archive budget and a
+# non-gating detector run whose aggregate goes to the job summary.
+#
+# Nightly: the 5,200-image full suite with its quota check and the same detector aggregate.
+#
+# Safety: `pull_request` only (never `pull_request_target`), read-only token, no secrets, Linux only.
+# The Python environment is installed from the hash-locked requirements.lock (`pip --require-hashes`).
+# Synthetic data detects regressions; it says nothing about real-world accuracy.
+
+name: Synthetic generator
+
+on:
+  pull_request:
+  schedule:
+    - cron: "41 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: synth-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  smoke:
+    name: generator checks and smoke suite
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Did anything the generator depends on change?
+        id: changes
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" != "pull_request" ] || git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -Eq '^(tools/synth/|crates/(eval|codecs|imgproc)/|xtask/|Cargo\.toml$|Cargo\.lock$|rust-toolchain\.toml$|\.github/workflows/synth\.yml$)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing the synthetic generator depends on changed: checks skipped." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: steps.changes.outputs.relevant == 'true'
+        with:
+          python-version: "3.12"
+      - name: Install Tesseract 5 (Ubuntu 22.04 ships 4.1; the OCR oracle needs 5.x)
+        if: steps.changes.outputs.relevant == 'true'
+        run: |
+          sudo add-apt-repository -y ppa:alex-p/tesseract-ocr5
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng
+          tesseract --version
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: steps.changes.outputs.relevant == 'true'
+      - name: Build the harness and the Python environment (hash-locked)
+        if: steps.changes.outputs.relevant == 'true'
+        run: |
+          cargo build --release -p auto-crop-eval
+          cargo xtask synth-setup
+      - name: Generator unit tests (golden quads, determinism, independence)
+        if: steps.changes.outputs.relevant == 'true'
+        run: cargo xtask synth-check tests
+      - name: Ground truth drift check (inverse-warp SSIM >= 0.98, PROVISIONAL)
+        if: steps.changes.outputs.relevant == 'true'
+        run: cargo xtask synth-check geometry
+      - name: Rust decoders reproduce the upright reference for every variant
+        if: steps.changes.outputs.relevant == 'true'
+        run: cargo xtask synth-check variants
+      - name: Tesseract 5 CER on the clean render (<= 5%, PROVISIONAL; M1.31)
+        if: steps.changes.outputs.relevant == 'true'
+        run: cargo xtask synth-check ocr --require
+      - name: Generate the smoke suite from its seed
+        if: steps.changes.outputs.relevant == 'true'
+        run: cargo xtask synth --suite smoke
+      - name: Validate the manifest and the splits
+        if: steps.changes.outputs.relevant == 'true'
+        run: |
+          ./target/release/auto-crop-eval validate-manifest target/synth/smoke/manifest.jsonl
+          cargo xtask check-splits target/synth/smoke/manifest.jsonl
+      - name: Smoke archive budget (<= 5 MB, no Git LFS)
+        if: steps.changes.outputs.relevant == 'true'
+        run: |
+          tar -czf smoke.tgz -C target/synth smoke
+          size=$(stat -c %s smoke.tgz)
+          echo "smoke archive: $size bytes" | tee -a "$GITHUB_STEP_SUMMARY"
+          test "$size" -le 5000000
+      - name: Detector over the smoke suite (aggregate only, not a gate)
+        if: steps.changes.outputs.relevant == 'true'
+        run: |
+          ./target/release/auto-crop-eval run --manifest target/synth/smoke/manifest.jsonl --predictor detector --suite smoke-py --threads 2 --out smoke-py-detector.json | tee smoke-py.txt
+          {
+            echo '### Detector on the Python smoke suite (synthetic, not a gate)'
+            echo '```'
+            sed -n '1,9p' smoke-py.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  full:
+    name: full suite (nightly)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Build the harness and the Python environment (hash-locked)
+        run: |
+          cargo build --release -p auto-crop-eval
+          cargo xtask synth-setup
+      - name: Generate the full suite (5,200 images, never archived or committed)
+        run: cargo xtask synth --suite full --truth none
+      - name: Quotas (every tag value >= 200 images), manifest and splits
+        run: |
+          ./target/release/auto-crop-eval validate-manifest target/synth/full/manifest.jsonl
+          cargo xtask check-splits target/synth/full/manifest.jsonl
+          PYTHONPATH=tools/synth target/synth-venv/bin/python -m synth quotas target/synth/full/manifest.jsonl
+      - name: Detector over the full suite (aggregate only, not a gate)
+        run: |
+          ./target/release/auto-crop-eval run --manifest target/synth/full/manifest.jsonl --predictor detector --suite full-py --out full-py-detector.json | tee full-py.txt
+          {
+            echo '### Detector on the Python full suite (synthetic, not a gate)'
+            echo '```'
+            cat full-py.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

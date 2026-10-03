@@ -8,17 +8,19 @@ The harness runs a **predictor** over a **manifest** of images with ground-truth
 
 ```
 cargo xtask eval self-check                       # no data needed; every-PR validation of the harness itself
-cargo xtask synth --suite smoke                   # 200 STAND-IN images -> target/synth/smoke (ignored by git)
+cargo xtask synth-setup                           # once: Python environment for tools/synth from the hashed lock
+cargo xtask synth --suite smoke                   # 200 images from the Python generator -> target/synth/smoke (ignored by version control)
+cargo xtask synth --suite smoke --generator rust  # the old Rust STAND-IN writer -> target/synth/smoke-rust
 cargo xtask eval run --manifest target/synth/smoke/manifest.jsonl --predictor detector --out base.json
 cargo xtask eval compare --base base.json --head head.json   # exit 1 = regression gate failed
 ```
 
-**Validating a detector change on more than one seed.** The stand-in generator takes `--seed`, `--count` and `--max-edge`, so a change can be developed on one seed and checked on others it never saw (and at other image sizes) before it is trusted even as a regression signal:
+**Validating a detector change on more than one seed.** Both generators take `--seed`, `--count` and `--max-edge` (the examples below use the Rust stand-in, hence `--generator rust`), so a change can be developed on one seed and checked on others it never saw (and at other image sizes) before it is trusted even as a regression signal:
 
 ```
-cargo xtask synth --suite full --count 1728 --seed 1234567 --out target/synth/mid-b   # balanced: 1,728 = 2^6 * 27, every tag value exactly even
-cargo xtask synth --suite smoke --seed 31415926 --out target/synth/smoke-d
-cargo xtask synth --suite smoke --max-edge 1024 --out target/synth/smoke-1024
+cargo xtask synth --generator rust --suite full --count 1728 --seed 1234567 --out target/synth/mid-b   # balanced: 1,728 = 2^6 * 27, every tag value exactly even
+cargo xtask synth --generator rust --suite smoke --seed 31415926 --out target/synth/smoke-d
+cargo xtask synth --generator rust --suite smoke --max-edge 1024 --out target/synth/smoke-1024
 ```
 
 Keep one seed back until the constants are frozen and run it once. Compare base and head with `eval compare` on each set, not only on the default smoke set; `docs/perf/detector-baseline.md` records the protocol and its limits.
@@ -27,12 +29,14 @@ Keep one seed back until the constants are frozen and run it once. Compare base 
 
 | Command | What it does |
 |---|---|
-| `synth --suite smoke\|full --out DIR [--seed N] [--count N] [--max-edge N]` | Writes the STAND-IN suite (below). |
+| `synth --suite smoke\|full --out DIR [--seed N] [--count N] [--max-edge N]` | Writes the Rust STAND-IN suite (below). `cargo xtask synth` defaults to the Python generator instead; this binary command is the `--generator rust` path. |
 | `run --manifest F --predictor SPEC --out F [--split dev\|test\|all] [--threads N] [--commit SHA] [--tier T] [--suite NAME]` | Scores a predictor. SPEC: `full-frame`, `oracle`, `detector[:GOOD_THRESHOLD]`, `jitter:SHIFT[:SEED]`, `jsonl:PATH`. Writes results (local, with per-image rows) and `<out>.timings.json`. |
 | `compare --base F --head F [--waiver] [--out F] [--min-gate-n N]` | Paired regression gate (below). Exit 0 pass or waived, 1 fail, 2 error. |
 | `noise-floor --a F --b F` | Disagreement between two annotators' label files (JSON lines of `id`, `width`, `height`, `quad`): IoU mean, median and p5, corner error median and p95, skew. No target may be tighter than the p95 disagreement. |
 | `publish --results F --out F` | Writes the publishable aggregate view and leak-checks it (below). |
 | `validate-manifest F` | Valid quads, unique ids, relative paths, scene-disjoint splits. |
+| `check-splits F...` | `cargo xtask check-splits`: fails when a `scene_id`, `scene_seed`, `group_id`, `document_id` or `background_seed` appears in two splits, in one manifest or across several (an item without `split` counts as its file name). Works on the raw lines, so generator-specific fields are seen too. |
+| `check-variants --dir D` | Decodes every format x EXIF orientation x colour-space variant written by `python -m synth variants` with the repo's decoders and requires the upright reference back (exact for lossless, bounded for lossy), the orientation tag, and the ICC profile byte for byte. |
 | `self-check` | Harness self-validation (below). |
 
 ## Manifest (`manifest.jsonl`)
@@ -89,16 +93,32 @@ Two results over the same manifest (same SHA-256; same image ids) are paired by 
 
 Real public datasets (SmartDoc 2015 Ch.1, CORD, MIDV-500, DIBCO, raw.pixls.us CC0) are fetched, verified and turned into manifests of this format by `cargo xtask fetch-corpus`; see [corpora.md](corpora.md). Manifest lines written by the adapters carry extra `licence`, `attribution` and `source` fields, which the harness ignores.
 
-## The synthetic suites are a STAND-IN
+## The synthetic suites
 
-`synth` is a minimal M1.35 writer, **not** the M1.30 Python/Augraphy generator. It extends the Rust scene renderer in `auto-crop-imgproc::synth` with a pinhole camera (roll and tilt up to 45 degrees; analytic ground truth), distractor clutter that never touches the page, three lighting conditions and JPEG/PNG output.
+Two generators write this manifest format. **The Python generator (`tools/synth`, M1.30 to M1.35) is the default of `cargo xtask synth`**; the Rust writer below is kept behind `--generator rust` as a fallback and because the per-PR accuracy gate (`accuracy-smoke.yml`) still generates its smoke set with it. Synthetic numbers detect regressions; they never back a real-world accuracy claim (B6).
+
+### Python generator (`tools/synth`)
+
+Known-text pages (Letter and A4 letters, invoices with line items, forms, reports) and receipts (58 to 80 mm, thermal fade, any length to 11.5:1, EAN-13 and QR), a pinhole camera (pitch and yaw to 45 degrees, any roll, tagged partial framing and curl) with an analytic ground-truth quad from the float64 matrix, procedural backgrounds with clutter, five lighting classes, blur and noise, Augraphy paper and ink degradations behind a seam, and JPEG, PNG, TIFF and WebP output with EXIF orientation 1 to 8 and sRGB or Display P3. Guide: [tools/synth/README.md](../../tools/synth/README.md).
+
+- Tags (15 axes, each value a slice): `aspect`, `paper`, `background`, `ink`, `lighting`, `clutter`, `tilt`, `rotation`, `framing`, `curl`, `blur`, `noise`, `format`, `exif`, `colorspace`. `full` has 5,200 images in 1,734 three-image scenes and every tag value has at least 468 images (the M1.35 floor is 200); `smoke` has 200.
+- Splits are by scene hash (30% `dev`, 70% `test`); a scene's page, background and seed never cross (`cargo xtask check-splits`).
+- **Size.** The smoke archive is under 5 MB as a `.tgz` (about 6.2 MB on disk with the transcripts) at a 320 px long edge and 12% lossless files; the full suite is 512 px, never archived. Both are regenerated from the seed.
+- Deterministic: the same seed gives identical manifest and image bytes within the pinned environment, at any worker count (tested with 1 and 2 workers). Nothing is promised across operating systems; the ground truth is checked against golden values to 1e-6.
+- Checks: `cargo xtask synth-check` (unit tests including the golden quads, SSIM of the unwarped render against the clean page, the Rust decoders on every variant, Tesseract CER where installed). See the README for the numbers and what is not run locally.
+- Known gaps: no multi-item scenes, no pages absent (negatives), no hands, glare or handwriting, curl without self-occlusion, backgrounds flat-on to the camera.
+
+### Rust STAND-IN (`--generator rust`)
+
+`synth` here is a minimal M1.35 writer, **not** the M1.30 Python/Augraphy generator. It extends the Rust scene renderer in `auto-crop-imgproc::synth` with a pinhole camera (roll and tilt up to 45 degrees; analytic ground truth), distractor clutter that never touches the page, three lighting conditions and JPEG/PNG output.
 
 - Tags: `lighting` (normal, dim, low-contrast), `clutter` (none, light, heavy), `tilt` (0-10, 10-30, 30-45 degrees; the larger of the in-plane roll and the plane's tilt), `aspect` (document about 1.4:1, receipt about 3.1:1), `format` (jpeg q40-95, png). Axes are exactly balanced; `full` has 5,184 images (every tag value 1,728-2,592, above the 200 floor of M1.35), `smoke` 200.
 - Two images share a scene (same paper texture and colours); splits are by scene hash, about 30% `dev` and 70% `test`.
 - Deterministic for a given suite and seed on one platform; f64 trigonometry means cross-OS bit-exactness is not promised.
-- Known gaps against M1.30-M1.34: no real fonts or text, no CC0 backgrounds, no curl, no partial frames, no multi-item scenes, no negatives, EXIF orientation 1 only, JPEG and PNG only (the codecs crate has no TIFF/WebP yet), receipt aspect 3.1:1 instead of > 4:1.
-- **Size.** The smoke suite is about 18.5 MB, above the <= 5 MB archive of M1.35 (noisy photographs do not compress; PNG variants are the bulk). CI regenerates it from the seed instead of storing an archive. Recorded as a plan deviation.
-- Output is never committed: the default output is `target/synth/<suite>`, and `/synth-out/` and `/eval-out/` are gitignored too.
+- Known gaps against M1.30-M1.34: no real fonts or text, no CC0 backgrounds, no curl, no partial frames, no multi-item scenes, no negatives, EXIF orientation 1 only, JPEG and PNG only, receipt aspect 3.1:1 instead of > 4:1.
+- **Size.** The smoke suite is about 18.5 MB, above the <= 5 MB archive of M1.35 (noisy photographs do not compress; PNG variants are the bulk). CI regenerates it from the seed instead of storing an archive. Recorded as a plan deviation (the Python smoke suite is inside the budget).
+- The detector under test and this generator share a lineage (its unit tests use the same renderer), so the numbers on it are the least independent ones; `docs/perf/detector-baseline.md` compares both generators.
+- Output is never committed: the default output is `target/synth/<suite>-rust`, and `/synth-out/` and `/eval-out/` are ignored by version control too.
 
 ## Not done here (so nobody assumes it is)
 
