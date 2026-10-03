@@ -353,6 +353,10 @@ fn heic_files_of_the_libheif_archive_decode_through_the_libde265_plugin() {
             (w, h),
             "{rel}: probe vs decode"
         );
+        assert_eq!(
+            d.source_bit_depth, p.bit_depth,
+            "{rel}: depth, probe vs libheif"
+        );
         if size != (0, 0) {
             assert_eq!((d.raster.width, d.raster.height), size, "{rel}");
         }

@@ -158,7 +158,7 @@ jobs:
         run: |
           python3 -m venv target/bench-venv || python -m venv target/bench-venv
           if [ -x target/bench-venv/bin/python ]; then py=target/bench-venv/bin/python; else py=target/bench-venv/Scripts/python; fi
-          "$py" -m pip install --quiet pillow numpy
+          "$py" -m pip install --quiet pillow==12.3.0 numpy==2.5.3
           "$py" crates/codecs/tests/fixtures/heif/make_big_avif.py target/heif-12mp.avif
           probe=target/release/examples/heif_probe
           for t in 1 2 0; do

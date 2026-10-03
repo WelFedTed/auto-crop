@@ -635,8 +635,10 @@ fn read_prop(w: &Walk<'_>, bx: Bx, p: &mut Props) -> Result<(), CodecError> {
             }
         }
         b"hvcC" if p.depth_cfg.is_none() => {
-            // byte 21: reserved(5) bitDepthLumaMinus8(3)
-            if let Some(f) = w.u8(bx.body + 21) {
+            // HEVCDecoderConfigurationRecord: byte 0 version, 1 profile, 2-5 compatibility flags,
+            // 6-11 constraint flags, 12 level, 13-14 segmentation, 15 parallelism, 16 chroma format,
+            // 17 reserved(5) bitDepthLumaMinus8(3).
+            if let Some(f) = w.u8(bx.body + 17) {
                 p.depth_cfg = Some((f & 7) + 8);
             }
         }
@@ -854,6 +856,37 @@ mod tests {
                 want.apply_orientation(Orientation::from_exif(o).unwrap());
                 assert_eq!(img.to_rgb8(), want.to_rgb8(), "r={r} m={m} exif={o}");
             }
+        }
+    }
+
+    fn prop_depth(typ: &[u8; 4], payload: &[u8]) -> Option<u8> {
+        let mut b = ((8 + payload.len()) as u32).to_be_bytes().to_vec();
+        b.extend_from_slice(typ);
+        b.extend_from_slice(payload);
+        let w = Walk { b: &b, boxes: 0 };
+        let bx = Bx {
+            typ: *typ,
+            body: 8,
+            end: b.len(),
+        };
+        let mut p = Props::default();
+        read_prop(&w, bx, &mut p).unwrap();
+        p.depth_cfg
+    }
+
+    #[test]
+    fn the_codec_configuration_boxes_give_the_bit_depth() {
+        // hvcC: byte 17 holds bitDepthLumaMinus8 in its low three bits.
+        for (code, want) in [(0xF8u8, 8u8), (0xFA, 10), (0xFC, 12)] {
+            let mut hvcc = vec![0u8; 23];
+            hvcc[0] = 1;
+            hvcc[17] = code;
+            assert_eq!(prop_depth(b"hvcC", &hvcc), Some(want));
+        }
+        assert_eq!(prop_depth(b"hvcC", &[1; 10]), None, "too short to say");
+        // av1C: byte 2 has high_bitdepth (0x40) and twelve_bit (0x20).
+        for (flags, want) in [(0x00u8, 8u8), (0x40, 10), (0x60, 12)] {
+            assert_eq!(prop_depth(b"av1C", &[0x81, 0x00, flags, 0x00]), Some(want));
         }
     }
 
