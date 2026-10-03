@@ -36,6 +36,8 @@ path = [
     "tools/imgproc-oracles/requirements.txt",
     "tools/imgproc-oracles/requirements.lock",
     "tools/perf_gate/fixtures/**",
+    "tools/ocr_oracle/requirements.txt",
+    "tools/ocr_oracle/requirements.lock",
     "**/*.proptest-regressions",
     "fuzz/regressions/**",
 ]

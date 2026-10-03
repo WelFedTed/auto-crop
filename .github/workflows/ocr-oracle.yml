@@ -1,0 +1,113 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+# Tesseract oracle (ROADMAP M1.66, dev-only; Auto Crop ships no OCR, B19). Linux job with Tesseract 5.x
+# from the same PPA the devcontainer uses (Ubuntu 22.04 itself ships 4.1). Generates the clean
+# synthetic receipts and blurred copies from their seed, OCRs them with fixed, logged settings and
+# applies the acceptance: clean mean CER <= 5% (PROVISIONAL) and the blurred copies are worse.
+# Every number is in the job log and the step summary; the Tesseract version and the traineddata
+# SHA-256 are in the JSON reports (artifact). Nothing here touches the golden receipts (B21).
+#
+# Safety: read-only token, no secrets, no pull_request trigger (the PPA is third-party: it is
+# fetched only on pushes to main and on dispatch).
+
+name: OCR oracle
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tools/ocr_oracle/**"
+      - ".github/workflows/ocr-oracle.yml"
+  workflow_dispatch:
+    inputs:
+      blur:
+        description: "Blur sigma (px) of the blurred copies checked by the acceptance"
+        required: false
+        default: "3.0"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ocr-oracle-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  oracle:
+    name: tesseract 5 on synthetic receipts
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Tesseract 5.x (alex-p PPA, as the devcontainer) and a monospace font
+        run: |
+          set -euo pipefail
+          sudo add-apt-repository -y ppa:alex-p/tesseract-ocr5
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng fonts-dejavu-core
+          tesseract --version
+          tesseract --list-langs
+      - name: Python environment from the hashed lock
+        run: |
+          set -euo pipefail
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --require-hashes -r tools/ocr_oracle/requirements.lock
+          .venv/bin/python --version
+      - name: Unit tests of the metrics
+        run: .venv/bin/python -m unittest discover -s tools/ocr_oracle -v
+      - name: Synthetic receipts (clean) and blurred copies at several sigmas
+        env:
+          BLUR: ${{ inputs.blur }}
+        run: |
+          set -euo pipefail
+          case "${BLUR:-3.0}" in *[!0-9.]*|'') echo "blur must be a number" >&2; exit 1 ;; esac
+          mkdir -p work
+          for s in 2.0 3.0 4.0 5.0 "${BLUR:-3.0}"; do
+            .venv/bin/python tools/ocr_oracle/ocr_oracle.py synth --out "work/blur-$s" --count 12 --blur "$s" > /dev/null
+          done
+          cat "work/blur-${BLUR:-3.0}/manifest.json"
+      - name: Run Tesseract (thresholding_method 0 = Otsu, the acceptance setting)
+        env:
+          BLUR: ${{ inputs.blur }}
+        run: |
+          set -euo pipefail
+          b="${BLUR:-3.0}"
+          o=.venv/bin/python
+          $o tools/ocr_oracle/ocr_oracle.py run --images "work/blur-$b/clean" --label clean --thresholding 0 --out work/clean-t0.json --dump work/ocr-clean
+          $o tools/ocr_oracle/ocr_oracle.py run --images "work/blur-$b/blurred" --truth "work/blur-$b/clean" --label "blurred-$b" --thresholding 0 --out work/blurred-t0.json
+      - name: Blur sweep (information for choosing the blurred-copy sigma)
+        run: |
+          set -euo pipefail
+          for s in 2.0 3.0 4.0 5.0; do
+            .venv/bin/python tools/ocr_oracle/ocr_oracle.py run --images "work/blur-$s/blurred" --truth "work/blur-$s/clean" --label "blur-$s" --thresholding 0 --out "work/sweep-$s.json" | tail -1
+          done
+      - name: Same images with thresholding_method 2 (Sauvola) and 1 (adaptive Otsu), for the record
+        env:
+          BLUR: ${{ inputs.blur }}
+        run: |
+          set -euo pipefail
+          b="${BLUR:-3.0}"
+          for t in 1 2; do
+            .venv/bin/python tools/ocr_oracle/ocr_oracle.py run --images "work/blur-$b/clean" --label "clean-t$t" --thresholding "$t" --out "work/clean-t$t.json" | tail -1
+            .venv/bin/python tools/ocr_oracle/ocr_oracle.py run --images "work/blur-$b/blurred" --truth "work/blur-$b/clean" --label "blurred-t$t" --thresholding "$t" --out "work/blurred-t$t.json" | tail -1
+          done
+      - name: Acceptance (clean CER <= 5%, blurred worse)
+        run: |
+          set -euo pipefail
+          status=0
+          .venv/bin/python tools/ocr_oracle/ocr_oracle.py check --clean work/clean-t0.json --blurred work/blurred-t0.json --max-clean-cer 0.05 | tee check.txt || status=$?
+          { echo '### Tesseract oracle (M1.66)'; echo '```'; cat check.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: ocr-oracle-reports
+          path: |
+            work/*.json
+            work/ocr-clean
+            work/blur-*/manifest.json
+          if-no-files-found: warn
