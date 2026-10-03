@@ -200,6 +200,15 @@ fn extract(archive: &Path, into: &Path) -> Result<PathBuf, String> {
     }
 }
 
+/// Whitespace-separated `AUTOCROP_CMAKE_ARGS`, appended after the manifest flags.
+fn extra_cmake_args() -> Vec<String> {
+    split_args(&std::env::var("AUTOCROP_CMAKE_ARGS").unwrap_or_default())
+}
+
+pub fn split_args(text: &str) -> Vec<String> {
+    text.split_whitespace().map(str::to_owned).collect()
+}
+
 fn build_cmake(lib: &Lib, src: &Path, build: &Path, prefix: &Path) -> Result<(), String> {
     let mut cfg = Command::new("cmake");
     cfg.arg("-S").arg(src).arg("-B").arg(build);
@@ -207,6 +216,10 @@ fn build_cmake(lib: &Lib, src: &Path, build: &Path, prefix: &Path) -> Result<(),
     cfg.arg(format!("-DCMAKE_INSTALL_PREFIX={}", prefix.display()));
     cfg.arg(format!("-DCMAKE_PREFIX_PATH={}", prefix.display()));
     cfg.args(&lib.flags);
+    // Extra CMake arguments for one-off builds (the sanitizer job builds a static, instrumented
+    // libjpeg-turbo with `AUTOCROP_CMAKE_ARGS="-DENABLE_SHARED=OFF -DENABLE_STATIC=ON"`). They come
+    // after the manifest flags, so they win; the pin and the hash check are unchanged.
+    cfg.args(extra_cmake_args());
     run_cmd(&mut cfg, &format!("cmake configure {}", lib.name))?;
     let mut b = Command::new("cmake");
     b.arg("--build")
@@ -327,6 +340,15 @@ mod tests {
             validate(&[lib("a", "1.0.0", "", GOOD), lib("a", "1.0.0", "", GOOD)]).len(),
             1
         );
+    }
+
+    #[test]
+    fn extra_cmake_arguments_split_on_whitespace() {
+        assert_eq!(
+            split_args(" -DENABLE_SHARED=OFF  -DENABLE_STATIC=ON "),
+            vec!["-DENABLE_SHARED=OFF", "-DENABLE_STATIC=ON"]
+        );
+        assert!(split_args("").is_empty());
     }
 
     #[test]
