@@ -265,7 +265,7 @@ name = "auto-crop-shell"
 version = "0.0.1"
 dependencies = [
  "auto-crop-engine",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "serde",
  "serde_json",
  "tauri",
