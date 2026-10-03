@@ -90,6 +90,8 @@ pub const TOOLS: &[Tool] = &[
     build_tool("git", &["git", "--version"], false),
     build_tool("cmake", &["cmake", "--version"], false),
     build_tool("ninja", &["ninja", "--version"], false),
+    // Builds dav1d (AVIF) in `cargo xtask build-native`.
+    build_tool("meson", &["meson", "--version"], false),
     build_tool("nasm", &["nasm", "-v"], true),
     build_tool("node", &["node", "--version"], false),
     // Dev tools (M1.79).
@@ -183,6 +185,7 @@ pub fn hint(os: Os, tool: &str) -> &'static str {
         (Os::Windows, "git") => "winget install --id Git.Git -e",
         (Os::Windows, "cmake") => "winget install --id Kitware.CMake -e",
         (Os::Windows, "ninja") => "winget install --id Ninja-build.Ninja -e",
+        (Os::Windows, "meson") => "python -m pip install meson ninja",
         (Os::Windows, "nasm") => "winget install --id NASM.NASM -e",
         (Os::Windows, "node") => "winget install --id OpenJS.NodeJS.LTS -e",
         (Os::Windows, "c-toolchain") => {
@@ -201,6 +204,7 @@ pub fn hint(os: Os, tool: &str) -> &'static str {
         (Os::Mac, "git") => "brew install git",
         (Os::Mac, "cmake") => "brew install cmake",
         (Os::Mac, "ninja") => "brew install ninja",
+        (Os::Mac, "meson") => "brew install meson",
         (Os::Mac, "nasm") => "brew install nasm",
         (Os::Mac, "node") => "brew install node",
         (Os::Mac, "python3") => "brew install python@3.12",
@@ -211,6 +215,7 @@ pub fn hint(os: Os, tool: &str) -> &'static str {
         (Os::Linux, "git") => "sudo apt install git",
         (Os::Linux, "cmake") => "sudo apt install cmake",
         (Os::Linux, "ninja") => "sudo apt install ninja-build",
+        (Os::Linux, "meson") => "sudo apt install meson",
         (Os::Linux, "nasm") => "sudo apt install nasm",
         (Os::Linux, "node") => {
             "install Node.js LTS (https://nodejs.org or your package manager's current LTS)"
@@ -426,7 +431,7 @@ mod tests {
         assert!(tool("valgrind").linux_only);
         assert_eq!(tool("tesseract").min_version, Some((5, 0)));
         assert_eq!(tool("python3").min_version, Some((3, 12)));
-        for n in ["git", "cmake", "ninja", "nasm", "node"] {
+        for n in ["git", "cmake", "ninja", "meson", "nasm", "node"] {
             assert_eq!(tool(n).need, Need::Build, "{n}");
         }
     }

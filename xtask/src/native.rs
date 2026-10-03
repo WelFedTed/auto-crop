@@ -257,6 +257,13 @@ fn build_meson(lib: &Lib, src: &Path, build: &Path, prefix: &Path) -> Result<(),
     // `lib`, not the multiarch directory Debian-style systems would pick, so every OS has the
     // same layout and `prefix/lib` is the one search path.
     cfg.args(["--libdir=lib", "--buildtype=release"]);
+    // The CMake builds use MSVC on Windows and libheif links against an MSVC import library
+    // (`dav1d.lib`), so dav1d must be built with MSVC too. A runner with MinGW on `PATH` would make
+    // meson pick gcc (`libdav1d.dll` plus a `.dll.a`, which libheif's CMake does not find);
+    // `--vsenv` activates the Visual Studio environment regardless.
+    if cfg!(windows) {
+        cfg.arg("--vsenv");
+    }
     cfg.args(&lib.flags);
     // One-off builds (a sanitizer job: `AUTOCROP_MESON_ARGS="-Db_sanitize=address"`); they come
     // after the manifest flags, so they win; the pin and the hash check are unchanged.
@@ -276,6 +283,15 @@ fn build_meson(lib: &Lib, src: &Path, build: &Path, prefix: &Path) -> Result<(),
         Command::new("meson").arg("install").arg("-C").arg(build),
         &format!("meson install {}", lib.name),
     )
+}
+
+/// True when a libheif `CMakeCache.txt` holds a real `DAV1D_LIBRARY` (not empty, not `-NOTFOUND`).
+pub fn dav1d_found(cache: &str) -> bool {
+    cache.lines().any(|l| {
+        l.strip_prefix("DAV1D_LIBRARY:")
+            .and_then(|r| r.split_once('='))
+            .is_some_and(|(_, v)| !v.trim().is_empty() && !v.contains("NOTFOUND"))
+    })
 }
 
 pub fn run(args: &[String]) -> Result<(), String> {
@@ -328,7 +344,22 @@ pub fn run(args: &[String]) -> Result<(), String> {
         let src = extract(&archive, &src_parent)?;
         println!("== {}: building ({})", lib.name, lib.build);
         match lib.build.as_str() {
-            "cmake" => build_cmake(lib, &src, &work.join("build"), &prefix)?,
+            "cmake" => {
+                build_cmake(lib, &src, &work.join("build"), &prefix)?;
+                if lib.flags.iter().any(|f| f == "-DWITH_DAV1D=ON") {
+                    // libheif's CMake carries on without dav1d when it finds none; a libheif that
+                    // cannot read AVIF must fail the build here, not at the first AVIF.
+                    let cache = fs::read_to_string(work.join("build/CMakeCache.txt"))
+                        .map_err(|e| format!("{}: CMakeCache.txt: {e}", lib.name))?;
+                    if !dav1d_found(&cache) {
+                        return Err(format!(
+                            "{}: WITH_DAV1D=ON but CMake found no dav1d library in {} (was dav1d built with the same compiler?)",
+                            lib.name,
+                            prefix.display()
+                        ));
+                    }
+                }
+            }
             "meson" => build_meson(lib, &src, &work.join("build"), &prefix)?,
             other => {
                 return Err(format!(
@@ -386,6 +417,17 @@ mod tests {
             validate(&[lib("a", "1.0.0", "", GOOD), lib("a", "1.0.0", "", GOOD)]).len(),
             1
         );
+    }
+
+    #[test]
+    fn a_libheif_configured_without_dav1d_is_detected() {
+        let ok = "DAV1D_INCLUDE_DIR:PATH=/p/include\nDAV1D_LIBRARY:FILEPATH=/p/lib/libdav1d.so\n";
+        assert!(dav1d_found(ok));
+        assert!(dav1d_found("DAV1D_LIBRARY:FILEPATH=C:/p/lib/dav1d.lib\r\n"));
+        assert!(!dav1d_found("DAV1D_LIBRARY:FILEPATH=DAV1D_LIBRARY-NOTFOUND\n"));
+        assert!(!dav1d_found("DAV1D_LIBRARY:FILEPATH=\n"));
+        assert!(!dav1d_found("WITH_DAV1D:BOOL=ON\n"));
+        assert!(!dav1d_found(""));
     }
 
     #[test]

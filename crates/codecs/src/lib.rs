@@ -2,8 +2,11 @@
 // SPDX-FileCopyrightText: 2026 Auto Crop contributors
 
 //! Image decoders and encoders (PLAN 3). Decoding of untrusted bytes is pure safe Rust (JPEG via
-//! zune-jpeg, PNG, TIFF and WebP through the `image` crate) behind hard limits and a panic guard;
-//! the libjpeg-turbo and HEIC paths of M1.18, M1.19 and M6 extend this crate later.
+//! zune-jpeg, PNG, TIFF and WebP through the `image` crate) behind hard limits and a panic guard.
+//! Two optional native paths sit behind cargo features (both off by default, so a plain build needs
+//! no C toolchain): `turbojpeg` (libjpeg-turbo: scaled decode, lossless transforms) and `heif`
+//! (libheif with dav1d and the libde265 plugin: HEIC, HEIF and AVIF decoding, ADR-0009). HEIC and
+//! AVIF are *probed* in every build, by a safe-Rust header walk.
 //!
 //! The pipeline for every file:
 //!
