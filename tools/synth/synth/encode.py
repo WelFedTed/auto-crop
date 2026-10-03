@@ -63,6 +63,47 @@ def exif_bytes(o: int) -> bytes:
     return ex.tobytes()
 
 
+def tiff_pad_range(data: bytes) -> tuple[int, int] | None:
+    """The byte range between the end of the last strip and the IFD, if there is one."""
+    if data[:4] != b"II*\x00":
+        return None
+    ifd = int.from_bytes(data[4:8], "little")
+    n = int.from_bytes(data[ifd : ifd + 2], "little")
+    offsets: list[int] = []
+    counts: list[int] = []
+    for k in range(n):
+        e = data[ifd + 2 + 12 * k : ifd + 14 + 12 * k]
+        tag, typ, cnt = (int.from_bytes(e[0:2], "little"), int.from_bytes(e[2:4], "little"), int.from_bytes(e[4:8], "little"))
+        size = {3: 2, 4: 4}.get(typ)
+        if tag not in (273, 279) or size is None:
+            continue
+        if cnt * size <= 4:
+            raw = e[8 : 8 + cnt * size]
+        else:
+            o = int.from_bytes(e[8:12], "little")
+            raw = data[o : o + cnt * size]
+        vals = [int.from_bytes(raw[i : i + size], "little") for i in range(0, len(raw), size)]
+        (offsets if tag == 273 else counts).extend(vals)
+    if not offsets or len(offsets) != len(counts):
+        return None
+    end = max(o + c for o, c in zip(offsets, counts))
+    return (end, ifd) if end < ifd else None
+
+
+def zero_tiff_padding(data: bytes) -> bytes:
+    """Zero the alignment byte libtiff leaves uninitialised between the last strip and the IFD.
+
+    When a deflate strip has an odd length, Pillow's libtiff writes one pad byte before the IFD that
+    holds whatever was in memory, so the same picture encoded twice differed in a single byte (7 of
+    20 TIFFs of the smoke suite on Linux). Pixels are unaffected; zeroing it makes the bytes
+    reproducible. Only little-endian files with one IFD of strips are touched (Pillow's own output).
+    """
+    pad = tiff_pad_range(data)
+    if pad is None:
+        return data
+    return data[: pad[0]] + bytes(pad[1] - pad[0]) + data[pad[1] :]
+
+
 def encode(
     upright: np.ndarray,
     fmt: str,
@@ -96,6 +137,7 @@ def encode(
         if orientation != 1:
             ifd[274] = orientation
         im.save(buf, "TIFF", compression="tiff_adobe_deflate", tiffinfo=ifd, **kw)
+        return zero_tiff_padding(buf.getvalue())
     elif fmt == "webp":
         if orientation != 1:
             kw["exif"] = exif_bytes(orientation)

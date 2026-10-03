@@ -79,6 +79,49 @@ class FormatTests(unittest.TestCase):
             self.assertTrue(encode.encode(up, fmt, 80, 1).startswith(magic), fmt)
 
 
+class TiffDeterminismTests(unittest.TestCase):
+    """Pillow's libtiff leaves one alignment byte before the IFD uninitialised when a strip has an
+    odd length; the suite's TIFFs therefore differed in a single byte from run to run."""
+
+    def tiff(self, seed):
+        # compressible, so the deflate strip length varies (random noise stores to a fixed, even size)
+        up = (np.random.default_rng(seed).integers(0, 6, size=(37, 53, 3)) * 40).astype(np.uint8)
+        return up, encode.encode(up, "tiff", 0, 1)
+
+    def test_a_garbage_pad_byte_is_zeroed_and_pixels_are_untouched(self):
+        padded = 0
+        for seed in range(40):
+            up, data = self.tiff(seed)
+            pad = encode.tiff_pad_range(data)
+            self.assertEqual(encode.zero_tiff_padding(data), data)  # encode() already did it
+            if pad is None:
+                continue
+            padded += 1
+            start, end = pad
+            garbage = data[:start] + b"\xaa" * (end - start) + data[end:]  # what libtiff may leave
+            self.assertNotEqual(garbage, data)
+            fixed = encode.zero_tiff_padding(garbage)
+            self.assertEqual(fixed, data)
+            np.testing.assert_array_equal(np.asarray(Image.open(io.BytesIO(garbage)).convert("RGB")), up)
+        self.assertGreater(padded, 3, "no odd-length strip among 40 images: the test tested nothing")
+
+    def test_two_processes_encode_identical_bytes(self):
+        import hashlib
+        import subprocess
+        import sys
+
+        code = (
+            "import sys, hashlib, numpy as np; sys.path.insert(0, %r);"
+            "from synth import encode;"
+            "print(''.join(hashlib.sha256(encode.encode((np.random.default_rng(s).integers(0,6,size=(41,57,3))*40).astype(np.uint8),'tiff',0,s%%8+1,'display-p3' if s%%3==0 else 'srgb')).hexdigest()[:8] for s in range(60)))"
+        ) % str(Path(__file__).resolve().parent.parent)
+        runs = [subprocess.run([sys.executable, "-c", code], capture_output=True, text=True).stdout for _ in range(3)]
+        self.assertTrue(runs[0].strip())
+        self.assertEqual(runs[0], runs[1])
+        self.assertEqual(runs[1], runs[2])
+        del hashlib
+
+
 class ColourTests(unittest.TestCase):
     def test_the_p3_profile_is_a_valid_icc_profile_pillows_cms_accepts(self):
         data = icc.display_p3_profile()
