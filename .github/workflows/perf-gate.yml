@@ -1,0 +1,179 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+# Instruction-count gate (ROADMAP M1.58, X.02): gungraun (Valgrind Callgrind, Linux only) runs the
+# decode, resize, warp and threshold kernels on small fixed inputs, once built from the base commit
+# and once from the head commit, in ONE job per SIMD level. `tools/perf_gate/compare.py` fails the
+# job when any benchmark executes more than 5% more instructions (warns above 2%).
+#
+# SIMD levels: the kernels have no hand-written SIMD, so a "level" is the compile-time target
+# feature set the autovectoriser may use (baseline x86-64 = SSE2, +sse4.1, +avx2).
+#
+# Triggers: `pull_request` (path filter inside the job, see ci guard rule 4), `push` to main (the
+# owner pushes straight to main, so the base is the commit before the push) and
+# `workflow_dispatch`. Dispatch inputs: `base` (a ref, default HEAD^) and `canary_pct`: when above
+# 0 the head build's `canary` benchmark does that many percent more work and the job passes only
+# if the gate catches it (the injected-regression proof).
+#
+# Safety: read-only token, no secrets, no pull_request_target. The benchmark harness
+# (crates/imgproc-bench) is always taken from the head commit and copied over the base checkout, so
+# both builds run identical benchmark code against different kernels.
+
+name: Perf gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: "Ref to compare against (default: the parent of the checked-out commit)"
+        required: false
+        default: ""
+        type: string
+      canary_pct:
+        description: "Inject this percent more work into the head build's canary benchmark (0 = off; the run then passes only if the gate fails)"
+        required: false
+        default: "0"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perf-gate-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  GUNGRAUN_RUNNER_VERSION: "0.20.0"
+
+jobs:
+  gate-logic:
+    name: gate logic (unit tests)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: python3 -m unittest discover -s tools/perf_gate -v
+
+  gate:
+    name: instruction counts (${{ matrix.level }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - level: baseline
+            rustflags: ""
+          - level: sse4.1
+            rustflags: "-C target-feature=+sse4.1"
+          - level: avx2
+            rustflags: "-C target-feature=+avx2"
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          path: head-src
+      - name: Pick the base commit and decide whether anything relevant changed
+        id: refs
+        working-directory: head-src
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          INPUT_BASE: ${{ inputs.base }}
+          CANARY_PCT: ${{ inputs.canary_pct }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            pull_request) base="$PR_BASE" ;;
+            push) base="$PUSH_BEFORE" ;;
+            *) base="${INPUT_BASE:-HEAD^}" ;;
+          esac
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] \
+             || ! git rev-parse --verify -q "$base^{commit}" >/dev/null; then
+            base="HEAD^"
+          fi
+          base_sha=$(git rev-parse "$base^{commit}")
+          head_sha=$(git rev-parse HEAD)
+          echo "base=$base_sha" >> "$GITHUB_OUTPUT"
+          echo "head=$head_sha" >> "$GITHUB_OUTPUT"
+          # Canary percentage: digits only (it reaches the benchmark's environment).
+          case "${CANARY_PCT:-0}" in
+            ''|*[!0-9]*) echo "canary_pct must be a whole number" >&2; exit 1 ;;
+          esac
+          echo "canary=${CANARY_PCT:-0}" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT" = "workflow_dispatch" ] \
+             || git diff --name-only "$base_sha" "$head_sha" \
+                | grep -Eq '^(crates/(imgproc|imgproc-bench|codecs|core)/|Cargo\.toml$|Cargo\.lock$|rust-toolchain\.toml$|tools/perf_gate/|\.github/workflows/perf-gate\.yml$)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "No kernel, codec, lockfile, toolchain or gate change: instruction counts cannot have moved." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Check out the base commit with the head's benchmark harness
+        if: steps.refs.outputs.relevant == 'true'
+        working-directory: head-src
+        env:
+          BASE_SHA: ${{ steps.refs.outputs.base }}
+        run: |
+          set -euo pipefail
+          git worktree add --detach ../base-src "$BASE_SHA"
+          # Same benchmark code on both sides; only the kernels differ.
+          rm -rf ../base-src/crates/imgproc-bench
+          cp -r crates/imgproc-bench ../base-src/crates/imgproc-bench
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: steps.refs.outputs.relevant == 'true'
+        with:
+          workspaces: |
+            head-src -> target
+            base-src -> target
+          key: perf-gate-${{ matrix.level }}
+      - name: Install Valgrind
+        if: steps.refs.outputs.relevant == 'true'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends valgrind
+      - name: Install the gungraun runner (must equal the library version)
+        if: steps.refs.outputs.relevant == 'true'
+        run: |
+          set -euo pipefail
+          # A no-op when the cached binary already has this version.
+          cargo install gungraun-runner --version "$GUNGRAUN_RUNNER_VERSION" --locked
+          valgrind --version
+      - name: Benchmark the base commit
+        if: steps.refs.outputs.relevant == 'true'
+        working-directory: base-src
+        run: cargo bench -p auto-crop-imgproc-bench --bench gungraun -- --output-format=json > "$GITHUB_WORKSPACE/base.jsonl"
+      - name: Benchmark the head commit
+        if: steps.refs.outputs.relevant == 'true'
+        working-directory: head-src
+        env:
+          AUTO_CROP_GATE_CANARY_PCT: ${{ steps.refs.outputs.canary }}
+        run: cargo bench -p auto-crop-imgproc-bench --bench gungraun -- --output-format=json > "$GITHUB_WORKSPACE/head.jsonl"
+      - name: Compare (fails above +5%, warns above +2%)
+        if: steps.refs.outputs.relevant == 'true'
+        env:
+          LEVEL: ${{ matrix.level }}
+          BASE_SHA: ${{ steps.refs.outputs.base }}
+          HEAD_SHA: ${{ steps.refs.outputs.head }}
+          CANARY_PCT: ${{ steps.refs.outputs.canary }}
+        run: |
+          set -euo pipefail
+          args=(--base base.jsonl --head head.jsonl --summary "$GITHUB_STEP_SUMMARY"
+                --title "Instruction counts, level ${LEVEL}: ${BASE_SHA:0:9} (base) vs ${HEAD_SHA:0:9} (head), canary +${CANARY_PCT}%")
+          if [ "$CANARY_PCT" != "0" ]; then args+=(--expect-fail); fi
+          python3 head-src/tools/perf_gate/compare.py "${args[@]}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && steps.refs.outputs.relevant == 'true'
+        with:
+          name: gungraun-${{ matrix.level }}
+          path: |
+            base.jsonl
+            head.jsonl
+          if-no-files-found: warn

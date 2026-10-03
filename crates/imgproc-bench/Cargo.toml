@@ -17,6 +17,10 @@ fast_image_resize = { version = "6", features = ["rayon"] }
 image = { version = "0.25", default-features = false }
 
 [dev-dependencies]
+auto-crop-codecs = { path = "../codecs", features = ["fixtures"] }
+# M1.58 instruction-count benchmarks (Linux only: the bench file is empty elsewhere). The runner
+# binary must have the same version: `cargo install gungraun-runner --version 0.20.0 --locked`.
+gungraun = "0.20"
 image-compare = { version = "0.5", default-features = false }
 serde_json.workspace = true
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
@@ -34,4 +38,8 @@ harness = false
 
 [[bench]]
 name = "resize"
+harness = false
+
+[[bench]]
+name = "gungraun"
 harness = false
