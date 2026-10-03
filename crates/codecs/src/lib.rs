@@ -20,6 +20,7 @@
 //! a re-encode, and JPEG output is always a full re-encode.
 
 mod decode;
+pub mod encoders;
 mod error;
 mod exif;
 #[cfg(any(test, feature = "fixtures"))]
@@ -30,9 +31,17 @@ pub mod guard;
 pub mod hostile;
 pub mod jpeg_lossless;
 mod limits;
+// The pinned-header readers shared with build.rs; included here so the version gate has unit tests.
+#[cfg(test)]
+#[allow(dead_code)]
+#[path = "../native_header.rs"]
+mod native_header;
 mod parse;
+mod scaled;
 #[cfg(test)]
 mod suite;
+#[cfg(feature = "turbojpeg")]
+pub mod turbo;
 
 pub use decode::{Decoded, decode, decode_with, probe, probe_with};
 pub use error::CodecError;
@@ -44,6 +53,7 @@ pub use limits::{
     DEFAULT_MAX_METADATA_BYTES, DEFAULT_MAX_PIXELS, DEFAULT_MAX_SCANS, DecodeLimits,
     HARD_MAX_PIXELS, Limit, est_bytes, est_bytes_for_pixels,
 };
+pub use scaled::{DENOMS, ScaledDecoded, decode_scaled, pick_denom};
 
 use auto_crop_imgproc::Raster;
 use image::ImageEncoder;

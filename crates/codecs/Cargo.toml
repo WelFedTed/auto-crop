@@ -4,6 +4,7 @@
 [package]
 name = "auto-crop-codecs"
 description = "Image decoders and encoders"
+build = "build.rs"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,9 +14,14 @@ publish.workspace = true
 [features]
 # Generators for synthetic and hostile test files (ROADMAP M1.12, M1.69). Never enabled in a shipped
 # build; `xtask` turns it on for `make-hostile`. The dev-dependencies below make it available to tests.
-fixtures = ["dep:jpeg-encoder", "dep:tiff", "dep:fax"]
+fixtures = ["dep:tiff", "dep:fax"]
+# libjpeg-turbo (>= 3.1.4, built by `cargo xtask build-native` from the pin in native-deps.toml):
+# DCT-domain scaled decode, lossless transforms through tj3Transform, the baseline JPEG encoder.
+# Off by default: the default build is pure Rust and needs no C toolchain (ROADMAP M1.18, ADR-0008).
+turbojpeg = []
 
 [dependencies]
+auto-crop-core = { path = "../core" }
 auto-crop-imgproc = { path = "../imgproc" }
 # Pure-Rust decoders only (zune-jpeg 0.5.15, png, tiff, image-webp). HEIC and the libjpeg-turbo path
 # arrive in M6 and M1.18/M1.19 (ADR-0004/0005).
@@ -24,7 +30,10 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 # Pin: zune-jpeg 0.5.15 is the release we measured (ROADMAP M1.15); the 0.5.16 release candidate is not
 # adopted. `image` resolves to this exact version anyway; the pin keeps a lockfile refresh from moving it.
 zune-jpeg = "=0.5.15"
-jpeg-encoder = { version = "0.7", optional = true }
+# Baseline pure-Rust JPEG encoder (M1.21). `(MIT OR Apache-2.0) AND IJG`: the notices carry the IJG text.
+jpeg-encoder = "0.7"
+# PNG writer for the baseline encoder (8/16-bit, pHYs, iCCP); the decoder side stays behind `image`.
+png = "0.18"
 tiff = { version = "0.11", optional = true }
 fax = { version = "0.2", optional = true }
 # Bounded inflate of the PNG iCCP chunk before the PNG decoder sees it (already in the tree via `png`).
@@ -32,9 +41,17 @@ flate2 = "1"
 
 [dev-dependencies]
 rayon = "1"
-jpeg-encoder = "0.7"
 tiff = "0.11"
 fax = "0.2"
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 
+# ROADMAP M1.56; `cargo bench -p auto-crop-codecs --features fixtures[,turbojpeg] --bench decode`.
+[[bench]]
+name = "decode"
+harness = false
+required-features = ["fixtures"]
+
+# `deny`, not `forbid`: the only `unsafe` is the SAFETY-commented FFI of `src/turbo/ffi/` (feature
+# `turbojpeg`), which `#![allow(unsafe_code)]`s itself; `cargo xtask ci-guards` allows that nowhere else.
 [lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"

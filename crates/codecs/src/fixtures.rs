@@ -43,6 +43,67 @@ pub fn smooth(w: u32, h: u32) -> Vec<u8> {
     v
 }
 
+/// Deterministic photo-like RGB8: a gradient with soft colour variation, dark rectangles (text
+/// and rules) and light noise.
+pub fn photo(w: u32, h: u32, seed: u64) -> Vec<u8> {
+    let mut s = seed | 1;
+    let mut next = move || {
+        s ^= s << 13;
+        s ^= s >> 7;
+        s ^= s << 17;
+        (s >> 33) as u32
+    };
+    let (wu, hu) = (w as usize, h as usize);
+    let mut v = vec![0u8; wu * hu * 3];
+    for y in 0..hu {
+        for x in 0..wu {
+            let base = 150.0
+                + 50.0 * (x as f64 / 37.0).sin()
+                + 30.0 * (y as f64 / 23.0).cos()
+                + 40.0 * x as f64 / wu as f64;
+            let i = (y * wu + x) * 3;
+            v[i] = base.clamp(0.0, 255.0) as u8;
+            v[i + 1] = (base * 0.93 + 8.0).clamp(0.0, 255.0) as u8;
+            v[i + 2] = (base * 0.80 + 12.0).clamp(0.0, 255.0) as u8;
+        }
+    }
+    for _ in 0..(wu * hu / 3000).max(6) {
+        let rw = 3 + next() as usize % 40;
+        let rh = 2 + next() as usize % 9;
+        let x0 = next() as usize % wu.saturating_sub(rw).max(1);
+        let y0 = next() as usize % hu.saturating_sub(rh).max(1);
+        let ink = (20 + next() % 70) as u8;
+        for y in y0..(y0 + rh).min(hu) {
+            for x in x0..(x0 + rw).min(wu) {
+                let i = (y * wu + x) * 3;
+                v[i..i + 3].fill(ink);
+            }
+        }
+    }
+    for b in &mut v {
+        let n = (next() % 7) as i32 - 3;
+        *b = (i32::from(*b) + n).clamp(0, 255) as u8;
+    }
+    v
+}
+
+/// PSNR in dB between two equally long 8-bit buffers (infinite when identical).
+pub fn psnr(a: &[u8], b: &[u8]) -> f64 {
+    assert_eq!(a.len(), b.len());
+    let sse: f64 = a
+        .iter()
+        .zip(b)
+        .map(|(x, y)| {
+            let d = f64::from(*x) - f64::from(*y);
+            d * d
+        })
+        .sum();
+    if sse == 0.0 {
+        return f64::INFINITY;
+    }
+    10.0 * (255.0f64 * 255.0 / (sse / a.len() as f64)).log10()
+}
+
 /// The grey (luma) channel of [`pattern`], for single-channel fixtures.
 pub fn pattern_gray(w: u32, h: u32) -> Vec<u8> {
     pattern(w, h)

@@ -1,0 +1,143 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+# The libjpeg-turbo path of `auto-crop-codecs` (ROADMAP M1.18 to M1.21, M1.56; ADR-0008): the pinned
+# libjpeg-turbo is built by `cargo xtask build-native` and linked through the `turbojpeg` feature.
+# The default build (`ci.yml`) needs no C toolchain; this workflow is the only place the feature is
+# built and tested, on the three required operating systems, plus an AddressSanitizer run of the
+# reused-buffer lossless transform and the version-gate negative tests.
+name: libjpeg-turbo path
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 5 * * 1"
+  push:
+    branches: [main]
+    paths:
+      - "crates/codecs/**"
+      - "crates/core/**"
+      - "crates/imgproc/**"
+      - "native-deps.toml"
+      - "xtask/src/native.rs"
+      - ".github/workflows/turbojpeg.yml"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  default-build:
+    # The feature is off by default: nothing native is searched for, linked or required.
+    name: default build has no native dependency
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build and test with a prefix that does not exist
+        env:
+          AUTOCROP_NATIVE_PREFIX: /nonexistent/native/prefix
+        run: cargo test -p auto-crop-codecs
+      - name: The test binary does not link libjpeg-turbo
+        run: |
+          bin=$(find target/debug/deps -maxdepth 1 -name 'auto_crop_codecs-*' -type f -perm -u+x | head -1)
+          echo "$bin"
+          if ldd "$bin" | grep -i turbojpeg; then echo "linked against turbojpeg"; exit 1; fi
+          if strings "$bin" | grep -q tj3Transform; then echo "contains TurboJPEG symbols"; exit 1; fi
+      - name: The feature without a built library fails with a clear message (negative test)
+        env:
+          AUTOCROP_NATIVE_PREFIX: /nonexistent/native/prefix
+        run: |
+          if out=$(cargo build -p auto-crop-codecs --features turbojpeg 2>&1); then
+            echo "the feature built without a native library"; exit 1
+          fi
+          echo "$out" | grep -q "cargo xtask build-native" || { echo "unhelpful failure: $out"; exit 1; }
+          echo "rejected as required"
+
+  turbojpeg:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, macos-latest, ubuntu-22.04]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install NASM (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command nasm -ErrorAction SilentlyContinue)) { choco install nasm -y --no-progress }
+          $dir = "C:\Program Files\NASM"
+          if (Test-Path $dir) { $dir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8 }
+      - name: Install NASM (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y nasm
+      - name: Build the pinned libjpeg-turbo
+        run: cargo xtask build-native --only libjpeg-turbo
+      - name: Check the built library (floor, allowed dependencies)
+        run: cargo xtask check-native
+      - name: Tests of the turbojpeg feature (green with the pin)
+        shell: bash
+        run: |
+          prefix="${GITHUB_WORKSPACE}/target/native/prefix"
+          export AUTOCROP_NATIVE_PREFIX="$prefix"
+          export LD_LIBRARY_PATH="$prefix/lib:${LD_LIBRARY_PATH:-}"
+          export DYLD_LIBRARY_PATH="$prefix/lib:${DYLD_LIBRARY_PATH:-}"
+          if command -v cygpath >/dev/null 2>&1; then export PATH="$(cygpath -u "$prefix")/bin:$PATH"; fi
+          cargo test -p auto-crop-codecs --features turbojpeg -- --nocapture
+      - name: Decode, scaled-decode and resize benchmarks (informational, shared runner, NOISY)
+        shell: bash
+        run: |
+          prefix="${GITHUB_WORKSPACE}/target/native/prefix"
+          export AUTOCROP_NATIVE_PREFIX="$prefix"
+          export LD_LIBRARY_PATH="$prefix/lib:${LD_LIBRARY_PATH:-}"
+          export DYLD_LIBRARY_PATH="$prefix/lib:${DYLD_LIBRARY_PATH:-}"
+          if command -v cygpath >/dev/null 2>&1; then export PATH="$(cygpath -u "$prefix")/bin:$PATH"; fi
+          cargo bench -p auto-crop-codecs --features fixtures,turbojpeg --bench decode -- --warm-up-time 1 --measurement-time 3 --noplot
+      - name: Negative test - libjpeg-turbo 3.1.0 must make the build fail (red with 3.1.0)
+        shell: bash
+        run: |
+          rm -rf target/native-old && cp -r target/native/prefix target/native-old
+          sed -i.bak 's/LIBJPEG_TURBO_VERSION_NUMBER *[0-9][0-9]*/LIBJPEG_TURBO_VERSION_NUMBER 3001000/' target/native-old/include/jconfig.h
+          sed -i.bak 's/TURBOJPEG_VERSION_NUMBER *[0-9][0-9]*/TURBOJPEG_VERSION_NUMBER 3001000/' target/native-old/include/turbojpeg.h
+          grep -q "3001000" target/native-old/include/jconfig.h
+          if out=$(AUTOCROP_NATIVE_PREFIX="${GITHUB_WORKSPACE}/target/native-old" cargo build -p auto-crop-codecs --features turbojpeg 2>&1); then
+            echo "a libjpeg-turbo 3.1.0 header was NOT rejected"; exit 1
+          fi
+          echo "$out" | grep -q "older than 3.1.4" || { echo "failed for the wrong reason: $out"; exit 1; }
+          echo "libjpeg-turbo 3.1.0 was rejected, as required"
+
+  asan:
+    # ROADMAP M1.20: 1000 reused buffers through tj3Transform, AddressSanitizer-clean. The library is
+    # built from the same pin with -fsanitize=address as a static archive, so out-of-bounds writes
+    # inside libjpeg-turbo are caught as well, not only misuse on the Rust side.
+    name: AddressSanitizer (ubuntu-22.04)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install NASM and clang
+        run: sudo apt-get update && sudo apt-get install -y nasm clang
+      - name: Nightly toolchain (sanitizers need it)
+        run: rustup toolchain install nightly --profile minimal --target x86_64-unknown-linux-gnu
+      - name: Build libjpeg-turbo with AddressSanitizer (static)
+        env:
+          CC: clang
+          CFLAGS: -fsanitize=address -fno-omit-frame-pointer -g -O1
+          AUTOCROP_CMAKE_ARGS: -DENABLE_SHARED=OFF -DENABLE_STATIC=ON
+        run: cargo xtask build-native --only libjpeg-turbo
+      - name: Tests under AddressSanitizer
+        env:
+          AUTOCROP_NATIVE_PREFIX: ${{ github.workspace }}/target/native/prefix
+          AUTOCROP_TURBOJPEG_STATIC: "1"
+          RUSTFLAGS: -Zsanitizer=address
+          RUSTDOCFLAGS: -Zsanitizer=address
+          ASAN_OPTIONS: detect_leaks=0:abort_on_error=0:halt_on_error=1
+        run: cargo +nightly test -p auto-crop-codecs --features turbojpeg --target x86_64-unknown-linux-gnu --lib -- --nocapture

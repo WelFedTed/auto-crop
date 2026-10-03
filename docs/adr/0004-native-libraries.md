@@ -2,7 +2,7 @@
 
 - **Status:** accepted
 - **Date:** 2026-10-01
-- **Roadmap items:** M0.39, M0.40, M0.41, M0.42, M0.44, M0.45
+- **Roadmap items:** M0.39, M0.40, M0.41, M0.42, M0.44, M0.45, M1.18 (update below)
 - **Decision log links:** B12, B2, D4, D6
 - **Time box:** 4 days (PROVISIONAL, with the HEIC binding in ADR-0005); actual about a day of CI iteration. Code: `native-deps.toml`, `xtask build-native`, `xtask check-native`, `.github/workflows/native.yml`, `spikes/turbojpeg/`.
 
@@ -49,3 +49,22 @@ All on GitHub-hosted runners, 2026-10-01. Required = Windows, macOS, Linux (B9).
 - **Security:** libheif and libde265 advisories are tracked by the daily security workflow and the `native-deps.toml` watch (M0.10, still open); the SLA is in PLAN 8.2.3.
 - **Open items:** ONNX Runtime, dav1d, libjxl and libwebp are pinned but not yet built (M4, M6, M11). `heif-libde265` plugin discovery on a relocated install is a packaging item (M6). Intel Mac native builds are best-effort until 1.0.
 - **Revisit trigger:** a libheif or libde265 security release (bump the pin), or a maintained pure-Rust HEVC decoder (re-evaluate in about six months, D4).
+
+## Update 2026-10-03 (M1.18): the `turbojpeg` crate or our own FFI
+
+M1.18 was written as "enable the `turbojpeg` 1.5.x crate". Before wiring it into `codecs` the crate was read against the questions that matter here (sources of `turbojpeg` 1.5.1 and `turbojpeg-sys` 1.2.0 from crates.io; not built locally because the only place the native library is built is CI):
+
+| Question | `turbojpeg` 1.5.1 + `turbojpeg-sys` 1.2.0 | Own `ffi/` module (this repo) |
+|---|---|---|
+| Finds our pinned build without pkg-config or vcpkg on Windows? | Only through `TURBOJPEG_SOURCE=explicit` plus `TURBOJPEG_LIB_DIR`, `TURBOJPEG_INCLUDE_DIR` and `TURBOJPEG_DYNAMIC=1` (otherwise it links statically), set in the environment of every cargo invocation (IDE, `cargo test`, CI). The default features (`cmake`, `pkg-config`) build the vendored copy or ask pkg-config | `build.rs` reads `AUTOCROP_NATIVE_PREFIX`, default `target/native/prefix`, so `cargo test --features turbojpeg` works after `cargo xtask build-native` with no environment |
+| Which libjpeg-turbo can it end up with? | The vendored source is **3.1.0** (`set(VERSION 3.1.0)` in the bundled `CMakeLists.txt`), the release with the known double free; a missing variable silently builds it. It has no version check at all | `build.rs` refuses anything below 3.1.4 (`jconfig.h` and `turbojpeg.h` both read) and never builds or searches anything else |
+| Licence | Unlicense OR MIT (acceptable), bundles 7 MB of libjpeg-turbo source in the crate | no new crate |
+| `unsafe` | about 30 `unsafe` sites in the crate (third party, so outside `ci-guards`) | about 20 sites, all in `crates/codecs/src/turbo/ffi/` with `// SAFETY:` comments, checked by `ci-guards` |
+| API coverage for our needs | scaled decode, `tj3Transform` into a caller slice, compress: yes | the same dozen functions, plus `tj3SetICCProfile` and the density parameters |
+| Constants | pregenerated from the 3.1.0 header | checked against the pinned `turbojpeg.h` by a unit test (`constants_match_the_pinned_header`); all of them also agree with the crate's pregenerated 3.1.0 bindings |
+
+**Decision: keep the hand-written binding** (as ADR-0004 and ADR-0005 already say for libheif). The crate would still need our own build script for the version floor, an environment dance on every machine, and would carry the vulnerable source in the tree; the binding is about 15 functions that CI has exercised on three operating systems since the M0.44 spike. The cost is first-party `unsafe` (confined to one directory, SAFETY-commented, guarded) and the `codecs` crate lint moving from `forbid(unsafe_code)` to `deny` with a single `#![allow(unsafe_code)]` inside `ffi/`. The default build (`turbojpeg` feature off) compiles no `unsafe` and needs no C toolchain.
+
+Revisit if the crate gains a version floor and a prefix-aware build (or a maintained fork does), or if the binding grows beyond about 25 functions.
+
+The version check is enforced three ways, each with a negative test: `xtask check-native` (header edited to 3.1.0 is rejected, `native.yml`), `build.rs` (`cargo build --features turbojpeg` against a header edited to 3.1.0 fails with "older than 3.1.4", `turbojpeg.yml`, unit-tested in `native_header.rs`), and the manifest check (`native-deps.toml` below its `min_version` is rejected). A real libjpeg-turbo 3.1.0 build is not exercised: the pin is 3.2.0, and an edited header proves the gate, not the library.

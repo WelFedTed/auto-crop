@@ -110,7 +110,13 @@ fn check_size(width: u32, height: u32, limits: &DecodeLimits) -> Result<(), Code
     Ok(())
 }
 
-fn decode_inner(bytes: &[u8], limits: &DecodeLimits) -> Result<Decoded, CodecError> {
+/// Every check that precedes the pixel decoder: file size, header probe, pixel cap, memory
+/// estimate, unsupported features and the plausibility rules that stop a tiny file from reserving
+/// a huge buffer. Shared by the `image`/zune path and the libjpeg-turbo path.
+pub(crate) fn precheck(
+    bytes: &[u8],
+    limits: &DecodeLimits,
+) -> Result<(Format, Header), CodecError> {
     let (format, h) = sniff_and_parse(bytes, limits)?;
     check_size(h.width, h.height, limits)?;
     if let Some(reason) = &h.unsupported {
@@ -148,6 +154,21 @@ fn decode_inner(bytes: &[u8], limits: &DecodeLimits) -> Result<Decoded, CodecErr
             "truncated JPEG (no end-of-image marker)",
         ));
     }
+    Ok((format, h))
+}
+
+fn decode_inner(bytes: &[u8], limits: &DecodeLimits) -> Result<Decoded, CodecError> {
+    decode_raw(bytes, limits, true)
+}
+
+/// The decode without (or with) the EXIF turn: scaled decode reduces the stored pixels first and
+/// turns afterwards.
+pub(crate) fn decode_raw(
+    bytes: &[u8],
+    limits: &DecodeLimits,
+    apply_orientation: bool,
+) -> Result<Decoded, CodecError> {
+    let (format, h) = precheck(bytes, limits)?;
 
     let mut reader = ImageReader::with_format(Cursor::new(bytes), image_format(format));
     reader.limits(limits.image_limits(h.width, h.height));
@@ -193,7 +214,7 @@ fn decode_inner(bytes: &[u8], limits: &DecodeLimits) -> Result<Decoded, CodecErr
 
     let rgb = img.into_rgb8();
     let mut img = DynamicImage::ImageRgb8(rgb);
-    if let Some(o) = Orientation::from_exif(h.orientation) {
+    if let Some(o) = Orientation::from_exif(h.orientation).filter(|_| apply_orientation) {
         img.apply_orientation(o);
     }
     let rgb = img.into_rgb8();
@@ -201,18 +222,7 @@ fn decode_inner(bytes: &[u8], limits: &DecodeLimits) -> Result<Decoded, CodecErr
     let raster = Raster::from_raw(width, height, rgb.into_raw())
         .ok_or_else(|| CodecError::corrupt("pixel buffer size mismatch"))?;
 
-    let icc = match &h.icc {
-        IccLoc::None => None,
-        IccLoc::PngCompressed => png_icc,
-        IccLoc::Range(r) => Some(bytes[r.clone()].to_vec()),
-        IccLoc::JpegChunks(chunks) => {
-            let icc = assemble_jpeg_icc(bytes, chunks);
-            if icc.is_none() {
-                notices.push("icc.invalid");
-            }
-            icc
-        }
-    };
+    let icc = extract_icc(bytes, &h, png_icc, &mut notices);
 
     Ok(Decoded {
         raster,
@@ -223,6 +233,44 @@ fn decode_inner(bytes: &[u8], limits: &DecodeLimits) -> Result<Decoded, CodecErr
         frames: h.frames,
         notices,
     })
+}
+
+/// Applies the EXIF orientation (1..=8; anything else is a no-op) to an RGB8 raster.
+pub(crate) fn orient(raster: Raster, orientation: u8) -> Result<Raster, CodecError> {
+    let Some(o) = Orientation::from_exif(orientation).filter(|o| *o != Orientation::NoTransforms)
+    else {
+        return Ok(raster);
+    };
+    let (w, h) = (raster.width, raster.height);
+    let img = image::RgbImage::from_raw(w, h, raster.data)
+        .ok_or_else(|| CodecError::corrupt("pixel buffer size mismatch"))?;
+    let mut img = DynamicImage::ImageRgb8(img);
+    img.apply_orientation(o);
+    let rgb = img.into_rgb8();
+    let (width, height) = rgb.dimensions();
+    Raster::from_raw(width, height, rgb.into_raw())
+        .ok_or_else(|| CodecError::corrupt("pixel buffer size mismatch"))
+}
+
+/// The embedded ICC profile, byte-exact (`png_icc` is the PNG decoder's expansion of `iCCP`).
+pub(crate) fn extract_icc(
+    bytes: &[u8],
+    h: &Header,
+    png_icc: Option<Vec<u8>>,
+    notices: &mut Vec<&'static str>,
+) -> Option<Vec<u8>> {
+    match &h.icc {
+        IccLoc::None => None,
+        IccLoc::PngCompressed => png_icc,
+        IccLoc::Range(r) => Some(bytes[r.clone()].to_vec()),
+        IccLoc::JpegChunks(chunks) => {
+            let icc = assemble_jpeg_icc(bytes, chunks);
+            if icc.is_none() {
+                notices.push("icc.invalid");
+            }
+            icc
+        }
+    }
 }
 
 fn has_translucent_pixels(img: &DynamicImage) -> bool {

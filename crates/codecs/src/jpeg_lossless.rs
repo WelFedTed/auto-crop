@@ -967,51 +967,24 @@ fn write_jpeg(
     Ok(out)
 }
 
-// ---------------------------------------------------------------------------------------------
-// Public entry point
-// ---------------------------------------------------------------------------------------------
-
-/// Applies `op` to the JPEG `bytes` without decoding any pixel. See the module docs for what is
-/// supported and what `policy` means.
-pub fn transform(
-    bytes: &[u8],
-    op: Op,
-    policy: Policy,
-    limits: &DecodeLimits,
-) -> Result<Transformed, CodecError> {
-    guard_item(|| transform_inner(bytes, op, policy, limits))
+/// What a transform does to an image of `w` x `ht` pixels with `mcu_w` x `mcu_h` MCUs: the part of
+/// the source it shows and whether that is exactly what was asked for. Shared by the safe-Rust
+/// transformer and the libjpeg-turbo one (`turbo::Transformer`), so both realise the same rectangle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Plan {
+    pub rect: Rect,
+    pub perfect: bool,
+    pub transposes: bool,
 }
 
-fn transform_inner(
-    bytes: &[u8],
+pub(crate) fn plan(
     op: Op,
     policy: Policy,
-    limits: &DecodeLimits,
-) -> Result<Transformed, CodecError> {
-    if crate::sniff(bytes) != Some(Format::Jpeg) {
-        return Err(CodecError::Unsupported);
-    }
-    let cap = limits.file_cap(Format::Jpeg);
-    if bytes.len() as u64 > cap {
-        return Err(CodecError::LimitExceeded {
-            limit: Limit::FileBytes,
-            actual: bytes.len() as u64,
-            cap,
-        });
-    }
-    // The shared header walk enforces the metadata and scan caps and the truncation rule.
-    let h = parse::parse(bytes, Format::Jpeg, limits)?;
-    if let Some(why) = &h.unsupported {
-        return Err(CodecError::UnsupportedFeature(why.clone()));
-    }
-    if h.truncated {
-        return Err(corrupt("truncated JPEG (no end-of-image marker)"));
-    }
-    parse::jpeg::check_plausible(&h, bytes.len())?;
-    let mut p = parse_all(bytes, limits)?;
-    let (w, ht) = (p.frame.width, p.frame.height);
-    let (mcu_w, mcu_h) = (8 * p.frame.hmax, 8 * p.frame.vmax);
-
+    w: usize,
+    ht: usize,
+    mcu_w: usize,
+    mcu_h: usize,
+) -> Result<Plan, CodecError> {
     // Which axes the op mirrors (and so must be MCU-aligned), and whether it transposes.
     let (need_w, need_h, transposes) = match op {
         Op::Rotate90 => (false, true, true),
@@ -1067,6 +1040,64 @@ fn transform_inner(
             "the transform is not perfect for this image size (partial MCUs at the edge)",
         ));
     }
+    Ok(Plan {
+        rect,
+        perfect,
+        transposes,
+    })
+}
+
+// ---------------------------------------------------------------------------------------------
+// Public entry point
+// ---------------------------------------------------------------------------------------------
+
+/// Applies `op` to the JPEG `bytes` without decoding any pixel. See the module docs for what is
+/// supported and what `policy` means.
+pub fn transform(
+    bytes: &[u8],
+    op: Op,
+    policy: Policy,
+    limits: &DecodeLimits,
+) -> Result<Transformed, CodecError> {
+    guard_item(|| transform_inner(bytes, op, policy, limits))
+}
+
+fn transform_inner(
+    bytes: &[u8],
+    op: Op,
+    policy: Policy,
+    limits: &DecodeLimits,
+) -> Result<Transformed, CodecError> {
+    if crate::sniff(bytes) != Some(Format::Jpeg) {
+        return Err(CodecError::Unsupported);
+    }
+    let cap = limits.file_cap(Format::Jpeg);
+    if bytes.len() as u64 > cap {
+        return Err(CodecError::LimitExceeded {
+            limit: Limit::FileBytes,
+            actual: bytes.len() as u64,
+            cap,
+        });
+    }
+    // The shared header walk enforces the metadata and scan caps and the truncation rule.
+    let h = parse::parse(bytes, Format::Jpeg, limits)?;
+    if let Some(why) = &h.unsupported {
+        return Err(CodecError::UnsupportedFeature(why.clone()));
+    }
+    if h.truncated {
+        return Err(corrupt("truncated JPEG (no end-of-image marker)"));
+    }
+    parse::jpeg::check_plausible(&h, bytes.len())?;
+    let mut p = parse_all(bytes, limits)?;
+    let (w, ht) = (p.frame.width, p.frame.height);
+    let (mcu_w, mcu_h) = (8 * p.frame.hmax, 8 * p.frame.vmax);
+    let Plan {
+        rect,
+        perfect,
+        transposes,
+    } = plan(op, policy, w, ht, mcu_w, mcu_h)?;
+    let (x0, y0) = (rect.x as usize, rect.y as usize);
+    let (x1, y1) = (x0 + rect.w as usize, y0 + rect.h as usize);
 
     // Keep only the MCUs of the shown part, then move blocks.
     let f = &mut p.frame;

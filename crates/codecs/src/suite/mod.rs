@@ -9,3 +9,4 @@ mod lossless;
 mod mutation;
 mod orientation;
 mod probe;
+mod scaled;
