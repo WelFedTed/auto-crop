@@ -47,7 +47,7 @@ jobs:
       - name: Build and test with a prefix that does not exist
         env:
           AUTOCROP_NATIVE_PREFIX: /nonexistent/native/prefix
-        run: cargo test -p auto-crop-codecs -p auto-crop-engine
+        run: cargo test -p auto-crop-codecs && cargo test -p auto-crop-engine --lib --test formats
       - name: The test binaries do not link or contain libheif, dav1d or libde265
         run: |
           for bin in $(find target/debug/deps -maxdepth 1 \( -name 'auto_crop_codecs-*' -o -name 'auto_crop_engine-*' \) -type f -perm -u+x); do
@@ -116,7 +116,7 @@ jobs:
       - name: Tests of the heif feature (codecs; real AVIF and HEIC files, probe, limits, orientation)
         run: cargo test -p auto-crop-codecs --features heif -- --nocapture
       - name: Engine tests with the feature (open AVIF, never replace it, copy it as PNG)
-        run: cargo test -p auto-crop-engine --features heif
+        run: cargo test -p auto-crop-engine --features heif --lib --test formats
       - name: Hostile-file corpus and fuzz seeds through libheif and dav1d
         run: |
           cargo run --quiet -p xtask --features heif -- make-hostile

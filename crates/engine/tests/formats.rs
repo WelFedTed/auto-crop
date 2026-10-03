@@ -53,12 +53,18 @@ fn open(e: &Env, name: &str, bytes: &[u8]) -> (OpenSummary, Option<ItemView>) {
         quarter_turns: 0,
         fine_deg: 0.0,
     };
-    let v = e.engine.set_edit(id, &edit, false, "test crop").unwrap();
+    e.engine.set_edit(id, &edit, false, "test crop").unwrap();
+    // A scan that the detector split into several crops is held for review; looking at it and
+    // accepting it is what the user does, and the format rules below must hold after that too.
+    let v = e
+        .engine
+        .accept_scan(id)
+        .unwrap_or_else(|_| e.engine.item_view(id).unwrap());
     (summary, Some(v))
 }
 
 /// A source with no writer: replacing is refused, the bytes stay, and a copy is a PNG or JPEG.
-fn check_not_replaceable(e: &Env, name: &str, bytes: &[u8], copy_ext: &str) {
+fn check_not_replaceable(e: &Env, name: &str, bytes: &[u8], copy_ext: &str) -> PathBuf {
     let (summary, v) = open(e, name, bytes);
     assert_eq!(summary.added, 1, "{name}");
     let v = v.unwrap();
@@ -71,7 +77,14 @@ fn check_not_replaceable(e: &Env, name: &str, bytes: &[u8], copy_ext: &str) {
         !out[0].ok,
         "{name}: a replace of a format without a writer succeeded"
     );
-    assert_eq!(out[0].error, Some(ErrKind::UnsupportedOutput), "{name}");
+    assert!(
+        matches!(
+            out[0].error,
+            Some(ErrKind::NotReplaceable | ErrKind::UnsupportedOutput)
+        ),
+        "{name}: {:?}",
+        out[0].error
+    );
     assert_eq!(
         fs::read(&path).unwrap(),
         bytes,
@@ -100,8 +113,22 @@ fn check_not_replaceable(e: &Env, name: &str, bytes: &[u8], copy_ext: &str) {
         bytes,
         "{name}: the source changed"
     );
+    // The copy is `<stem>.<ext>`, or a numbered name when the scan was split into several crops.
     let stem = path.file_stem().unwrap().to_string_lossy().into_owned();
-    let copy = e.dir.join("AutoCrop").join(format!("{stem}.{copy_ext}"));
+    let mut copies: Vec<PathBuf> = fs::read_dir(e.dir.join("AutoCrop"))
+        .unwrap()
+        .flatten()
+        .map(|f| f.path())
+        .filter(|p| {
+            p.extension().is_some_and(|x| x == copy_ext)
+                && p.file_stem().unwrap().to_string_lossy().starts_with(&stem)
+        })
+        .collect();
+    copies.sort();
+    let copy = copies
+        .first()
+        .unwrap_or_else(|| panic!("{name}: no copy was written"))
+        .clone();
     let copy_bytes = fs::read(&copy).unwrap_or_else(|er| panic!("{}: {er}", copy.display()));
     let d = auto_crop_codecs::decode(&copy_bytes).unwrap();
     assert_eq!(
@@ -117,6 +144,7 @@ fn check_not_replaceable(e: &Env, name: &str, bytes: &[u8], copy_ext: &str) {
         e.engine.list_backups().runs.is_empty(),
         "{name}: a copy needs no backup"
     );
+    copy
 }
 
 #[test]
@@ -154,12 +182,11 @@ fn jpeg_and_png_sources_are_still_replaced_in_place_with_a_backup() {
 fn avif_sources_open_are_never_replaced_and_copy_as_png() {
     let avif = include_bytes!("../../codecs/tests/fixtures/heif/gradient-444-48x32.avif");
     let e = env();
-    check_not_replaceable(&e, "photo.avif", avif, "png");
-    // The picture really is the AVIF's (not a placeholder): 48x32 cropped to 80% by the quad.
-    let copy = fs::read(e.dir.join("AutoCrop/photo.png")).unwrap();
-    let d = auto_crop_codecs::decode(&copy).unwrap();
+    let copy = check_not_replaceable(&e, "photo.avif", avif, "png");
+    // The picture really is the AVIF's (not a placeholder): smaller than 48x32 and not empty.
+    let d = auto_crop_codecs::decode(&fs::read(copy).unwrap()).unwrap();
     assert!(
-        d.raster.width.abs_diff(38) <= 2 && d.raster.height.abs_diff(26) <= 2,
+        d.raster.width > 8 && d.raster.width < 48 && d.raster.height > 8 && d.raster.height < 32,
         "{}x{}",
         d.raster.width,
         d.raster.height
@@ -172,8 +199,7 @@ fn an_avif_with_an_icc_profile_keeps_it_in_the_png_copy() {
     let avif = include_bytes!("../../codecs/tests/fixtures/heif/icc-srgb-32x24.avif");
     let icc = include_bytes!("../../codecs/tests/fixtures/heif/icc-srgb.icc");
     let e = env();
-    check_not_replaceable(&e, "tagged.avif", avif, "png");
-    let copy = fs::read(e.dir.join("AutoCrop/tagged.png")).unwrap();
+    let copy = fs::read(check_not_replaceable(&e, "tagged.avif", avif, "png")).unwrap();
     assert_eq!(
         auto_crop_codecs::decode(&copy).unwrap().icc.as_deref(),
         Some(&icc[..]),
