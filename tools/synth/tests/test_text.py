@@ -34,6 +34,12 @@ class MetricTests(unittest.TestCase):
             self.assertEqual(verify.levenshtein(a, b), naive_levenshtein(a, b), (a, b))
         self.assertEqual(verify.levenshtein("kitten", "sitting"), 3)
 
+    def test_separator_rules_are_dropped_from_both_sides_like_the_ocr_oracle(self):
+        ref = "SUBTOTAL 10.00\nTOTAL 10.70"
+        ocr = "SUBTOTAL 10.00\n-----------------\n*****\nTOTAL 10.70\n"
+        self.assertEqual(verify.cer(ref, ocr), 0.0)
+        self.assertEqual(verify.normalise("a ---- b\n=====\nc"), "a ---- b c")  # a rule is a whole line
+
     def test_cer_normalises_whitespace_and_counts_edits(self):
         self.assertEqual(verify.cer("a  b\nc", "a b c"), 0.0)
         self.assertAlmostEqual(verify.cer("abcd", "abxd"), 0.25)

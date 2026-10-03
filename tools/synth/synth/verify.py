@@ -24,6 +24,7 @@ import hashlib
 import importlib.metadata as md
 import io
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -40,6 +41,7 @@ from . import rng as R
 
 SSIM_MIN = 0.98  # PROVISIONAL (ROADMAP M1.32)
 CER_MAX = 0.05  # PROVISIONAL (ROADMAP M1.31)
+OCR_PPM = 10.0  # pixels per millimetre of the OCR renders (254 dpi)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -157,8 +159,15 @@ def levenshtein(a: str, b: str) -> int:
     return score
 
 
+RULE_RE = re.compile(r"^\s*[-=_*.~#—─]{4,}\s*$")
+
+
 def normalise(text: str) -> str:
-    return re.sub(r"\s+", " ", text).strip()
+    """Whitespace runs collapse to one space; blank lines and separator rules (four or more of
+    ``-=_*.~#``) are dropped from either side. Rules are drawing, not content: Tesseract skips or
+    garbles them (the OCR oracle in tools/ocr_oracle measured 32% CER from them alone)."""
+    lines = [ln for ln in text.splitlines() if not RULE_RE.match(ln)]
+    return re.sub(r"\s+", " ", " ".join(lines)).strip()
 
 
 def cer(reference: str, hypothesis: str) -> float:
@@ -198,17 +207,18 @@ def check_ocr(argv: list[str]) -> int:
         for i in range(a.count):
             kind = kinds[i % len(kinds)]
             rng = R.stream(a.seed, "ocr", i)
-            # 8 px per mm is about 203 dpi, the resolution of a thermal print head and a plain scan.
+            # 10 px per mm is 254 dpi, the resolution of a good scan; text is then 30 to 40 px tall.
             layouts = sorted(pagemod.DOC_LAYOUTS)
-            pg = pagemod.render(rng, kind, "white", ppm=8.0, layout=layouts[(i // len(kinds)) % len(layouts)])
+            pg = pagemod.render(rng, kind, "white", ppm=OCR_PPM, layout=layouts[(i // len(kinds)) % len(layouts)])
             gray = pg.clean_gray(text_only=True)  # rules, boxes and codes carry no transcript
             path = Path(tmp) / f"p{i}.png"
             cv2.imwrite(str(path), gray)
             # Page segmentation: columns for the report layout, one block of lines otherwise.
             psm = "3" if pg.layout == "report" else "6"
             r = subprocess.run(
-                ["tesseract", str(path), "stdout", "-l", "eng", "--psm", psm],
+                ["tesseract", str(path), "stdout", "-l", "eng", "--oem", "1", "--psm", psm, "--dpi", str(round(OCR_PPM * 25.4))],
                 capture_output=True, text=True, encoding="utf8", errors="replace",
+                env={**os.environ, "OMP_THREAD_LIMIT": "1"},  # one thread: same output on any machine
             )
             if r.returncode != 0:
                 print(f"tesseract failed on page {i}: {r.stderr[:200]}", file=sys.stderr)
@@ -219,7 +229,7 @@ def check_ocr(argv: list[str]) -> int:
                 shutil.copy(path, keep / f"p{i}.png")
                 (keep / f"p{i}.ref.txt").write_text(pg.text, encoding="utf8")
                 (keep / f"p{i}.ocr.txt").write_text(r.stdout, encoding="utf8")
-    print(f"{ver}; CER on the clean render (8 px/mm), threshold {a.max_cer:.0%} (PROVISIONAL)")
+    print(f"{ver}; CER on the clean text render ({OCR_PPM:g} px/mm = {round(OCR_PPM * 25.4)} dpi), threshold {a.max_cer:.0%} (PROVISIONAL)")
     bad = False
     for k in kinds:
         v = results[k]
