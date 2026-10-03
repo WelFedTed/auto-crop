@@ -29,6 +29,7 @@ sysinfo = { version = "0.37", default-features = false, features = ["system"] }
 tempfile = "3"
 peak_alloc = "0.3"
 insta = { version = "1", features = ["json"] }
+proptest = { version = "1", default-features = false, features = ["std"] }
 
 [lints.rust]
 unsafe_code = "forbid"

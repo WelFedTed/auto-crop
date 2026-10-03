@@ -23,12 +23,52 @@ pub enum BackupState {
     Restored,
 }
 
+/// What a backup was made for (PLAN 2.7 `backups.kind`). Additive: a manifest without the field
+/// is `OneToOne`, which is every manifest written before M10.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum BackupKind {
+    #[default]
+    OneToOne,
+    /// A multi-item scan: the scan went to the store and `outputs` holds its N derived files.
+    OneToN,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OutputRec {
     pub path: String,
     pub blake3: String,
     pub size: u64,
     pub mtime_ms: i64,
+    /// The item this output was cut from (1-to-N only; M10.25).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item_id: Option<u32>,
+    /// 1-based rank among the outputs, the `{n}` of its name (1-to-N only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<u32>,
+}
+
+impl OutputRec {
+    /// A one-to-one output.
+    pub fn plain(path: String, blake3: String, size: u64, mtime_ms: i64) -> Self {
+        Self {
+            path,
+            blake3,
+            size,
+            mtime_ms,
+            item_id: None,
+            index: None,
+        }
+    }
+}
+
+/// A derived file that Restore moved into the store (M10.26 "Remove"): reversible, never a delete.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MovedRec {
+    /// Where the file was.
+    pub path: String,
+    /// Its name inside `<backup>/derived-by-restore/`.
+    pub stored: String,
+    pub blake3: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,6 +94,10 @@ pub struct Manifest {
     #[serde(deserialize_with = "crate::migrate::deserialize_optional")]
     pub edit: Option<EditState>,
     pub restored_at: Option<i64>,
+    /// `OneToN` for a split scan (M10.25); older manifests read as `OneToOne`.
+    pub kind: BackupKind,
+    /// Derived files Restore moved into the store (M10.26).
+    pub derived_moved: Vec<MovedRec>,
 }
 
 impl Default for Manifest {
@@ -78,6 +122,8 @@ impl Default for Manifest {
             engine_version: env!("CARGO_PKG_VERSION").to_owned(),
             edit: None,
             restored_at: None,
+            kind: BackupKind::OneToOne,
+            derived_moved: Vec::new(),
         }
     }
 }
@@ -123,6 +169,33 @@ impl Store {
         Some(self.entry_dir(&m.id)?.join(name))
     }
 
+    /// The folder of a backup entry (validated id), for the files a group commit or a restore
+    /// keeps next to the original.
+    pub fn entry_path(&self, id: &str) -> Option<PathBuf> {
+        self.entry_dir(id)
+    }
+
+    /// Where group-commit journals live (M10.24). Not a backup id, so `list` skips it.
+    pub fn groups_dir(&self) -> PathBuf {
+        self.dir.join(".groups")
+    }
+
+    /// Removes a backup that never became part of a save (a group that rolled back): an entry
+    /// still in `BackedUp`, or a half-made one with no manifest at all, inside the store. A
+    /// saved, restored or unreadable entry is never touched. Returns whether it was removed.
+    pub fn remove_unused(&self, id: &str) -> bool {
+        let Some(dir) = self.entry_dir(id) else {
+            return false;
+        };
+        match self.read(id) {
+            Some(m) if m.state == BackupState::BackedUp => fs::remove_dir_all(dir).is_ok(),
+            None if dir.is_dir() && !dir.join("manifest.json").exists() => {
+                fs::remove_dir_all(dir).is_ok()
+            }
+            _ => false,
+        }
+    }
+
     pub fn pre_restore_path(&self, m: &Manifest) -> Option<PathBuf> {
         Some(
             self.entry_dir(&m.id)?
@@ -133,7 +206,12 @@ impl Store {
     /// Copies the original into the store, verifies the copy against the hash taken when the file
     /// was opened, makes it durable, and only then writes the manifest. No backup, no overwrite.
     pub fn create(&self, req: &NewBackup<'_>) -> Result<Manifest> {
-        let id = new_id();
+        self.create_with_id(new_id(), req)
+    }
+
+    /// [`Store::create`] under an id chosen by the caller, so a journal can name the backup
+    /// before it exists (M10.24).
+    pub fn create_with_id(&self, id: String, req: &NewBackup<'_>) -> Result<Manifest> {
         let dir = self.entry_dir(&id).ok_or(ErrKind::Internal)?;
         fs::create_dir_all(&dir)
             .map_err(|e| ErrKind::from_io(&e))

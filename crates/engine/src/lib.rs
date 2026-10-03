@@ -8,6 +8,8 @@ pub mod commit;
 mod engine;
 pub mod enumerate;
 pub mod error;
+pub mod fsplan;
+pub mod group;
 pub mod logging;
 pub mod memory;
 pub mod migrate;

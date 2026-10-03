@@ -817,12 +817,12 @@ impl Engine {
 
                 // Record what is about to be written, so a crash after the swap still restores.
                 let expected_mtime = unix_ms(mtime);
-                manifest.outputs = vec![OutputRec {
-                    path: path.to_string_lossy().into_owned(),
-                    blake3: tmp.blake3.clone(),
-                    size: tmp.size,
-                    mtime_ms: expected_mtime,
-                }];
+                manifest.outputs = vec![OutputRec::plain(
+                    path.to_string_lossy().into_owned(),
+                    tmp.blake3.clone(),
+                    tmp.size,
+                    expected_mtime,
+                )];
                 manifest.edit = Some(state.clone());
                 self.inner
                     .store
