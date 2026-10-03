@@ -1,0 +1,173 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+# The HEIF path of `auto-crop-codecs` (HEIC, HEIF and AVIF decoding, ADR-0009): the pinned,
+# decode-only libheif with dav1d (AV1) linked in and the libde265 plugin (HEVC) is built by
+# `cargo xtask build-native` and linked through the `heif` feature. The default build (`ci.yml`)
+# needs no C toolchain; this workflow is the only place the feature is built and tested, on the
+# three required operating systems: real AVIF and HEIC files, the hostile-file corpus and the fuzz
+# seeds through libheif, the no-hevc behaviour, the version-gate negative test and a 12 MP timing.
+name: HEIF path (libheif, dav1d, libde265)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "47 5 * * 2"
+  push:
+    branches: [main]
+    paths:
+      - "crates/codecs/**"
+      - "crates/core/**"
+      - "crates/engine/**"
+      - "crates/imgproc/**"
+      - "fuzz/**"
+      - "native-deps.toml"
+      - "xtask/src/native.rs"
+      - "xtask/src/check_native.rs"
+      - "xtask/src/hostile.rs"
+      - "packaging/allowed-libs.txt"
+      - ".github/workflows/heif.yml"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  default-build:
+    # The feature is off by default: no native library is searched for, linked or required, and HEIC
+    # and AVIF are probed (header only) but not decoded.
+    name: default build has no native dependency
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build and test with a prefix that does not exist
+        env:
+          AUTOCROP_NATIVE_PREFIX: /nonexistent/native/prefix
+        run: cargo test -p auto-crop-codecs -p auto-crop-engine
+      - name: The test binaries do not link or contain libheif, dav1d or libde265
+        run: |
+          for bin in $(find target/debug/deps -maxdepth 1 \( -name 'auto_crop_codecs-*' -o -name 'auto_crop_engine-*' \) -type f -perm -u+x); do
+            echo "$bin"
+            if ldd "$bin" | grep -Ei 'heif|dav1d|de265'; then echo "linked against a HEIF library"; exit 1; fi
+            if strings "$bin" | grep -q 'heif_context_alloc'; then echo "contains libheif symbols"; exit 1; fi
+          done
+      - name: The feature without a built library fails with a clear message (negative test)
+        env:
+          AUTOCROP_NATIVE_PREFIX: /nonexistent/native/prefix
+        run: |
+          if out=$(cargo build -p auto-crop-codecs --features heif 2>&1); then
+            echo "the feature built without a native library"; exit 1
+          fi
+          echo "$out" | grep -q "cargo xtask build-native" || { echo "unhelpful failure: $out"; exit 1; }
+          echo "rejected as required"
+
+  heif:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, macos-latest, ubuntu-22.04]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install NASM (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command nasm -ErrorAction SilentlyContinue)) { choco install nasm -y --no-progress }
+          $dir = "C:\Program Files\NASM"
+          if (Test-Path $dir) { $dir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8 }
+      - name: Install Meson and Ninja (Windows; they build dav1d)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: python -m pip install --quiet meson ninja
+      - name: Install NASM, Meson and Ninja (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y nasm meson ninja-build
+      - name: Install Meson and Ninja (macOS)
+        if: runner.os == 'macOS'
+        run: brew install meson ninja
+      - name: Build the pinned libheif, dav1d, libde265 and libjpeg-turbo
+        run: cargo xtask build-native
+      - name: Check the built libraries (no GPL or AV1 encoders, allowed dependencies, libheif links dav1d)
+        run: cargo xtask check-native
+      - name: Environment for the tests below
+        shell: bash
+        run: |
+          prefix="${GITHUB_WORKSPACE}/target/native/prefix"
+          {
+            echo "AUTOCROP_NATIVE_PREFIX=$prefix"
+            echo "LD_LIBRARY_PATH=$prefix/lib:${LD_LIBRARY_PATH:-}"
+            echo "DYLD_LIBRARY_PATH=$prefix/lib:${DYLD_LIBRARY_PATH:-}"
+            echo "LIBHEIF_PLUGIN_PATH=$prefix/lib/libheif"
+            echo "AUTOCROP_REQUIRE_HEIF_SAMPLES=1"
+          } >> "$GITHUB_ENV"
+          if command -v cygpath >/dev/null 2>&1; then
+            cygpath -w "$prefix/bin" >> "$GITHUB_PATH"
+          fi
+      - name: Lints with the feature (clippy, warnings are errors)
+        run: cargo clippy -p auto-crop-codecs -p auto-crop-engine --all-targets --features auto-crop-codecs/heif -- -D warnings
+      - name: Tests of the heif feature (codecs; real AVIF and HEIC files, probe, limits, orientation)
+        run: cargo test -p auto-crop-codecs --features heif -- --nocapture
+      - name: Engine tests with the feature (open AVIF, never replace it, copy it as PNG)
+        run: cargo test -p auto-crop-engine --features heif
+      - name: Hostile-file corpus and fuzz seeds through libheif and dav1d
+        run: |
+          cargo run --quiet -p xtask --features heif -- make-hostile
+          cargo test -p xtask --features heif --test fuzz_regressions
+      - name: no-hevc behaviour (plugin present decodes HEIC; plugin absent says hevc_decoder_missing; AVIF always decodes)
+        shell: bash
+        run: |
+          cargo build --release -p auto-crop-codecs --features heif --example heif_probe
+          probe=target/release/examples/heif_probe
+          src=$(find target/native -maxdepth 4 -type d -name 'libheif-*' -path '*/src/*' | head -1)
+          heic="$src/tests/data/rainbow-451x461.heic"
+          avif="crates/codecs/tests/fixtures/heif/gradient-444-48x32.avif"
+          test -f "$heic" && test -f "$avif"
+          plug="${GITHUB_WORKSPACE}/target/native/prefix/lib/libheif"
+          test -d "$plug" && ls "$plug"
+          out=$("$probe" "$heic"); echo "plugin present: $out"
+          echo "$out" | grep -q "^OK 451x461 " && echo "$out" | grep -q "hevc=true"
+          mv "$plug" "$plug.off"
+          trap 'mv "$plug.off" "$plug" 2>/dev/null || true' EXIT
+          unset LIBHEIF_PLUGIN_PATH
+          if out=$("$probe" "$heic"); then echo "decoded HEVC without the libde265 plugin: $out"; exit 1; fi
+          echo "plugin absent: $out"
+          echo "$out" | grep -q "^ERR code=hevc_decoder_missing"
+          out=$("$probe" "$avif"); echo "plugin absent, AVIF: $out"
+          echo "$out" | grep -q "^OK 48x32 " && echo "$out" | grep -q "hevc=false" && echo "$out" | grep -q "av1=true"
+      - name: Negative test - a libheif older than 1.23.5 must make the build fail (red with 1.23.4)
+        shell: bash
+        run: |
+          rm -rf target/native-old && cp -r target/native/prefix target/native-old
+          sed -i.bak 's/#define LIBHEIF_VERSION "[0-9.]*"/#define LIBHEIF_VERSION "1.23.4"/' target/native-old/include/libheif/heif_version.h
+          grep -q '"1.23.4"' target/native-old/include/libheif/heif_version.h
+          if out=$(AUTOCROP_NATIVE_PREFIX="${GITHUB_WORKSPACE}/target/native-old" cargo build -p auto-crop-codecs --features heif 2>&1); then
+            echo "a libheif 1.23.4 header was NOT rejected"; exit 1
+          fi
+          echo "$out" | grep -q "older than 1.23.5" || { echo "failed for the wrong reason: $out"; exit 1; }
+          echo "libheif 1.23.4 was rejected, as required"
+      - name: Decode time of a 12 MP AVIF (informational, shared runner, NOISY)
+        shell: bash
+        run: |
+          python3 -m venv target/bench-venv || python -m venv target/bench-venv
+          if [ -x target/bench-venv/bin/python ]; then py=target/bench-venv/bin/python; else py=target/bench-venv/Scripts/python; fi
+          "$py" -m pip install --quiet pillow numpy
+          "$py" crates/codecs/tests/fixtures/heif/make_big_avif.py target/heif-12mp.avif
+          probe=target/release/examples/heif_probe
+          for t in 1 2 0; do
+            echo "codec threads: $t (0 = all cores)"
+            "$probe" --threads "$t" --repeat 10 target/heif-12mp.avif | tee -a target/heif-timing.txt
+          done
+          {
+            echo '### 12 MP AVIF decode (4000x3000, 8-bit 4:2:0, release build)'
+            echo '```'
+            cat target/heif-timing.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
