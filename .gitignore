@@ -33,3 +33,4 @@ spikes/**/target-dyn/
 /corpora/
 /datasets/
 /golden/
+/_data
