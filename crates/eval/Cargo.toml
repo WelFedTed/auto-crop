@@ -20,7 +20,7 @@ auto-crop-codecs = { path = "../codecs" }
 rayon = "1"
 serde.workspace = true
 serde_json = { workspace = true, features = ["float_roundtrip"] }
-sha2 = "0.10"
+sha2 = "0.11"
 
 [[bin]]
 name = "auto-crop-eval"
