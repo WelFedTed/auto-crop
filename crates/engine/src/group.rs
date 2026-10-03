@@ -405,6 +405,14 @@ fn link_no_clobber(temp: &Path, dest: &Path) -> Result<(), LinkErr> {
     }
 }
 
+/// [`link_no_clobber`] with the engine's error codes: a name that exists is `PlanStale`.
+pub(crate) fn move_no_clobber(temp: &Path, dest: &Path) -> Result<(), ErrKind> {
+    link_no_clobber(temp, dest).map_err(|e| match e {
+        LinkErr::Exists => ErrKind::PlanStale,
+        LinkErr::Other(k) => k,
+    })
+}
+
 /// Keeps a previous output's bytes in the store: a hard link (no copy), else a verified copy.
 fn preserve(src: &Path, stored: &Path, expect: &str) -> Result<(), ErrKind> {
     if let Some(dir) = stored.parent() {

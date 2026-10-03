@@ -35,4 +35,4 @@ pub use history::{GestureId, History, SessionCmd, SessionHistory};
 pub use items::{Cut, CutAxis, ItemsError, MAX_ITEMS, Redetected};
 pub use output::{OutputSpec, WriteRequirements};
 pub use source::{SourceId, SourceRef};
-pub use triage::{Band, FAILED_FLOOR, STRICT_CUTOFF, ScanTriage};
+pub use triage::{Band, FAILED_FLOOR, STRICT_CUTOFF, ScanTriage, scan_triage};

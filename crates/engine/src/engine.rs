@@ -9,12 +9,17 @@ use crate::api::*;
 use crate::commit::{free_name, swap, verify_temp, write_temp};
 use crate::enumerate;
 use crate::error::{ErrKind, Result, codec_err};
+use crate::fsplan::ReservedKeys;
+use crate::items_detect::{ItemDetector, NoSplit, worst_confidence};
 use crate::paths::AppPaths;
+use crate::scan::{GroupOut, crop_views};
 use crate::settings::Settings;
-use crate::store::{BackupState, Manifest, NewBackup, OutputRec, Store};
+use crate::store::{BackupKind, BackupState, Manifest, NewBackup, OutputRec, Store};
 use crate::util::{blake3_hex, display_name, new_id, now_secs, rfc3339, unix_ms};
 use auto_crop_codecs::{Format, MAX_PIXELS, decode, encode, probe};
-use auto_crop_core::{Confidence, EditState, Forced, History, Origin, QuadWarp};
+use auto_crop_core::{
+    Confidence, EditState, Forced, History, Origin, QuadWarp, SplitPolicy, SplitState,
+};
 use auto_crop_imgproc::Raster;
 use auto_crop_imgproc::detect::detect;
 use auto_crop_imgproc::render::{Limits, render_quad};
@@ -27,14 +32,14 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, UNIX_EPOCH};
 
 /// Long edge of the display proxy served as `src` and used for previews.
-const DISPLAY_EDGE: u32 = 2048;
+pub(crate) const DISPLAY_EDGE: u32 = 2048;
 /// Long edge of the always-resident thumbnail source.
 const THUMB_SRC_EDGE: u32 = 640;
-const THUMB_EDGE: u32 = 256;
-const RESULT_EDGE: u32 = 1400;
-const JPEG_PREVIEW_QUALITY: u8 = 86;
+pub(crate) const THUMB_EDGE: u32 = 256;
+pub(crate) const RESULT_EDGE: u32 = 1400;
+pub(crate) const JPEG_PREVIEW_QUALITY: u8 = 86;
 /// Quality for JPEG outputs (PLAN: a real quality estimate arrives with the codec work in M2).
-const JPEG_SAVE_QUALITY: u8 = 92;
+pub(crate) const JPEG_SAVE_QUALITY: u8 = 92;
 const WORKERS: usize = 3;
 const PROXY_CACHE: usize = 6;
 const RENDER_CACHE_BYTES: usize = 192 * 1024 * 1024;
@@ -43,56 +48,67 @@ const MAX_SOURCE_BYTES: u64 = 512 * 1024 * 1024;
 /// Called with the new view of an item whenever one changes in the background.
 pub type Notify = Arc<dyn Fn(ItemView) + Send + Sync>;
 
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Snapshot {
-    size: u64,
-    mtime_ms: i64,
-    blake3: String,
+pub(crate) struct Snapshot {
+    pub(crate) size: u64,
+    pub(crate) mtime_ms: i64,
+    pub(crate) blake3: String,
 }
 
 #[derive(Debug, Clone)]
-struct SavedRec {
-    backup_id: Option<String>,
-    output_path: PathBuf,
-    copy: bool,
-    state: EditState,
+pub(crate) struct SavedRec {
+    pub(crate) backup_id: Option<String>,
+    pub(crate) output_path: PathBuf,
+    pub(crate) copy: bool,
+    pub(crate) state: EditState,
     /// The written file as it stood after the swap, to notice later outside edits.
-    out: Snapshot,
+    pub(crate) out: Snapshot,
+    /// The N outputs of a split scan, in output order (empty for a one-to-one save).
+    pub(crate) group: Vec<GroupOut>,
 }
 
-struct Item {
-    id: u32,
-    path: PathBuf,
-    name: String,
-    status: ItemStatus,
-    error: Option<ErrKind>,
-    format: Format,
-    snapshot: Snapshot,
+/// One opened image (the registry entry; not a crop: an image has `EditState.items` crops).
+pub(crate) struct Item {
+    pub(crate) id: u32,
+    pub(crate) path: PathBuf,
+    pub(crate) name: String,
+    pub(crate) status: ItemStatus,
+    pub(crate) error: Option<ErrKind>,
+    pub(crate) format: Format,
+    pub(crate) snapshot: Snapshot,
     /// mtime of the very first source, applied to every output (kept by default).
-    orig_mtime_ms: i64,
+    pub(crate) orig_mtime_ms: i64,
     /// Where pixels come from: the file itself until the first in-place save, then the backup.
-    original_path: PathBuf,
-    dims: (u32, u32),
-    thumb_src: Option<Arc<Raster>>,
-    icc: Option<Arc<Vec<u8>>>,
-    auto: Option<EditState>,
-    confidence: Option<Confidence>,
-    history: Option<History<EditState>>,
-    generation: u64,
-    saved: Option<SavedRec>,
+    pub(crate) original_path: PathBuf,
+    pub(crate) dims: (u32, u32),
+    pub(crate) thumb_src: Option<Arc<Raster>>,
+    pub(crate) icc: Option<Arc<Vec<u8>>>,
+    pub(crate) auto: Option<EditState>,
+    pub(crate) confidence: Option<Confidence>,
+    pub(crate) history: Option<History<EditState>>,
+    pub(crate) generation: u64,
+    pub(crate) saved: Option<SavedRec>,
+    /// Frames, pages or IFDs the source declares (a multi-page TIFF is never replaced).
+    pub(crate) frames: u32,
+    /// The `render_hash` of the state the user accepted for saving (M10.29): a held split scan is
+    /// written only while its current state still has this hash.
+    pub(crate) accepted: Option<u64>,
 }
 
 impl Item {
-    fn view(&self) -> ItemView {
+    pub(crate) fn view(&self) -> ItemView {
         let current = self.history.as_ref().map(|h| h.current());
         let edited = match (current, &self.auto) {
             (Some(c), Some(a)) => c != a,
             _ => false,
         };
+        let (crops, split) = current
+            .map(|c| crop_views(self, c))
+            .unwrap_or((Vec::new(), None));
         ItemView {
             id: self.id,
             name: self.name.clone(),
@@ -113,6 +129,12 @@ impl Item {
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default(),
                 copy: s.copy,
+                outputs: s
+                    .group
+                    .iter()
+                    .filter_map(|g| g.path.file_name())
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .collect(),
             }),
             dirty_since_save: self
                 .saved
@@ -128,6 +150,9 @@ impl Item {
                 .history
                 .as_ref()
                 .and_then(|h| h.redo_label().map(str::to_owned)),
+            crops,
+            split,
+            history_position: self.history.as_ref().map_or(0, |h| h.position()),
         }
     }
 
@@ -136,16 +161,35 @@ impl Item {
             .as_ref()
             .and_then(|h| h.current().quad().cloned())
     }
+
+    /// The current state differs from what the detector proposed.
+    fn is_edited(&self) -> bool {
+        match (self.history.as_ref().map(|h| h.current()), &self.auto) {
+            (Some(c), Some(a)) => c != a,
+            _ => false,
+        }
+    }
+
+    /// The image would be saved as several files: the thumbnail then shows the whole scan.
+    pub(crate) fn is_split(&self) -> bool {
+        self.history.as_ref().is_some_and(|h| {
+            h.current()
+                .included()
+                .filter(|i| i.geometry.quad().is_some())
+                .count()
+                >= 2
+        })
+    }
 }
 
 #[derive(Default)]
-struct ProxyCache {
+pub(crate) struct ProxyCache {
     /// Most recently used last.
     entries: Vec<(u32, Arc<Raster>)>,
 }
 
 impl ProxyCache {
-    fn get(&mut self, id: u32) -> Option<Arc<Raster>> {
+    pub(crate) fn get(&mut self, id: u32) -> Option<Arc<Raster>> {
         let i = self.entries.iter().position(|(k, _)| *k == id)?;
         let e = self.entries.remove(i);
         let r = e.1.clone();
@@ -153,7 +197,7 @@ impl ProxyCache {
         Some(r)
     }
 
-    fn put(&mut self, id: u32, r: Arc<Raster>) {
+    pub(crate) fn put(&mut self, id: u32, r: Arc<Raster>) {
         self.entries.retain(|(k, _)| *k != id);
         self.entries.push((id, r));
         while self.entries.len() > PROXY_CACHE {
@@ -167,18 +211,18 @@ impl ProxyCache {
 }
 
 #[derive(Default)]
-struct RenderCache {
+pub(crate) struct RenderCache {
     map: HashMap<(u32, u8, u64), Arc<Vec<u8>>>,
     order: VecDeque<(u32, u8, u64)>,
     bytes: usize,
 }
 
 impl RenderCache {
-    fn get(&self, k: &(u32, u8, u64)) -> Option<Arc<Vec<u8>>> {
+    pub(crate) fn get(&self, k: &(u32, u8, u64)) -> Option<Arc<Vec<u8>>> {
         self.map.get(k).cloned()
     }
 
-    fn put(&mut self, k: (u32, u8, u64), v: Arc<Vec<u8>>) {
+    pub(crate) fn put(&mut self, k: (u32, u8, u64), v: Arc<Vec<u8>>) {
         self.bytes += v.len();
         if self.map.insert(k, v).is_none() {
             self.order.push_back(k);
@@ -204,25 +248,29 @@ impl RenderCache {
     }
 }
 
-struct Inner {
-    paths: AppPaths,
-    store: Store,
-    settings: Mutex<Settings>,
-    items: Mutex<BTreeMap<u32, Arc<Mutex<Item>>>>,
+pub(crate) struct Inner {
+    pub(crate) paths: AppPaths,
+    pub(crate) store: Store,
+    pub(crate) settings: Mutex<Settings>,
+    pub(crate) items: Mutex<BTreeMap<u32, Arc<Mutex<Item>>>>,
     next_id: AtomicU32,
-    proxies: Mutex<ProxyCache>,
-    renders: Mutex<RenderCache>,
+    pub(crate) proxies: Mutex<ProxyCache>,
+    pub(crate) renders: Mutex<RenderCache>,
     queue: Mutex<VecDeque<u32>>,
     workers: AtomicUsize,
+    /// The multi-item detector (M10); `NoSplit` until one is installed.
+    pub(crate) detector: Mutex<Arc<dyn ItemDetector>>,
+    /// Output names of split saves in flight, so two scans never plan the same file (M10.22).
+    pub(crate) reserved: Mutex<ReservedKeys>,
 }
 
 /// A cheap-to-clone handle on the engine.
 #[derive(Clone)]
 pub struct Engine {
-    inner: Arc<Inner>,
+    pub(crate) inner: Arc<Inner>,
 }
 
-fn snapshot_of(path: &Path) -> Result<(Snapshot, Vec<u8>)> {
+pub(crate) fn snapshot_of(path: &Path) -> Result<(Snapshot, Vec<u8>)> {
     let meta = fs::metadata(path).map_err(|e| ErrKind::from_io(&e))?;
     if meta.len() > MAX_SOURCE_BYTES {
         return Err(ErrKind::TooLarge);
@@ -239,12 +287,12 @@ fn snapshot_of(path: &Path) -> Result<(Snapshot, Vec<u8>)> {
     ))
 }
 
-fn stat_of(path: &Path) -> Option<(u64, i64)> {
+pub(crate) fn stat_of(path: &Path) -> Option<(u64, i64)> {
     let m = fs::metadata(path).ok()?;
     Some((m.len(), m.modified().map(unix_ms).unwrap_or(0)))
 }
 
-fn jpeg(r: &Raster, quality: u8) -> Result<Vec<u8>> {
+pub(crate) fn jpeg(r: &Raster, quality: u8) -> Result<Vec<u8>> {
     encode(r, Format::Jpeg, quality, None).map_err(codec_err)
 }
 
@@ -263,10 +311,20 @@ impl Engine {
                 renders: Mutex::new(RenderCache::default()),
                 queue: Mutex::new(VecDeque::new()),
                 workers: AtomicUsize::new(0),
+                detector: Mutex::new(Arc::new(NoSplit)),
+                reserved: Mutex::new(ReservedKeys::default()),
             }),
         };
+        // A crash may have interrupted a split save: finish or undo it before anything is opened
+        // (M10.24), then purge.
+        crate::group::recover(&engine.inner.store, &crate::group::NoFaults);
         engine.inner.store.purge(now_secs());
         engine
+    }
+
+    /// Installs the multi-item detector (the classical one in the app, a stub in tests).
+    pub fn set_item_detector(&self, d: Arc<dyn ItemDetector>) {
+        *lock(&self.inner.detector) = d;
     }
 
     pub fn paths(&self) -> &AppPaths {
@@ -289,7 +347,7 @@ impl Engine {
 
     // ------------------------------------------------------------------ items
 
-    fn item(&self, id: u32) -> Option<Arc<Mutex<Item>>> {
+    pub(crate) fn item(&self, id: u32) -> Option<Arc<Mutex<Item>>> {
         lock(&self.inner.items).get(&id).cloned()
     }
 
@@ -340,6 +398,8 @@ impl Engine {
                 history: None,
                 generation: 0,
                 saved: None,
+                frames: 1,
+                accepted: None,
             };
             lock(&self.inner.items).insert(id, Arc::new(Mutex::new(item)));
             summary.ids.push(id);
@@ -407,6 +467,8 @@ impl Engine {
                     it.snapshot = a.snapshot.clone();
                     it.orig_mtime_ms = a.snapshot.mtime_ms;
                     it.dims = a.raster_dims;
+                    it.frames = a.frames;
+                    it.accepted = None;
                     it.thumb_src = Some(Arc::new(a.thumb_src));
                     it.icc = a.icc.map(Arc::new);
                     it.confidence = Some(a.confidence);
@@ -444,13 +506,52 @@ impl Engine {
             raster.width,
             raster.height,
         );
-        let detection = detect(&raster);
-        let state = detection
-            .quad
-            .map(QuadWarp::new)
-            .map_or_else(EditState::default, |q| {
-                EditState::single_with(q, Origin::Auto { pipeline_ver: 1 }, None)
-            });
+        // Several items on one scan (M10): the detector is asked first, and only two or more
+        // items make a split; anything else is the ordinary single-item route.
+        let (policy, profile) = {
+            let s = lock(&self.inner.settings);
+            (s.split_policy, s.split_profile)
+        };
+        let detector = lock(&self.inner.detector).clone();
+        let split = (policy != SplitPolicy::Never)
+            .then(|| detector.detect(&raster, policy, profile))
+            .flatten()
+            .filter(|d| d.items.len() >= 2);
+        let (mut state, confidence) = match split {
+            Some(d) => {
+                let confidence = worst_confidence(&d.items);
+                let items = d
+                    .items
+                    .into_iter()
+                    .map(|i| {
+                        let mut q = QuadWarp::new(i.quad);
+                        q.quarter_turns = i.quarter_turns % 4;
+                        auto_crop_core::items::auto_item(q, 1, Some(i.confidence))
+                    })
+                    .collect();
+                let mut st = EditState::default();
+                st.split.policy = policy;
+                st.split.profile = profile;
+                st.redetect(items, (raster.width, raster.height))
+                    .map_err(|e| e.kind())?;
+                (st, confidence)
+            }
+            None => {
+                let detection = detect(&raster);
+                let state = detection
+                    .quad
+                    .map(QuadWarp::new)
+                    .map_or_else(EditState::default, |q| {
+                        EditState::single_with(q, Origin::Auto { pipeline_ver: 1 }, None)
+                    });
+                (state, detection.confidence)
+            }
+        };
+        state.split = SplitState {
+            policy,
+            profile,
+            ..state.split
+        };
         Ok(Analysis {
             format: decoded.format,
             snapshot,
@@ -458,14 +559,15 @@ impl Engine {
             thumb_src: resize_to_fit(&raster, THUMB_SRC_EDGE),
             display: resize_to_fit(&raster, DISPLAY_EDGE),
             icc: decoded.icc,
-            confidence: detection.confidence,
+            confidence,
             state,
+            frames: decoded.frames.max(1),
         })
     }
 
     // ------------------------------------------------------------------ edits
 
-    fn with_history<R>(&self, id: u32, f: impl FnOnce(&mut Item) -> R) -> Result<R> {
+    pub(crate) fn with_history<R>(&self, id: u32, f: impl FnOnce(&mut Item) -> R) -> Result<R> {
         let item = self.item(id).ok_or(ErrKind::Internal)?;
         let mut it = lock(&item);
         if it.history.is_none() {
@@ -477,8 +579,26 @@ impl Engine {
     /// `live` returns the view the UI would show for a drag in progress without recording
     /// anything; `end` commits one history entry and bumps the generation if the state changed.
     pub fn set_edit(&self, id: u32, edit: &Edit, live: bool, label: &str) -> Result<ItemView> {
-        let state = edit.to_state();
         self.with_history(id, |it| {
+            // The edit is for the first included crop; every other crop, the order and the split
+            // settings stay as they are. An image with no crop yet gets a fresh single crop.
+            let current = it.history.as_ref().expect("checked").current().clone();
+            let state = match current
+                .included()
+                .find_map(|c| c.geometry.quad().map(|q| (c.id, q)))
+            {
+                Some((cid, q)) => {
+                    let mut st = current.clone();
+                    match st.edit_item_quad(cid, edit.apply_to(q)) {
+                        Ok(()) => st,
+                        Err(_) => edit.to_state(),
+                    }
+                }
+                None => EditState {
+                    split: current.split,
+                    ..edit.to_state()
+                },
+            };
             if live {
                 let mut v = it.view();
                 v.edit = edit_of(&state);
@@ -528,7 +648,11 @@ impl Engine {
     /// For items with no crop: an editable quad inset about 5% from the frame.
     pub fn draw_crop(&self, id: u32) -> Result<ItemView> {
         self.with_history(id, |it| {
-            let state = EditState::single(QuadWarp::inset_frame(0.05));
+            let split = it.history.as_ref().expect("checked").current().split;
+            let state = EditState {
+                split,
+                ..EditState::single(QuadWarp::inset_frame(0.05))
+            };
             if it
                 .history
                 .as_mut()
@@ -543,7 +667,7 @@ impl Engine {
 
     // ------------------------------------------------------------------ pixels for the UI
 
-    fn proxy(&self, id: u32) -> Result<Arc<Raster>> {
+    pub(crate) fn proxy(&self, id: u32) -> Result<Arc<Raster>> {
         if let Some(p) = lock(&self.inner.proxies).get(id) {
             return Ok(p);
         }
@@ -573,8 +697,13 @@ impl Engine {
                 .is_some_and(|c| c.forced == Some(Forced::Failed));
             (
                 it.generation,
-                it.geometry(),
-                failed && !it.view().edited,
+                // A split scan's thumbnail is the whole scan; its crops have their own images.
+                if kind == ImageKind::Thumb && it.is_split() {
+                    None
+                } else {
+                    it.geometry()
+                },
+                failed && !it.is_edited(),
                 it.thumb_src.clone(),
                 it.status == ItemStatus::Ready,
             )
@@ -647,20 +776,7 @@ impl Engine {
             .collect();
         ids.iter()
             .map(|id| {
-                let outcome = match self.save_one(*id, target, &run_id, &run_name) {
-                    Ok(saved) => SaveOutcome {
-                        id: *id,
-                        ok: true,
-                        error: None,
-                        saved: Some(saved),
-                    },
-                    Err(e) => SaveOutcome {
-                        id: *id,
-                        ok: false,
-                        error: Some(e),
-                        saved: None,
-                    },
-                };
+                let outcome = self.save_dispatch(*id, target, &run_id, &run_name);
                 if let Some(v) = self.item_view(*id) {
                     notify(v);
                 }
@@ -669,7 +785,7 @@ impl Engine {
             .collect()
     }
 
-    fn save_one(
+    pub(crate) fn save_one(
         &self,
         id: u32,
         target: SaveTarget,
@@ -784,6 +900,7 @@ impl Engine {
                     copy: true,
                     state,
                     out: out_snap,
+                    group: Vec::new(),
                 });
                 // The first copy leaves the source where it is; later edits still start from it.
                 Ok(SavedInfo {
@@ -793,6 +910,7 @@ impl Engine {
                         .map(|n| n.to_string_lossy().into_owned())
                         .unwrap_or_default(),
                     copy: true,
+                    outputs: Vec::new(),
                 })
             }
             SaveTarget::Replace => {
@@ -881,6 +999,7 @@ impl Engine {
                     copy: false,
                     state,
                     out: out_snap.clone(),
+                    group: Vec::new(),
                 });
                 it.original_path = backup_original;
                 it.snapshot = out_snap;
@@ -891,6 +1010,7 @@ impl Engine {
                         .map(|n| n.to_string_lossy().into_owned())
                         .unwrap_or_default(),
                     copy: false,
+                    outputs: Vec::new(),
                 })
             }
         }
@@ -931,6 +1051,11 @@ impl Engine {
     }
 
     fn changed_since_saved(&self, m: &Manifest) -> bool {
+        if m.kind == BackupKind::OneToN {
+            return crate::restore::derived_files(m)
+                .iter()
+                .any(|d| d.state == DerivedState::Changed);
+        }
         let Some(out) = m.outputs.first() else {
             return false;
         };
@@ -945,14 +1070,25 @@ impl Engine {
     }
 
     fn backup_file(&self, m: &Manifest) -> BackupFile {
+        let one_to_n = m.kind == BackupKind::OneToN;
         BackupFile {
             id: format!("{}/0", m.id),
             name: m.original_name.clone(),
             display_path: m.original_path.clone(),
             original_bytes: m.original_size,
-            output_bytes: m.outputs.first().map(|o| o.size),
+            output_bytes: if one_to_n {
+                Some(m.outputs.iter().map(|o| o.size).sum())
+            } else {
+                m.outputs.first().map(|o| o.size)
+            },
             changed_since_saved: self.changed_since_saved(m),
             restored: m.state == BackupState::Restored,
+            kind: m.kind,
+            derived: if one_to_n {
+                crate::restore::derived_files(m)
+            } else {
+                Vec::new()
+            },
         }
     }
 
@@ -996,12 +1132,16 @@ impl Engine {
         }
     }
 
-    fn restore_manifest(
+    pub(crate) fn restore_manifest(
         &self,
         mut m: Manifest,
         mode: RestoreMode,
         notify: &dyn Fn(ItemView),
     ) -> RestoreOutcome {
+        if m.kind == BackupKind::OneToN {
+            // The old entry points never touch derived files: Keep.
+            return self.restore_group(m, mode, DerivedAction::Keep, notify);
+        }
         let result = (|| -> Result<RestoreOutcome> {
             let orig_file = self
                 .inner
@@ -1041,6 +1181,7 @@ impl Engine {
                     needs_choice: false,
                     error: None,
                     restored: dest.file_name().map(|n| n.to_string_lossy().into_owned()),
+                    derived: Vec::new(),
                 });
             }
             if changed && mode == RestoreMode::Auto {
@@ -1049,6 +1190,7 @@ impl Engine {
                     needs_choice: true,
                     error: None,
                     restored: None,
+                    derived: Vec::new(),
                 });
             }
             if !already_original {
@@ -1086,6 +1228,7 @@ impl Engine {
                 needs_choice: false,
                 error: None,
                 restored: Some(name.to_owned()),
+                derived: Vec::new(),
             })
         })();
         result.unwrap_or_else(RestoreOutcome::failed)
@@ -1101,4 +1244,5 @@ struct Analysis {
     icc: Option<Vec<u8>>,
     confidence: Confidence,
     state: EditState,
+    frames: u32,
 }

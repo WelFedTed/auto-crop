@@ -189,9 +189,16 @@ impl<T: Clone + PartialEq> History<T> {
 
 impl History<EditState> {
     /// A history of edit states whose "unchanged" test is an equal `render_hash` (PLAN 2.6): a
-    /// commit that only touches provenance is dropped.
+    /// commit that only touches provenance is dropped. A change of the split policy, profile or
+    /// order mode is a step of its own even when no pixel changes (M10.40: "Treat as one item"
+    /// on a scan the detector sees as one item is still an undoable choice).
     pub fn for_edit(initial: EditState) -> Self {
-        Self::with_equivalence(initial, |a, b| a.render_hash() == b.render_hash())
+        Self::with_equivalence(initial, |a, b| {
+            a.render_hash() == b.render_hash()
+                && a.split.policy == b.split.policy
+                && a.split.profile == b.split.profile
+                && a.split.order_mode == b.split.order_mode
+        })
     }
 }
 

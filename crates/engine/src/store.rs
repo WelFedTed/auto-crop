@@ -289,6 +289,15 @@ impl Store {
         out
     }
 
+    /// The idempotency guard (M10.25): the saved backup, if any, one of whose recorded outputs has
+    /// this hash, and which output it is (0-based). A split's N outputs are all searched.
+    pub fn find_output(&self, blake3: &str) -> Option<(Manifest, usize)> {
+        self.list().into_iter().find_map(|m| {
+            let i = m.outputs.iter().position(|o| o.blake3 == blake3)?;
+            Some((m, i))
+        })
+    }
+
     pub fn used_bytes(&self) -> u64 {
         fn walk(p: &Path) -> u64 {
             let Ok(rd) = fs::read_dir(p) else { return 0 };
