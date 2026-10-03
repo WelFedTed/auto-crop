@@ -125,9 +125,105 @@ fn eval(expr: &str) -> Option<i64> {
     }
 }
 
+/// libheif 1.23.5 (ADR-0004): the floor for the HEIF path, with the `heif_security_limits` API.
+pub const HEIF_VERSION_FLOOR: (u32, u32, u32) = (1, 23, 5);
+
+/// `1.23.5` -> (1, 23, 5); missing or non-numeric parts are 0.
+pub fn parse_version(v: &str) -> (u32, u32, u32) {
+    let mut it = v
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|p| !p.is_empty())
+        .map(|p| p.parse().unwrap_or(0));
+    (
+        it.next().unwrap_or(0),
+        it.next().unwrap_or(0),
+        it.next().unwrap_or(0),
+    )
+}
+
+/// `#define LIBHEIF_VERSION "1.23.5"` -> `1.23.5`.
+pub fn heif_version(heif_version_h: &str) -> Option<String> {
+    heif_version_h.lines().find_map(|l| {
+        let mut it = l.split_whitespace();
+        (it.next() == Some("#define") && it.next() == Some("LIBHEIF_VERSION"))
+            .then(|| it.next().map(|v| v.trim_matches('"').to_owned()))
+            .flatten()
+    })
+}
+
+/// Reads the version out of `heif_version.h` and refuses anything below the floor.
+pub fn check_heif_version(heif_version_h: &str) -> Result<String, String> {
+    let v =
+        heif_version(heif_version_h).ok_or("cannot read LIBHEIF_VERSION from heif_version.h")?;
+    let (a, b, c) = HEIF_VERSION_FLOOR;
+    if parse_version(&v) < HEIF_VERSION_FLOOR {
+        return Err(format!(
+            "libheif {v} is older than {a}.{b}.{c}; refusing to link"
+        ));
+    }
+    Ok(v)
+}
+
+/// The field names of `typedef struct <name> { ... } <name>;`, in order (a function pointer
+/// `void (* f)(...)` contributes `f`).
+pub fn struct_fields(text: &str, name: &str) -> Vec<String> {
+    let clean = strip_comments(text);
+    let Some(start) = clean.find(&format!("typedef struct {name}")) else {
+        return Vec::new();
+    };
+    let rest = &clean[start..];
+    let (Some(open), Some(close)) = (rest.find('{'), rest.find(&format!("}} {name};"))) else {
+        return Vec::new();
+    };
+    rest[open + 1..close]
+        .split(';')
+        .filter_map(|decl| {
+            let decl = decl.trim();
+            if decl.is_empty() {
+                return None;
+            }
+            if let Some(p) = decl.find("(*") {
+                let tail = &decl[p + 2..];
+                return Some(tail[..tail.find(')')?].trim().to_owned());
+            }
+            decl.rsplit(|c: char| c.is_whitespace() || c == '*')
+                .find(|t| !t.is_empty())
+                .map(str::to_owned)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_libheif_floor_is_enforced_and_struct_fields_are_read() {
+        let h =
+            |v: &str| format!("#define LIBHEIF_VERSION_MAJOR 1\n#define LIBHEIF_VERSION \"{v}\"\n");
+        assert_eq!(check_heif_version(&h("1.23.5")), Ok("1.23.5".into()));
+        assert_eq!(check_heif_version(&h("1.24.0")), Ok("1.24.0".into()));
+        assert_eq!(check_heif_version(&h("2.0.0")), Ok("2.0.0".into()));
+        for old in ["1.23.4", "1.23.1", "1.20.2", "0.99.9"] {
+            let e = check_heif_version(&h(old)).unwrap_err();
+            assert!(e.contains("older than 1.23.5"), "{e}");
+        }
+        assert!(check_heif_version("").is_err());
+        assert_eq!(parse_version("1.23.5"), (1, 23, 5));
+        assert_eq!(parse_version("1.23"), (1, 23, 0));
+        let s = "typedef struct heif_x\n{\n  uint8_t version;\n  // c\n  uint64_t a_b;\n  const struct heif_x* parent;\n  void (* on_progress)(int step, void* data);\n  heif_color_conversion_options color_conversion_options;\n} heif_x;\n";
+        assert_eq!(
+            struct_fields(s, "heif_x"),
+            [
+                "version",
+                "a_b",
+                "parent",
+                "on_progress",
+                "color_conversion_options"
+            ]
+        );
+        assert!(struct_fields(s, "nope").is_empty());
+    }
 
     fn jconfig(v: u32) -> String {
         format!(

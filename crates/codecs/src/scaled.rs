@@ -82,7 +82,11 @@ fn decode_scaled_inner(
     if denom > 1 {
         decoded.raster = block_mean(&decoded.raster, denom);
     }
-    decoded.raster = orient(decoded.raster, decoded.exif_orientation)?;
+    // HEIC and AVIF come back upright from libheif (`irot` and `imir` are already applied), so
+    // turning again by the orientation they report would rotate twice.
+    if !matches!(format, Format::Heic | Format::Avif) {
+        decoded.raster = orient(decoded.raster, decoded.exif_orientation)?;
+    }
     Ok(ScaledDecoded {
         decoded,
         denom,

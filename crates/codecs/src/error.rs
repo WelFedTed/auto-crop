@@ -11,9 +11,14 @@ pub enum CodecError {
     /// Not an image this crate recognises.
     #[error("unsupported format")]
     Unsupported,
-    /// A recognised container that this build does not decode (HEIC, AVIF, GIF, BMP, JXL).
+    /// A recognised container that this build does not decode (HEIC and AVIF without the `heif`
+    /// feature, GIF, BMP, JXL).
     #[error("{} files cannot be decoded in this build", .0.extension())]
     NotDecodable(Format),
+    /// The image is HEVC coded and the libde265 plugin of libheif is not installed (the `no-hevc`
+    /// build, ADR-0005). AVIF still decodes; the UI points to the operating system's decoder.
+    #[error("no HEVC decoder is installed (the libde265 plugin of libheif was not found)")]
+    HevcDecoderMissing,
     /// A recognised format that uses a feature this build cannot decode (12-bit JPEG, ...).
     #[error("unsupported feature: {0}")]
     UnsupportedFeature(String),
@@ -45,6 +50,7 @@ impl CodecError {
         match self {
             CodecError::Unsupported => "unsupported",
             CodecError::NotDecodable(_) => "not_decodable",
+            CodecError::HevcDecoderMissing => "hevc_decoder_missing",
             CodecError::UnsupportedFeature(_) => "unsupported_feature",
             CodecError::Corrupt(_) => "corrupt",
             CodecError::TooLarge(_) => "too_large",

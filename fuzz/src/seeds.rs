@@ -159,6 +159,26 @@ pub fn sample_files() -> Vec<(String, Vec<u8>)> {
 
     add("heic-stub", fx::heic_stub());
     add("avif-stub", fx::avif_stub());
+    // HEIF and AVIF: the committed real files (header walk always; libheif and dav1d when the
+    // fuzz build enables `auto-crop-codecs/heif`) and generated containers with transformations,
+    // an ICC profile, extra items, a grid and a sequence, so the mutator starts from valid boxes.
+    for (name, bytes) in fx::heif_real_files() {
+        add(
+            &format!("heif-real-{}", name.trim_end_matches(".avif")),
+            bytes.to_vec(),
+        );
+    }
+    let mut s = fx::HeifSpec::avif(100, 60);
+    s.props = vec![fx::heif_clap(50, 40), fx::heif_irot(1), fx::heif_imir(0)];
+    s.icc = Some(fx::fake_icc(300));
+    add("heif-mock-avif-transforms-icc", s.build());
+    let mut s = fx::HeifSpec::heic(1024, 1024);
+    s.grid_tiles = Some(16);
+    s.exif_len = Some(64);
+    add("heif-mock-heic-grid-exif", s.build());
+    let mut s = fx::HeifSpec::avif(64, 48);
+    (s.extra_items, s.sequence) = (3, true);
+    add("heif-mock-avif-items-sequence", s.build());
     add("gif-stub", fx::gif_stub());
     add("bmp-stub", fx::bmp_stub());
     add("jxl-stub", fx::jxl_stub());

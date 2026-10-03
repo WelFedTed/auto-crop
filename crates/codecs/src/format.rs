@@ -3,17 +3,18 @@
 
 //! Format identification by magic bytes (PLAN 3.1 rule 2): file names are never trusted.
 
-/// An image container this crate can name. JPEG, PNG, TIFF and WebP are decodable; the rest are
-/// recognised only, so the caller can say "this is a HEIC" instead of "unknown file".
+/// An image container this crate can name. JPEG, PNG, TIFF and WebP are decodable; HEIC and AVIF
+/// are decodable with the `heif` feature and probed (header only) without it; the rest are
+/// recognised only, so the caller can say "this is a GIF" instead of "unknown file".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Format {
     Jpeg,
     Png,
     Tiff,
     Webp,
-    /// HEIC / HEIF (recognised only; decoding is M6 and runs in the worker pool).
+    /// HEIC / HEIF (decoded by libheif with the `heif` feature).
     Heic,
-    /// AVIF (recognised only).
+    /// AVIF (decoded by libheif and dav1d with the `heif` feature).
     Avif,
     /// GIF (recognised only).
     Gif,
@@ -39,12 +40,19 @@ impl Format {
         }
     }
 
-    /// True for the formats [`crate::decode`] reads in this build.
+    /// True for the formats [`crate::decode`] reads in this build: JPEG, PNG, TIFF and WebP
+    /// always, HEIC and AVIF with the `heif` feature (libheif, libde265 and dav1d).
     pub fn is_decodable(self) -> bool {
         matches!(
             self,
             Format::Jpeg | Format::Png | Format::Tiff | Format::Webp
-        )
+        ) || (cfg!(feature = "heif") && matches!(self, Format::Heic | Format::Avif))
+    }
+
+    /// True for the formats [`crate::probe`] reads: everything decodable, plus HEIC and AVIF in
+    /// every build (their header walk is safe Rust and needs no native library).
+    pub fn is_probeable(self) -> bool {
+        self.is_decodable() || matches!(self, Format::Heic | Format::Avif)
     }
 
     /// True for the formats [`crate::encode`] writes in this build.
@@ -110,6 +118,11 @@ fn sniff_ftyp(bytes: &[u8]) -> Option<Format> {
         .min(16 + 64 * 4);
     let major = &bytes[8..12];
     let mut brands: Vec<&[u8]> = vec![major];
+    // The compact `mini` layout (major brand `mif3`) names its codec in the minor_version field
+    // ("avif", "heic") instead of in a compatible-brand list.
+    if major == b"mif3" && bytes.len() >= 16 {
+        brands.push(&bytes[12..16]);
+    }
     // Skip minor_version (bytes 12..16), then compatible brands.
     let mut i = 16;
     while i + 4 <= end {
@@ -174,6 +187,21 @@ mod tests {
         );
         assert_eq!(sniff(&ftyp(b"mif1", &[b"avif"])), Some(Format::Avif));
         assert_eq!(sniff(&ftyp(b"qt  ", &[])), None);
+    }
+
+    #[test]
+    fn the_mini_layout_names_its_codec_in_the_minor_version() {
+        let mini = |minor: &[u8; 4]| {
+            let mut v = vec![0, 0, 0, 16];
+            v.extend_from_slice(b"ftypmif3");
+            v.extend_from_slice(minor);
+            v
+        };
+        assert_eq!(sniff(&mini(b"avif")), Some(Format::Avif));
+        assert_eq!(sniff(&mini(b"heic")), Some(Format::Heic));
+        assert_eq!(sniff(&mini(b"abcd")), None);
+        // Too short to carry a minor version: no panic, no guess.
+        assert_eq!(sniff(b"\0\0\0\x10ftypmif3"), None);
     }
 
     #[test]

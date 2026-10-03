@@ -377,9 +377,18 @@ fn animated_webp_gives_the_first_frame_and_the_flag() {
 
 #[test]
 fn recognised_only_and_unknown_inputs_are_typed_errors() {
+    // HEIC is decodable only with the `heif` feature; without it the error names the format. With
+    // it a bare `ftyp` (recognised, no `meta` box) is a corrupt file.
+    #[cfg(not(feature = "heif"))]
     assert!(matches!(
         decode(&heic_stub()),
         Err(CodecError::NotDecodable(Format::Heic))
+    ));
+    #[cfg(feature = "heif")]
+    assert!(matches!(decode(&heic_stub()), Err(CodecError::Corrupt(_))));
+    assert!(matches!(
+        decode(&gif_stub()),
+        Err(CodecError::NotDecodable(Format::Gif))
     ));
     assert!(matches!(
         decode(b"plain text"),

@@ -261,6 +261,50 @@ fn cases() -> Vec<Case> {
     );
     c.frames = 3;
     v.push(c);
+    // AVIF: the committed files (Pillow and libavif, docs/provenance.md). The Exif orientation Pillow
+    // was given became `irot`/`imir`, and the header walk must add them up to the same number.
+    for (name, bytes) in heif_real_files() {
+        let (size, depth, channels, frames, orientation, icc) = match name {
+            "gradient-420-64x48.avif" => ((64, 48), 8, 3, 1, 1, false),
+            "gray-32x24.avif" => ((32, 24), 8, 1, 1, 1, false),
+            "alpha-32x24.avif" => ((32, 24), 8, 3, 1, 1, false),
+            "depth10-32x24.avif" => ((32, 24), 10, 3, 1, 1, false),
+            "icc-srgb-32x24.avif" => ((32, 24), 8, 3, 1, 1, true),
+            "seq-2frames-32x24.avif" => ((32, 24), 8, 3, 2, 1, false),
+            // HEIF ignores the Exif tag: it stays 1 although the file carries an Orientation of 6.
+            "exif-orient6-noirot-48x32.avif" => ((48, 32), 8, 3, 1, 1, false),
+            n if n.starts_with("orient") => ((48, 32), 8, 3, 1, n.as_bytes()[6] - b'0', false),
+            _ => ((48, 32), 8, 3, 1, 1, false),
+        };
+        let mut c = case(name, bytes.to_vec(), Format::Avif, size);
+        (c.depth, c.channels, c.frames, c.orientation, c.icc) =
+            (depth, channels, frames, orientation, icc);
+        v.push(c);
+    }
+    // Generated containers with transformations; the stored size is the size after `clap` and
+    // before the turn, the orientation the EXIF value that `irot` and `imir` add up to.
+    let mut s = HeifSpec::avif(100, 60);
+    s.props = vec![heif_irot(1)];
+    let mut c = case("avif irot 90 ccw", s.build(), Format::Avif, (100, 60));
+    c.orientation = 8;
+    v.push(c);
+    let mut s = HeifSpec::heic(100, 60);
+    s.props = vec![heif_clap(50, 40), heif_irot(1), heif_imir(0)];
+    let mut c = case("heic clap irot imir", s.build(), Format::Heic, (50, 40));
+    c.orientation = 5;
+    v.push(c);
+    let mut s = HeifSpec::avif(64, 48);
+    s.depth = 10;
+    s.icc = Some(fake_icc(300));
+    s.extra_items = 2;
+    let mut c = case(
+        "avif 10-bit icc 3 images",
+        s.build(),
+        Format::Avif,
+        (64, 48),
+    );
+    (c.depth, c.frames, c.icc) = (10, 3, true);
+    v.push(c);
     v
 }
 
@@ -303,8 +347,6 @@ fn probe_reports_the_stored_icc_size_byte_exact_for_jpeg_tiff_and_webp() {
 #[test]
 fn recognised_only_formats_sniff_but_do_not_probe() {
     for (bytes, f) in [
-        (heic_stub(), Format::Heic),
-        (avif_stub(), Format::Avif),
         (gif_stub(), Format::Gif),
         (bmp_stub(), Format::Bmp),
         (jxl_stub(), Format::Jxl),
@@ -313,6 +355,44 @@ fn recognised_only_formats_sniff_but_do_not_probe() {
         assert_eq!(probe(&bytes), Err(CodecError::NotDecodable(f)));
         assert!(!f.is_decodable());
     }
+}
+
+#[test]
+fn heic_and_avif_probe_in_every_build_and_decode_only_with_the_heif_feature() {
+    for (bytes, f) in [(heic_stub(), Format::Heic), (avif_stub(), Format::Avif)] {
+        assert_eq!(sniff(&bytes), Some(f));
+        // A bare `ftyp` is recognised but has no `meta` box: the header walk says so.
+        assert!(
+            matches!(probe(&bytes), Err(CodecError::Corrupt(_))),
+            "{f:?}"
+        );
+        assert!(f.is_probeable());
+        assert_eq!(f.is_decodable(), cfg!(feature = "heif"));
+    }
+    // A real file probes whether or not the decoder is built in, and the supported-format
+    // lists say exactly what `decode` delivers.
+    let avif = &heif_real_files()[0].1;
+    assert_eq!(probe(avif).unwrap().format, Format::Avif);
+    let has = |l: &[&str], n: &str| l.contains(&n);
+    for list in [
+        crate::supported_input_formats(),
+        crate::supported_input_extensions(),
+    ] {
+        assert!(has(list, "tiff") || has(list, "tif"));
+        assert_eq!(
+            has(list, "avif") && has(list, "heic"),
+            cfg!(feature = "heif")
+        );
+    }
+    assert_eq!(
+        has(crate::supported_input_extensions(), "heif"),
+        cfg!(feature = "heif")
+    );
+    #[cfg(not(feature = "heif"))]
+    assert_eq!(
+        crate::decode(avif).unwrap_err().to_string(),
+        "avif files cannot be decoded in this build"
+    );
 }
 
 #[test]

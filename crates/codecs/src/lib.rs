@@ -32,6 +32,8 @@ pub mod hostile;
 pub mod jpeg_lossless;
 mod limits;
 // The pinned-header readers shared with build.rs; included here so the version gate has unit tests.
+#[cfg(feature = "heif")]
+pub mod heif;
 #[cfg(test)]
 #[allow(dead_code)]
 #[path = "../native_header.rs"]
@@ -61,9 +63,32 @@ use image::ImageEncoder;
 /// Largest image accepted by default (PLAN C1: 100 MP).
 pub const MAX_PIXELS: u64 = DEFAULT_MAX_PIXELS;
 
-/// Formats this build can decode.
+/// Formats this build can decode: JPEG, PNG, TIFF and WebP always; HEIC and AVIF with the `heif`
+/// feature (so the list never promises more than [`decode`] delivers).
 pub fn supported_input_formats() -> &'static [&'static str] {
-    &["jpeg", "png", "tiff", "webp"]
+    #[cfg(feature = "heif")]
+    {
+        &["jpeg", "png", "tiff", "webp", "heic", "avif"]
+    }
+    #[cfg(not(feature = "heif"))]
+    {
+        &["jpeg", "png", "tiff", "webp"]
+    }
+}
+
+/// File extensions (lower case, without the dot) of the formats this build can decode, for
+/// picking candidate files; the content is still sniffed, never the extension trusted.
+pub fn supported_input_extensions() -> &'static [&'static str] {
+    #[cfg(feature = "heif")]
+    {
+        &[
+            "jpg", "jpeg", "png", "tif", "tiff", "webp", "heic", "heif", "avif",
+        ]
+    }
+    #[cfg(not(feature = "heif"))]
+    {
+        &["jpg", "jpeg", "png", "tif", "tiff", "webp"]
+    }
 }
 
 /// What the header says about a file; produced without allocating pixels.

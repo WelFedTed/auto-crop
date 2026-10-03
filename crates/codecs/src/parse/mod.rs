@@ -9,6 +9,7 @@
 use crate::{CodecError, DecodeLimits, Format, Limit};
 use std::ops::Range;
 
+pub(crate) mod heif;
 pub(crate) mod jpeg;
 pub(crate) mod png;
 pub(crate) mod tiff;
@@ -25,6 +26,36 @@ pub(crate) enum IccLoc {
     JpegChunks(Vec<(u8, u8, Range<usize>)>),
     /// PNG `iCCP`: zlib-compressed, expanded by the PNG decoder.
     PngCompressed,
+}
+
+/// The codec of a HEIF primary item (or of the first tile of a grid).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HeifCodec {
+    Av1,
+    Hevc,
+    /// AVC, JPEG, JPEG 2000, VVC, uncompressed, unknown: whatever libheif was built with decides.
+    Other,
+}
+
+/// An `nclx` colour description (ITU-T H.273 codes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Nclx {
+    pub primaries: u16,
+    pub transfer: u16,
+    pub matrix: u16,
+    pub full_range: bool,
+}
+
+/// What the HEIF header walk learns beyond the common fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct HeifInfo {
+    pub codec: HeifCodec,
+    pub nclx: Option<Nclx>,
+    /// The file has a `moov` box or a sequence brand (`msf1`, `avis`).
+    pub sequence: bool,
+    /// The `ispe` size of the primary item, before `clap`, `irot` and `imir`: the size the
+    /// decoder works at, so the pixel cap applies to it as well as to the cropped size.
+    pub ispe: (u32, u32),
 }
 
 /// Everything the probe learns from the container headers.
@@ -50,6 +81,8 @@ pub(crate) struct Header {
     pub compression: u16,
     /// Why the decoder cannot read this file even though the container is fine.
     pub unsupported: Option<String>,
+    /// HEIF and AVIF only.
+    pub heif: Option<HeifInfo>,
 }
 
 impl Header {
@@ -69,6 +102,7 @@ impl Header {
             truncated: false,
             compression: 0,
             unsupported: None,
+            heif: None,
         }
     }
 }
@@ -84,6 +118,7 @@ pub(crate) fn parse(
         Format::Png => png::parse(bytes, limits)?,
         Format::Tiff => tiff::parse(bytes, limits)?,
         Format::Webp => webp::parse(bytes, limits)?,
+        Format::Heic | Format::Avif => heif::parse(bytes, format, limits)?,
         other => return Err(CodecError::NotDecodable(other)),
     };
     if h.width == 0 || h.height == 0 {

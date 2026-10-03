@@ -482,6 +482,168 @@ pub fn corpus() -> Vec<Hostile> {
     add("heic-header-only", heic_stub(), Expect::Reject);
     add("avif-header-only", avif_stub(), Expect::Reject);
 
+    // ---- HEIF and AVIF (header walk always; libheif and dav1d with the `heif` feature) ------
+    // Sizes the pixel cap must refuse from the header alone, before libheif sees the file.
+    let spec = |w, h| HeifSpec::avif(w, h);
+    add(
+        "avif-ispe-60000x60000",
+        spec(60_000, 60_000).build(),
+        Expect::Reject,
+    );
+    add(
+        "heic-ispe-65535x65535",
+        HeifSpec::heic(65_535, 65_535).build(),
+        Expect::Reject,
+    );
+    add(
+        "avif-ispe-4g-x-4g",
+        spec(u32::MAX, u32::MAX).build(),
+        Expect::Reject,
+    );
+    add("avif-ispe-zero", spec(0, 0).build(), Expect::Reject);
+    add(
+        "avif-ispe-100mp-plus-one",
+        spec(10_000, 10_001).build(),
+        Expect::Reject,
+    );
+    add(
+        "avif-clap-small-ispe-huge",
+        {
+            let mut s = spec(60_000, 60_000);
+            s.props = vec![heif_clap(16, 16)];
+            s.build()
+        },
+        Expect::Reject,
+    );
+    add(
+        "avif-grid-canvas-60000x60000",
+        {
+            let mut s = spec(60_000, 60_000);
+            s.grid_tiles = Some(4);
+            s.build()
+        },
+        Expect::Reject,
+    );
+    // Item, entry and metadata floods.
+    add(
+        "avif-items-20000",
+        {
+            let mut s = spec(64, 48);
+            s.extra_items = 20_000;
+            s.build()
+        },
+        Expect::Reject,
+    );
+    add(
+        "avif-iinf-claims-4g-entries",
+        {
+            let mut s = spec(64, 48);
+            s.iinf_claim = Some(u32::MAX);
+            s.build()
+        },
+        Expect::Reject,
+    );
+    add(
+        "avif-exif-item-claims-4gb",
+        {
+            let mut s = spec(64, 48);
+            s.exif_len = Some(u32::MAX);
+            s.build()
+        },
+        Expect::Reject,
+    );
+    add(
+        "avif-meta-box-size-lies",
+        {
+            let mut b = spec(64, 48).build();
+            // ftyp is 24 bytes (one brand and two compatible ones); meta follows.
+            b[24..28].copy_from_slice(&u32::MAX.to_be_bytes());
+            b
+        },
+        Expect::Reject,
+    );
+    // Structure without coded data, and a grid of thousands of tiny tiles over a small canvas:
+    // typed errors, no big allocation.
+    add(
+        "avif-structure-no-image-data",
+        spec(64, 48).build(),
+        bounded(10_000, 64),
+    );
+    add(
+        "heic-structure-no-image-data",
+        HeifSpec::heic(64, 48).build(),
+        bounded(10_000, 64),
+    );
+    add(
+        "avif-grid-4096-tiles",
+        {
+            let mut s = spec(1024, 1024);
+            s.grid_tiles = Some(4096);
+            s.build()
+        },
+        bounded(10_000, 64),
+    );
+    add(
+        "heic-grid-4096-tiles",
+        {
+            let mut s = HeifSpec::heic(1024, 1024);
+            s.grid_tiles = Some(4096);
+            s.build()
+        },
+        bounded(10_000, 64),
+    );
+    add(
+        "avif-sequence-structure",
+        {
+            let mut s = spec(64, 48);
+            s.sequence = true;
+            s.build()
+        },
+        bounded(10_000, 64),
+    );
+    {
+        let real = heif_real_files();
+        let get = |n: &str| {
+            real.iter()
+                .find(|(name, _)| *name == n)
+                .map(|(_, b)| b.to_vec())
+                .expect("fixture")
+        };
+        // The real files, truncated everywhere that matters.
+        for (case, name) in [
+            ("gradient", "gradient-444-48x32.avif"),
+            ("depth10", "depth10-32x24.avif"),
+            ("sequence", "seq-2frames-32x24.avif"),
+        ] {
+            let full = get(name);
+            for (label, cut) in [
+                ("3b", 3usize),
+                ("20b", 20),
+                ("10pct", full.len() / 10),
+                ("50pct", full.len() / 2),
+                ("90pct", full.len() * 9 / 10),
+                ("99pct", full.len() - full.len() / 100 - 1),
+                ("minus-1", full.len() - 1),
+            ] {
+                add(
+                    &format!("avif-real-{case}-truncated-{label}"),
+                    full[..cut.max(1)].to_vec(),
+                    bounded(10_000, 64),
+                );
+            }
+        }
+    }
+    add(
+        "avif-magic-then-noise-4mb",
+        noise(&ftyp(b"avif", &[b"mif1"]), 4 << 20, 0x2468_ACE0_1357_9BDF),
+        bounded(10_000, 64),
+    );
+    add(
+        "heic-magic-then-noise-4mb",
+        noise(&ftyp(b"heic", &[b"mif1"]), 4 << 20, 0x1111_2222_3333_4444),
+        bounded(10_000, 64),
+    );
+
     // ---- Truncations and junk --------------------------------------------------------------
     for (name, full) in [
         ("jpeg", JpegSpec::new(128, 96).build()),

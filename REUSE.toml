@@ -33,6 +33,7 @@ path = [
     "crates/*/src/snapshots/*.snap",
     ".devcontainer/devcontainer.json",
     "crates/imgproc/tests/fixtures/**",
+    "crates/codecs/tests/fixtures/heif/**",
     "tools/imgproc-oracles/requirements.txt",
     "tools/imgproc-oracles/requirements.lock",
     "tools/perf_gate/fixtures/**",

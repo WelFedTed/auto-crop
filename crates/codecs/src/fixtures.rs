@@ -916,7 +916,7 @@ pub fn avif_stub() -> Vec<u8> {
     ftyp(b"avif", &[b"mif1", b"miaf"])
 }
 
-fn ftyp(major: &[u8; 4], compat: &[&[u8; 4]]) -> Vec<u8> {
+pub fn ftyp(major: &[u8; 4], compat: &[&[u8; 4]]) -> Vec<u8> {
     let mut v = ((16 + 4 * compat.len()) as u32).to_be_bytes().to_vec();
     v.extend_from_slice(b"ftyp");
     v.extend_from_slice(major);
@@ -925,6 +925,240 @@ fn ftyp(major: &[u8; 4], compat: &[&[u8; 4]]) -> Vec<u8> {
         v.extend_from_slice(*c);
     }
     v
+}
+
+// ---------------------------------------------------------------------------------------------
+// HEIF and AVIF: generated header-only files (no coded image data) and the committed real files
+// ---------------------------------------------------------------------------------------------
+
+/// The committed AVIF fixtures of `tests/fixtures/heif/` (made by `make_heif_fixtures.py` with
+/// Pillow, see docs/provenance.md): name and bytes.
+pub fn heif_real_files() -> Vec<(&'static str, &'static [u8])> {
+    macro_rules! f {
+        ($n:literal) => {
+            (
+                $n,
+                &include_bytes!(concat!("../tests/fixtures/heif/", $n))[..],
+            )
+        };
+    }
+    vec![
+        f!("gradient-444-48x32.avif"),
+        f!("orient2-444-48x32.avif"),
+        f!("orient3-444-48x32.avif"),
+        f!("orient4-444-48x32.avif"),
+        f!("orient5-444-48x32.avif"),
+        f!("orient6-444-48x32.avif"),
+        f!("orient7-444-48x32.avif"),
+        f!("orient8-444-48x32.avif"),
+        f!("gradient-420-64x48.avif"),
+        f!("gray-32x24.avif"),
+        f!("alpha-32x24.avif"),
+        f!("depth10-32x24.avif"),
+        f!("icc-srgb-32x24.avif"),
+        f!("seq-2frames-32x24.avif"),
+        f!("exif-orient6-noirot-48x32.avif"),
+    ]
+}
+
+fn bx(typ: &[u8; 4], body: &[u8]) -> Vec<u8> {
+    let mut v = ((8 + body.len()) as u32).to_be_bytes().to_vec();
+    v.extend_from_slice(typ);
+    v.extend_from_slice(body);
+    v
+}
+
+fn full_box(typ: &[u8; 4], version: u8, flags: u32, body: &[u8]) -> Vec<u8> {
+    let mut b = vec![version];
+    b.extend_from_slice(&flags.to_be_bytes()[1..]);
+    b.extend_from_slice(body);
+    bx(typ, &b)
+}
+
+/// An `irot` property: `quarter_turns` anticlockwise.
+pub fn heif_irot(quarter_turns: u8) -> Vec<u8> {
+    bx(b"irot", &[quarter_turns & 3])
+}
+
+/// An `imir` property: axis 0 flips top-bottom, 1 left-right (as libavif and libheif read it).
+pub fn heif_imir(axis: u8) -> Vec<u8> {
+    bx(b"imir", &[axis & 1])
+}
+
+/// A `clap` property with an integer clean-aperture size and no offset.
+pub fn heif_clap(w: u32, h: u32) -> Vec<u8> {
+    let mut b = Vec::new();
+    for (n, d) in [(w, 1u32), (h, 1), (0, 1), (0, 1)] {
+        b.extend_from_slice(&n.to_be_bytes());
+        b.extend_from_slice(&d.to_be_bytes());
+    }
+    bx(b"clap", &b)
+}
+
+/// A HEIF or AVIF container made of boxes only: the structure of a real file (primary item,
+/// properties, optional grid, extra items, Exif item) but no coded image, so it probes and fails
+/// to decode with a typed error. Used for the hostile corpus and the header-walk tests.
+#[derive(Debug, Clone)]
+pub struct HeifSpec {
+    /// Major brand: `avif` or `heic`.
+    pub brand: [u8; 4],
+    /// Item type of the image (and of grid tiles): `av01` or `hvc1`.
+    pub codec: [u8; 4],
+    pub width: u32,
+    pub height: u32,
+    /// Bits per channel in `pixi`.
+    pub depth: u8,
+    /// Properties after `ispe` and `pixi`, in the order the primary item applies them.
+    pub props: Vec<Vec<u8>>,
+    /// An ICC profile in a `colr` box.
+    pub icc: Option<Vec<u8>>,
+    /// Further top-level image items.
+    pub extra_items: u32,
+    /// `iinf` claims this many entries instead of the real count.
+    pub iinf_claim: Option<u32>,
+    /// A grid primary item (`grid`) over this many hidden tile items.
+    pub grid_tiles: Option<u32>,
+    /// An `Exif` item whose `iloc` extent claims this many bytes.
+    pub exif_len: Option<u32>,
+    /// Add a `moov` box (an image sequence).
+    pub sequence: bool,
+}
+
+impl HeifSpec {
+    pub fn avif(width: u32, height: u32) -> Self {
+        Self {
+            brand: *b"avif",
+            codec: *b"av01",
+            width,
+            height,
+            depth: 8,
+            props: Vec::new(),
+            icc: None,
+            extra_items: 0,
+            iinf_claim: None,
+            grid_tiles: None,
+            exif_len: None,
+            sequence: false,
+        }
+    }
+
+    pub fn heic(width: u32, height: u32) -> Self {
+        Self {
+            brand: *b"heic",
+            codec: *b"hvc1",
+            ..Self::avif(width, height)
+        }
+    }
+
+    pub fn build(&self) -> Vec<u8> {
+        let infe = |id: u32, typ: &[u8; 4], hidden: bool| {
+            let mut b = (id as u16).to_be_bytes().to_vec();
+            b.extend_from_slice(&[0, 0]);
+            b.extend_from_slice(typ);
+            b.push(0);
+            full_box(b"infe", 2, u32::from(hidden), &b)
+        };
+        let primary_type = if self.grid_tiles.is_some() {
+            *b"grid"
+        } else {
+            self.codec
+        };
+        let mut infes = infe(1, &primary_type, false);
+        let mut next = 2u32;
+        let tiles: Vec<u32> = (0..self.grid_tiles.unwrap_or(0))
+            .map(|_| {
+                let id = next;
+                next += 1;
+                infes.extend(infe(id, &self.codec, true));
+                id
+            })
+            .collect();
+        for _ in 0..self.extra_items {
+            infes.extend(infe(next, &self.codec, false));
+            next += 1;
+        }
+        let exif_id = self.exif_len.map(|_| {
+            let id = next;
+            next += 1;
+            infes.extend(infe(id, b"Exif", false));
+            id
+        });
+        let count = self.iinf_claim.unwrap_or(next - 1);
+        let iinf = if count > u32::from(u16::MAX) {
+            let mut b = count.to_be_bytes().to_vec();
+            b.extend(&infes);
+            full_box(b"iinf", 1, 0, &b)
+        } else {
+            let mut b = (count as u16).to_be_bytes().to_vec();
+            b.extend(&infes);
+            full_box(b"iinf", 0, 0, &b)
+        };
+
+        // properties: ispe, pixi, the caller's, colr
+        let mut ipco = Vec::new();
+        let mut ispe = self.width.to_be_bytes().to_vec();
+        ispe.extend_from_slice(&self.height.to_be_bytes());
+        ipco.extend(full_box(b"ispe", 0, 0, &ispe));
+        ipco.extend(full_box(
+            b"pixi",
+            0,
+            0,
+            &[3, self.depth, self.depth, self.depth],
+        ));
+        let mut n_props = 2u8;
+        for p in &self.props {
+            ipco.extend(p);
+            n_props += 1;
+        }
+        if let Some(icc) = &self.icc {
+            let mut c = b"prof".to_vec();
+            c.extend(icc);
+            ipco.extend(bx(b"colr", &c));
+            n_props += 1;
+        }
+        let mut ipma = 1u32.to_be_bytes().to_vec();
+        ipma.extend_from_slice(&1u16.to_be_bytes());
+        ipma.push(n_props);
+        ipma.extend(1..=n_props);
+        let iprp = bx(
+            b"iprp",
+            &[bx(b"ipco", &ipco), full_box(b"ipma", 0, 0, &ipma)].concat(),
+        );
+
+        let mut hdlr = vec![0u8; 4];
+        hdlr.extend_from_slice(b"pict");
+        hdlr.extend_from_slice(&[0; 13]); // reserved, empty name
+        let mut meta = full_box(b"hdlr", 0, 0, &hdlr);
+        meta.extend(full_box(b"pitm", 0, 0, &1u16.to_be_bytes()));
+        meta.extend(iinf);
+        if !tiles.is_empty() {
+            let mut r = 1u16.to_be_bytes().to_vec();
+            r.extend_from_slice(&(tiles.len() as u16).to_be_bytes());
+            for t in &tiles {
+                r.extend_from_slice(&(*t as u16).to_be_bytes());
+            }
+            meta.extend(full_box(b"iref", 0, 0, &bx(b"dimg", &r)));
+        }
+        meta.extend(iprp);
+        if let (Some(id), Some(len)) = (exif_id, self.exif_len) {
+            // iloc v0: offset_size 4, length_size 4, base_offset_size 0; one item
+            let mut l = vec![0x44, 0x00];
+            l.extend_from_slice(&1u16.to_be_bytes());
+            l.extend_from_slice(&(id as u16).to_be_bytes());
+            l.extend_from_slice(&[0, 0]); // data reference index
+            l.extend_from_slice(&1u16.to_be_bytes());
+            l.extend_from_slice(&0u32.to_be_bytes());
+            l.extend_from_slice(&len.to_be_bytes());
+            meta.extend(full_box(b"iloc", 0, 0, &l));
+        }
+        let mut out = ftyp(&self.brand, &[b"mif1", b"miaf"]);
+        out.extend(full_box(b"meta", 0, 0, &meta));
+        if self.sequence {
+            out.extend(bx(b"moov", &[]));
+        }
+        out.extend(bx(b"mdat", &[0xAB; 32]));
+        out
+    }
 }
 
 pub fn gif_stub() -> Vec<u8> {

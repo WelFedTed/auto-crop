@@ -18,6 +18,7 @@ pub fn codec_err(e: auto_crop_codecs::CodecError) -> ErrKind {
         C::Unsupported | C::NotDecodable(_) | C::UnsupportedFeature(_) => {
             ErrKind::UnsupportedFormat
         }
+        C::HevcDecoderMissing => ErrKind::HevcDecoderMissing,
         C::Corrupt(_) => ErrKind::Corrupt,
         C::TooLarge(_) | C::LimitExceeded { .. } => ErrKind::TooLarge,
         // The early slice reported these as Internal and the UI has copy for that code only.

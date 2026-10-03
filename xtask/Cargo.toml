@@ -10,6 +10,11 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+# Run the hostile-file corpus and the fuzz-seed replay through libheif and dav1d too:
+# `cargo run -p xtask --features heif -- make-hostile --only avif` (needs `cargo xtask build-native`).
+heif = ["auto-crop-codecs/heif"]
+
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true

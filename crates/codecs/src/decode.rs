@@ -18,7 +18,9 @@ pub struct Decoded {
     /// Pixels with the EXIF orientation already applied.
     pub raster: Raster,
     pub format: Format,
-    /// The EXIF orientation found (1 = none), already applied to `raster`.
+    /// The EXIF orientation found (1 = none), already applied to `raster`. For HEIC and AVIF this
+    /// is the turn that `irot` and `imir` add up to, applied by libheif; the Exif tag of such a
+    /// file is ignored.
     pub exif_orientation: u8,
     pub icc: Option<Vec<u8>>,
     /// Bits per sample of the source (the raster is always 8-bit until the 16-bit `Raster` of
@@ -40,7 +42,7 @@ fn limit_err(limit: Limit, actual: u64, cap: u64) -> CodecError {
 /// caller can report the real size of a refused image).
 pub fn probe_with(bytes: &[u8], limits: &DecodeLimits) -> Result<Probe, CodecError> {
     guard_item(|| {
-        let (format, h) = sniff_and_parse(bytes, limits)?;
+        let (format, h) = sniff_and_parse(bytes, limits, true)?;
         Ok(probe_of(format, &h))
     })
 }
@@ -50,9 +52,19 @@ pub fn probe(bytes: &[u8]) -> Result<Probe, CodecError> {
     probe_with(bytes, &DecodeLimits::default())
 }
 
-fn sniff_and_parse(bytes: &[u8], limits: &DecodeLimits) -> Result<(Format, Header), CodecError> {
+/// `probing` admits the formats that have a header walk but no decoder in this build (HEIC and
+/// AVIF without the `heif` feature), so a caller can read their size before saying "cannot decode".
+fn sniff_and_parse(
+    bytes: &[u8],
+    limits: &DecodeLimits,
+    probing: bool,
+) -> Result<(Format, Header), CodecError> {
     let format = sniff(bytes).ok_or(CodecError::Unsupported)?;
-    if !format.is_decodable() {
+    if !(if probing {
+        format.is_probeable()
+    } else {
+        format.is_decodable()
+    }) {
         return Err(CodecError::NotDecodable(format));
     }
     let cap = limits.file_cap(format);
@@ -117,8 +129,12 @@ pub(crate) fn precheck(
     bytes: &[u8],
     limits: &DecodeLimits,
 ) -> Result<(Format, Header), CodecError> {
-    let (format, h) = sniff_and_parse(bytes, limits)?;
+    let (format, h) = sniff_and_parse(bytes, limits, false)?;
     check_size(h.width, h.height, limits)?;
+    if let Some(info) = &h.heif {
+        // The decoder works at the `ispe` size, before the clean aperture crops it.
+        check_size(info.ispe.0, info.ispe.1, limits)?;
+    }
     if let Some(reason) = &h.unsupported {
         return Err(CodecError::UnsupportedFeature(reason.clone()));
     }
@@ -169,6 +185,14 @@ pub(crate) fn decode_raw(
     apply_orientation: bool,
 ) -> Result<Decoded, CodecError> {
     let (format, h) = precheck(bytes, limits)?;
+
+    // HEIC and AVIF go through libheif, which applies `irot`, `imir` and `clap` itself: the pixels
+    // come back upright whatever `apply_orientation` says, and `exif_orientation` reports the turn
+    // that was applied (never the Exif tag, which is informational in HEIF and would double-rotate).
+    #[cfg(feature = "heif")]
+    if matches!(format, Format::Heic | Format::Avif) {
+        return crate::heif::decode(bytes, &h, limits);
+    }
 
     let mut reader = ImageReader::with_format(Cursor::new(bytes), image_format(format));
     reader.limits(limits.image_limits(h.width, h.height));
