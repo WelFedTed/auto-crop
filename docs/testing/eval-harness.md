@@ -25,6 +25,8 @@ cargo xtask synth --generator rust --suite smoke --max-edge 1024 --out target/sy
 
 Keep one seed back until the constants are frozen and run it once. Compare base and head with `eval compare` on each set, not only on the default smoke set; `docs/perf/detector-baseline.md` records the protocol and its limits.
 
+**Looking at what the detector does.** `cargo run --release -p auto-crop-eval --example manifest_report -- MANIFEST OUTDIR [key=value ...] [--failures] [--silent] [--limit N] [--lines] [--err]` writes a contact sheet (ground truth white, detection coloured by verdict) and a list that says, per image, the IoU and whether any candidate the detector scored had IoU >= 0.90 (a ranking problem) or none did (a candidate-generation problem); `id=a,b` selects images. `folder_report` does the same for a folder without ground truth. Both write only into the directory you name; point them at a private folder only inside that folder's own gitignored area.
+
 ## Commands
 
 | Command | What it does |

@@ -12,7 +12,70 @@ Two measurements of the classical page detector (`auto_crop_imgproc::detect::det
 - Large synthetic gains can come from fitting the generator's habits. The constants of the new detector were chosen on two seeds, checked on a third, and then run once on a fourth that did not exist until they were frozen (see "Other seeds and sizes"); it was also run on other image sizes. That guards against tuning to one seed; it cannot rule out a quirk shared by every seed of the generator, which is why the caveats below matter more than the numbers.
 - The confidence is still an uncalibrated heuristic; the Good/Check/Failed mapping (Good at score >= 0.90 with no forced band, Failed below 0.60 or when it reports no quad) is the interim Balanced cutoff from PLAN 7.4, not a calibrated operating point.
 - Aggregates only. No per-image rows are recorded here.
-- **The update directly below measures the same detector on the independent Python generator and the numbers do not carry over. Everything after it ("Method" onwards) was measured on the Rust stand-in generator.**
+- **The 2026-10-04 update below changes the detector for long thin receipts; the 2026-10-03 update after it measures the detector as it was before that change.** The 2026-10-03 update measures the same detector on the independent Python generator and the numbers do not carry over. Everything after it ("Method" onwards) was measured on the Rust stand-in generator.**
+
+## Update 2026-10-04: long thin receipts and pages whose short ends are faint, cut or hidden
+
+The Python suites showed the detector failing most on long and strip receipts (aspect 4:1 to 11:1), pages cut by the frame and look-alike desks; the owner's own photos showed the same (long receipts on wood or textured desks, receipts held in a hand where a table or banner inside the receipt was returned instead of the receipt). This change targets the first two without touching the constants the stand-in tuning chose. Base is commit `ec20442`; the head is this change. Same harness, same metrics, same machine (Windows 11, release build). **Aggregates only; the real-file numbers rest on approximate hand labels (see below).**
+
+### What changed (`crates/imgproc/src/detect.rs`, `detect/strip.rs`, `detect/edges.rs`)
+
+1. **Strip candidates** (`detect/strip.rs`, new). Diagnosis first: on the 21 failing full-frame `aspect=long` images of the Python smoke set, both long edges were found as lines for all of them (0.1 to 4 px from the truth); the two short ends were not (a short side of a thin receipt has under a few dozen edge points, below the Hough and inlier minimums, and the desk texture lifts the edge threshold). So a pair of near-parallel long lines (within 12 degrees, covered by edge points along at least 1.8 widths) now proposes a page without needing its ends as lines: the strip between them is compared with the colour just beyond each long edge all along its length (the interior of each long edge is judged by the strip centre or by the margin just inside it, whichever differs more, so a dark logo or a dense row of print does not break the run); the page is the run where that contrast holds, bridged over short dips, never extended more than 0.15 widths beyond the stretch where both edges carry edge points (past a receipt's end the contrast usually continues into a neighbouring sheet) unless the run reaches the frame. Ends are sharpened to the strongest inside/outside colour change and confirmed by that contrast instead of by an edge. A run that reaches the frame is a page cut by it: the corners are where the long lines leave the frame, the candidate is flagged `PartialFrame`, and both ends may be cut (a receipt running out of the top and the bottom), which the four-line quads could not express. Only the 16 best covered pairs get a colour profile (cost).
+2. **Conservative scoring of strips.** A strip candidate is never auto-accepted (score capped at 0.8, forced Check), competes at 85% of its rank, and is not a "rival" that holds a clean quad. Without these the held answers on the stand-in changed for the worse (a text block found as a strip beat a worse wrong answer; 15 of 1,728 correct Good results became Check).
+3. **Candidate selection ignores candidates that could never be answered** (score under 0.6 or ImplausibleQuad). Before, the top-ranked candidate by `score x (0.4 + area)` could be such a one and the detector then reported "no quad" although a usable candidate was in the list (the case in real photos of long receipts).
+4. **A patch inside a bigger page.** When the chosen quad is already held for review and a bigger viable quad (score >= 0.6 and >= 0.75 of the chosen score) contains it, that one is chosen (still held). This is the table, banner or text block chosen instead of the receipt. It is not applied to a chosen quad that is clean (a page next to distractors that happen to bridge to a bigger quad: that cost 7 correct results on the stand-in until restricted).
+5. **A container of several items is held.** Two or more separate, well supported (>= 0.9) quads of 12 to 60% of its area inside the chosen one turn a Good into Check (three photos on a mat were auto-accepted as one page). Multi-item splitting stays M10; this only keeps such an image from being accepted as a single page.
+6. Small: the minimum separation of the two long sides drops from 7% to 3% of the long frame edge (a 12 to 25 px wide strip at 320 to 512 px), the odd-aspect hold moves from 12:1 to 20:1, `trace`/`trace_lines` expose the candidates for the new `manifest_report` example (`crates/eval/examples`, a local contact sheet with ground truth, candidates and lines drawn).
+
+### Results (aggregates; base -> head)
+
+`eval compare` base vs head is PASS on every set below. Silent failures = auto-accepted with IoU < 0.90.
+
+| Set | Images | Mean IoU | Failure rate | Auto-accepted | Silent failures |
+|---|---|---|---|---|---|
+| Python full (seed default, 512 px) | 5,200 | 0.632 -> 0.696 | 44.4% -> 40.5% | 1,456 -> 1,468 | 31 -> 31 |
+| Python mid-d (seed 424242, 1,000, made during development) | 1,000 | 0.626 -> 0.689 | 46.4% -> 43.4% | 288 -> 290 | 7 -> 7 |
+| Python smoke (default) | 200 | 0.604 -> 0.696 | 45.5% -> 41.5% | 39 -> 39 | 0 -> 0 |
+| Python smoke-b (seed 1234567) | 200 | 0.635 -> 0.725 | 46.0% -> 40.5% | 53 -> 53 | 2 -> 2 |
+| Python smoke-c (seed 987654321) | 200 | 0.598 -> 0.705 | 47.5% -> 42.5% | 49 -> 50 | 1 -> 1 |
+| Rust stand-in full | 5,184 | 0.979 -> 0.980 | 1.85% -> 1.72% | 4,558 -> 4,556 | 6 -> 6 |
+| Rust stand-in mid-b (seed 1234567) | 1,728 | 0.978 -> 0.979 | 1.91% -> 1.79% | 1,531 -> 1,530 | 1 -> 1 |
+| Rust stand-in smoke / smoke-b | 200 / 200 | 0.977 -> 0.981 / 0.979 -> 0.979 | 1.5% -> 0.5% / 2.5% -> 2.5% | 175 -> 175 / 182 -> 182 | 0 -> 0 / 0 -> 0 |
+
+The stand-in suites (the previous tuning) are not worse on any gated slice. Python full by slice (mean IoU, failure rate; the document and normal-light slices were good before and are not worse):
+
+| Slice | n | Base | Head | | Slice | n | Base | Head |
+|---|---|---|---|---|---|---|---|---|
+| aspect = document | 2,082 | 0.781, 29.1% | 0.793, 28.5% | | background = wood | 831 | 0.744, 31.2% | 0.793, 27.9% |
+| aspect = receipt | 1,560 | 0.675, 39.9% | 0.724, 37.2% | | background = stone | 729 | 0.670, 39.0% | 0.754, 32.4% |
+| aspect = long | 1,090 | 0.456, 63.8% | 0.582, 55.5% | | background = white-desk | 831 | 0.467, 60.8% | 0.569, 56.0% |
+| aspect = strip | 468 | 0.237, 82.1% | 0.440, 69.2% | | background = tile | 624 | 0.478, 68.9% | 0.539, 66.2% |
+| framing = full | 4,576 | 0.694, 36.8% | 0.757, 32.5% | | lighting = normal | 1,768 | 0.640, 44.0% | 0.702, 40.3% |
+| framing = partial | 624 | 0.177, 99.8% | 0.249, 98.9% | | lighting = low-contrast | 832 | 0.648, 41.8% | 0.726, 38.2% |
+
+Aspect long / strip on the other Python sets (failure rate): smoke 59.5% / 94.4% -> 52.4% / 77.8%; smoke-b 61.9% / 94.4% -> 52.4% / 72.2%; smoke-c 69.0% / 88.9% -> 61.9% / 72.2%; mid-d 71.2% / 84.4% -> 64.4% / 73.3%.
+
+**Real photos (35 files in a private folder, never committed, no ground truth).** 15 single-page files were labelled by eye (approximate visual estimates, about +-1 to 2% of the image size and worse for pages held in a hand; multi-item files skipped), so these numbers are indicative only: mean IoU 0.537 -> 0.650, IoU >= 0.90 on 4 -> 5 of 15, answered with no quad at all 4 -> 1, auto-accepted 3 -> 3 (one of them at IoU 0.89 against an approximate label). Over all 35 files: the three-photo scan that was auto-accepted as one page is now held, and five files that returned no quad now return a held quad (three of them are among the labelled ones). The remaining wrong answers are held, none is newly Good.
+
+**Speed**, single thread, whole `eval run` per image (decode included, noisy machine, three alternating runs each): 480 px stand-in 36.5 to 50.4 ms -> 47.4 to 73.8 ms, 320 px Python 17.9 to 22.7 ms -> 22.2 to 30.2 ms. Roughly +25 to 35% (the strip search: line pairs, colour profile of the 16 best). An earlier version without the pair limit cost 3x on the 320 px set.
+
+### What did not work
+
+- **Ranking by extent (longer diagonal) instead of area**, so a thin page is not outranked by a small fat distractor: mean IoU up on Python, but the stand-in failure rate rose (1.5% -> 2.0% and 2.5% -> 4.0%) and Python smoke failures rose. Dropped; the tuned ranking stays.
+- **Looser paper-colour match** (4 -> 7 grey levels) to recognise "paper beyond" edges inside a page: low-contrast slices got worse on both generators (stand-in 4.5% -> 6.1%). Reverted.
+- **Another solid item next to the chosen page makes it Check** (score >= 0.6 to 0.8, area >= 25%): no change in silent failures on Python, 3 to 10 fewer Good on the stand-in. Dropped; the container rule (item 5) with strict children costs nothing on the stand-in (looser children, 0.7 and 6%: 175 -> 165 Good).
+- **Promoting the bigger containing quad at looser thresholds** (0.5 and 0.5): Python failure rate up by 2 to 6 points. Without the "chosen quad is already held" condition: 7 correct stand-in results lost.
+- **Widening each line's covered stretch to the span of all its runs**: slightly worse on Python and no gain on the real photos.
+- Not tried: skin-coloured blobs as occlusion, a paper-colour region segmentation for textured desks, a higher-resolution or anisotropic proxy for thin pages (the 640 px proxy was not what failed: the long edges were found), a model-based end detector.
+
+### Remaining weak spots and caveats
+
+- **The numbers are synthetic and share assumptions with the detector** (the strip search uses flat paper against a desk; generator strips are 12 to 25 px wide at 320 to 512 px, far thinner in pixels than a real receipt in a phone photo). Nothing here claims a G-gate or B6.
+- Pages cut by the frame (`framing = partial`) remain 98.9% "failures" by definition (the truth leaves the frame; an in-frame answer scores the visible share). The detector now returns the visible part of a long receipt cut at both ends as a held `PartialFrame` quad where it used to return nothing.
+- Of the 100 failing full-frame `aspect = long` images of the mid-d set, 26 had a candidate at IoU >= 0.90 that was not chosen (ranking), 35 had one at 0.75 to 0.90 (mostly one end of the strip placed 30 to 90 px too far, into a neighbouring sheet or into clutter, with sub-pixel long sides), 39 had none (faint receipts on dark mat, white desk and tile).
+- White desk and tile stay above 55% failures; strips at 8:1 and beyond stay near 70%.
+- Real receipts held in a hand: the receipt is now usually among the held candidates; the wrong one (a table or text block, or a quad that stops at a finger) is still sometimes chosen.
+- The 200-image gate (`eval compare` at n = 200) is sensitive to one image in a gated slice; all nine comparisons above pass, but an earlier variant failed it on a single held image (-0.33 points on the png slice).
 
 ## Update 2026-10-03: the same detector on an independent generator (bad news)
 
