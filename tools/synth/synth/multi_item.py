@@ -729,9 +729,13 @@ def render_scene(spec: MultiSceneSpec, max_edge: int):
     # ground truth through the plane-to-picture transform
     quads = []
     for i in range(len(polys)):
-        pts = (polys[i] + ss_offset).astype(np.float64)
+        # `_paste` draws the polygon on a 3x grid whose index coordinates sit a third of a pixel
+        # inside the 1x ones; undo that, push the quad through the (index to index) picture
+        # transform, and move to the continuous convention (pixel i covers i to i+1) the
+        # harness uses.
+        pts = (polys[i] + ss_offset - 1.0 / 3.0).astype(np.float64)
         h3 = np.c_[pts, np.ones(4)] @ Hm.T
-        q = h3[:, :2] / h3[:, 2:3]
+        q = h3[:, :2] / h3[:, 2:3] + 0.5
         quads.append(q / np.array([W, H]))
     # contrast tag: how different is the bed from the items' outer edge colour
     bg_pic = cv2.resize(bg, (W, H), interpolation=cv2.INTER_AREA) if flat else bg

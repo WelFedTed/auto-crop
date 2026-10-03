@@ -54,6 +54,20 @@ One JSON object per line:
 
 `quad` is the ground-truth page outline: TL, TR, BR, BL of the upright item, clockwise in a y-down frame, normalised to the EXIF-oriented image (x by width, y by height); it may leave the frame. `image` is relative to the manifest directory (absolute paths and `..` are rejected). Each tag key becomes a slice axis. A `scene_id` must not appear in two splits. Unknown fields are ignored.
 
+## Multi-item scenes (`run --multi`, M10.56)
+
+A manifest row may carry `items`, a list of quads in the same convention as `quad` (which must then equal the first of them; single-item manifests are unchanged). `run --multi` scores a **multi-item predictor** (`items[:CUTOFF]` is `imgproc::items::detect_items` with the receipts profile; `oracle` returns the truth) and writes `auto-crop-eval-multi-results/1`:
+
+```
+cargo xtask synth --suite multi-smoke                      # 160 scenes (tools/synth/multi_item.py)
+cargo run --release -p auto-crop-eval -- run --multi --manifest target/synth/multi-smoke/manifest.jsonl \
+    --predictor items --out multi.json --suite multi-smoke
+```
+
+Per scan: the predictor's items are matched to the ground-truth items one to one, greedily by descending IoU, at IoU 0.9 (both clipped to the frame, so a clipped item is scored on its visible part). Reported over scans and over items: **exact count** (share of scans with the right number of items), **item recall** (matched over ground-truth items) and **precision** (matched over predicted items), mean IoU of matched pairs, `perfect` scans (every item matched, no extra), the auto-accept rate, `held_but_right` (perfect scans that were not auto-accepted), and the **silent wrong split**: an auto-accepted scan whose item set is wrong (another count, or an item below IoU 0.9), as k over the auto-accepted scans with a one-sided 95% Clopper-Pearson bound. **Routing** is the share of `touching` and `overlap` scans that were not auto-accepted (Wilson 95% interval). Slices follow the usual rules (n < 30 suppressed, 30 to 79 advisory, 80 and up gated). The per-scan rows carry `gt_best_iou` (the best IoU of any prediction with each ground-truth item) for diagnostics; they are local only. Results are byte-identical at 1 and 8 threads (tested with the oracle and, through files on disk, with the real detector). The metric module (`multi.rs`) imports no project crate, like `geom` and `metrics`.
+
+Local aids (never publish their output when the input is the owner's `_data/`): `cargo run --release -p auto-crop-eval --example multi_report -- <folder or manifest.jsonl> <out dir>` draws every detected item (and the ground truth when there is a manifest) on a preview and writes `index.html`; `--example items_debug -- <image> [mask.png]` prints the detector's diagnostics and writes a picture of what the flood fill saw.
+
 ## Predictor protocol
 
 The Rust trait is `Predictor { name, predict(&PredictInput) -> Result<Prediction, PredictError> }`; a predictor sees the image path and size, never the ground truth. Any tool can instead write a **JSON-lines predictions file** and be scored with `--predictor jsonl:preds.jsonl`:

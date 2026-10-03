@@ -153,7 +153,10 @@ fn touching_photos_are_never_accepted() {
         .map(|r| r.code)
         .collect();
     assert!(
-        codes.contains(&ReasonCode::TouchingItems) || codes.contains(&ReasonCode::ItemsTooClose),
+        codes.contains(&ReasonCode::TouchingItems)
+            || codes.contains(&ReasonCode::ItemsTooClose)
+            // On a white bed the white borders hide the touch; the scan is held as low contrast.
+            || codes.contains(&ReasonCode::LowContrastEdge),
         "{codes:?}"
     );
 }
@@ -330,4 +333,107 @@ fn thirty_three_small_items_are_capped_and_flagged() {
             .any(|r| r.code == ReasonCode::TooManyItems)
     );
     assert!(!det.auto_accept(0.5));
+}
+
+#[test]
+fn degenerate_inputs_never_panic_and_never_invent_items() {
+    // Sizes around the guards, flat images and pure noise.
+    for (w, h) in [
+        (1u32, 1u32),
+        (3, 3),
+        (23, 40),
+        (24, 24),
+        (64, 8),
+        (8, 64),
+        (65, 65),
+        (130, 90),
+    ] {
+        for fill in [[0u8, 0, 0], [255, 255, 255], [128, 40, 200]] {
+            let img = Raster::filled(w, h, fill);
+            let det = detect_items(&img, &opts());
+            assert!(det.items.is_empty(), "{w}x{h} {fill:?}");
+            assert!(!det.auto_accept(0.5));
+        }
+    }
+    let mut noise = Raster::new(200, 160);
+    for y in 0..160u32 {
+        for x in 0..200u32 {
+            let v = ((hash(x, y, 3) + 0.5) * 255.0) as u8;
+            noise.set_pixel(x, y, [v, v.wrapping_mul(3), v.wrapping_add(90)]);
+        }
+    }
+    let det = detect_items(&noise, &opts());
+    assert!(!det.auto_accept(0.5), "noise must never be accepted");
+}
+
+#[test]
+fn the_result_is_identical_at_one_and_eight_threads() {
+    let items = [
+        photo((130.0, 120.0), 150.0, 100.0, 7.0),
+        photo((350.0, 130.0), 130.0, 150.0, -11.0),
+        photo((200.0, 310.0), 160.0, 110.0, 0.0),
+    ];
+    let img = scene(520, 420, [20, 22, 24], &items, true);
+    let run = |threads: usize| {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build()
+            .expect("pool");
+        pool.install(|| format!("{:?}", detect_items(&img, &opts())))
+    };
+    assert_eq!(run(1), run(8));
+}
+
+#[test]
+fn a_white_frame_around_a_dark_table_is_not_the_bed() {
+    let items = [
+        photo((130.0, 120.0), 150.0, 100.0, 4.0),
+        photo((330.0, 130.0), 130.0, 150.0, -6.0),
+    ];
+    let inner = scene(440, 300, [18, 18, 20], &items, true);
+    let mut framed = Raster::filled(480, 340, [250, 250, 250]);
+    for y in 0..300u32 {
+        for x in 0..440u32 {
+            framed.set_pixel(x + 20, y + 20, inner.pixel(x, y));
+        }
+    }
+    let det = detect_items(&framed, &opts());
+    assert_eq!(det.items.len(), 2, "{:?}", det.scan_flags);
+    // Quads are mapped back to the whole picture: the first print is near (150, 140) of 480x340.
+    let c = det.items[0].quad.iter().map(|p| p.x).sum::<f64>() / 4.0 * 480.0;
+    assert!((c - 150.0).abs() < 8.0, "{c}");
+}
+
+#[test]
+fn candidates_become_auto_items_and_the_core_triage_agrees_with_auto_accept() {
+    use auto_crop_core::{EditState, ScanTriage, scan_triage};
+    let items = [
+        photo((130.0, 120.0), 150.0, 100.0, 7.0),
+        photo((350.0, 130.0), 130.0, 150.0, -11.0),
+        photo((200.0, 310.0), 160.0, 110.0, 0.0),
+    ];
+    let img = scene(520, 420, [20, 22, 24], &items, true);
+    let det = detect_items(&img, &opts());
+    let mut state = EditState::default();
+    state
+        .redetect(det.to_items(1), (520, 420))
+        .expect("redetect");
+    assert_eq!(state.items.len(), det.items.len());
+    let triage = scan_triage(&state, 0.95);
+    assert_eq!(triage == ScanTriage::Approved, det.auto_accept(0.95));
+    // A held scan stays held through the core rule.
+    let framed = scene(
+        520,
+        400,
+        [238, 238, 238],
+        &[
+            photo((150.0, 200.0), 200.0, 150.0, 0.0),
+            photo((350.5, 200.0), 200.0, 150.0, 0.0),
+        ],
+        true,
+    );
+    let held = detect_items(&framed, &opts());
+    let mut s2 = EditState::default();
+    s2.redetect(held.to_items(1), (520, 400)).expect("redetect");
+    assert_ne!(scan_triage(&s2, 0.95), ScanTriage::Approved);
 }

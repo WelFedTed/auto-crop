@@ -373,7 +373,7 @@ pub fn inspect_inside(q: &[P; 4], f: &Fields) -> Inside {
             if span >= 0.97 {
                 full_lines.push(s);
             }
-            if span >= 0.55 && touches {
+            if span >= 0.55 && span < 0.97 && touches {
                 any_line = true;
             }
         }
@@ -404,7 +404,7 @@ pub fn inspect_inside(q: &[P; 4], f: &Fields) -> Inside {
                 }
             }
         }
-        if !lines.is_empty() || any_line {
+        if any_line {
             verdict = Inside::Line;
         }
     }

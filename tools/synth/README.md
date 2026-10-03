@@ -10,6 +10,8 @@ It renders known-text pages and receipts, photographs them with a pinhole camera
 cargo xtask synth-setup                     # once: target/synth-venv from requirements.lock (--require-hashes), Python >= 3.12
 cargo xtask synth --suite smoke             # 200 images -> target/synth/smoke (about 4.8 MB of images)
 cargo xtask synth --suite full              # 5,200 images -> target/synth/full (never archived, never committed)
+cargo xtask synth --suite multi-smoke       # 160 multi-item scenes -> target/synth/multi-smoke (about 4.5 MB)
+cargo xtask synth --suite multi-full        # 1,200 multi-item scenes -> target/synth/multi-full (never archived)
 cargo xtask synth --suite smoke --generator rust   # the old Rust STAND-IN writer, as a fallback
 cargo xtask check-splits                    # a scene or seed in two splits fails
 cargo xtask synth-check                     # unit tests, inverse-warp SSIM, decoder variants, Tesseract CER
@@ -29,6 +31,14 @@ Directly (from `tools/synth` with the environment active): `python -m synth --se
 | File | JPEG q40-95, PNG, TIFF, WebP; EXIF orientation 1 to 8 with pre-rotated pixels; sRGB and Display P3 (own ICC profile) | `encode.py`, `icc.py` |
 
 Tags (each tag value is a slice; every value has at least 468 images in the full suite, floor 200 by M1.35): `aspect` (document, receipt 2:1 to 4:1, long 4:1 to 8:1, strip over 8:1), `paper`, `background`, `ink` (normal, faded), `lighting`, `clutter`, `tilt` (max of pitch and yaw: 0-10, 10-30, 30-45), `rotation` (upright to 15, tilted to 45, any), `framing` (full, partial), `curl`, `blur`, `noise`, `format`, `exif` (1 to 8), `colorspace`. Quotas are exact (balanced shuffles, `plan.py`), and `python -m synth quotas MANIFEST` checks them.
+
+## Multi-item scenes (M10.51)
+
+`synth/multi_item.py` places 2 to 8 items on one picture: photographic prints (3:2, 4:3, 5:4 and square, with white, Polaroid-style or no borders, procedural content with a wandering horizon), receipts (the known-text receipts of `page.py`, up to 6:1) and ID-1 cards. The bed is a flatbed lid (white, grey or black, with a vignette, platen frame shadows, 1 to 5 px edge lines, dust and the odd hair) or a desk photographed from slightly off-axis (wood, stone, fabric, dark mat; a keystone homography). Items cast soft shadows and carry a thin darker rim. Every item has an **analytic ground-truth quad** (TL, TR, BR, BL of the upright item, clockwise, y down, normalised; for desks through the plane-to-picture homography), listed in `items`; `quad` is the first item in reading order, so a single-item reader still gets a valid quad. Items are scored against their visible part when the frame clips them.
+
+Tags: `count` (2, 3, 4, 5-6, 7-8), `separation` of the closest pair (`separated` at least 3.5% of the shorter side apart, `close` 1.5% to 3.2%, `touching` 0 to 0.8%, `overlap`; a layout whose closest pair falls between the bands is redrawn, and a test recomputes the class from the quads), `bed`, `kind` (photos, receipts, cards, mixed), `clip` (none, partial), `contrast` (`low` when the bed is within 28 grey levels of the items' outer edge colour, computed from the pixels), `rotation`, `format`. Quotas are exact (balanced shuffles); splits are by scene hash. Extra fields (ignored by the harness): `item_count`, `visible_fractions`, `min_gap_pct`, `item_kinds`, `angles_deg`, `bed_luma`.
+
+Not rendered: hands and fingers, glare, items stacked in more than one layer, curl, text-bearing photos, real scanner banding. White-on-white is covered only as white-bordered prints and white receipts on a white lid. Smoke: 160 scenes at 640 px, JPEG, 4.5 MB; full: 1,200 at 800 px. Develop on one seed and check on others (`--seed N --name NAME --out DIR`); the same seed gives identical bytes at any `--jobs` (tested).
 
 ## Manifest
 
@@ -57,4 +67,4 @@ The classical detector scores mean IoU 0.98 and 1.85% failures on the Rust stand
 
 ## Known gaps
 
-No multi-item scenes (M10.51), no negatives (pages absent), no hands or fingers, no glare, no thermal-paper dot structure at pixel level, no handwriting, no real photographs or real scanner artefacts, curl is a smooth lift with no self-occlusion, one page per picture, backgrounds are flat-on to the camera. A detector that does well here is not thereby good on photographs.
+No negatives (pages absent), no hands or fingers, no glare, no thermal-paper dot structure at pixel level, no handwriting, no real photographs or real scanner artefacts, curl is a smooth lift with no self-occlusion, one page per picture, backgrounds are flat-on to the camera. A detector that does well here is not thereby good on photographs.

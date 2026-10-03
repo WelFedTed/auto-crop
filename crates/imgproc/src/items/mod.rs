@@ -32,6 +32,7 @@ mod bed;
 mod color;
 mod frame;
 mod geom;
+pub mod handoff;
 mod label;
 mod refine;
 mod segment;
@@ -192,7 +193,25 @@ pub struct ItemsDetection {
     pub diagnostics: Diagnostics,
 }
 
+impl ItemCandidate {
+    /// The candidate as an auto `Item` (id 0: the engine assigns ids, `EditState::redetect`),
+    /// ready to feed `redetect`. Its confidence carries the hold reasons.
+    pub fn to_item(&self, pipeline_ver: u32) -> auto_crop_core::Item {
+        auto_crop_core::items::auto_item(
+            auto_crop_core::QuadWarp::new(self.quad),
+            pipeline_ver,
+            Some(self.confidence.clone()),
+        )
+    }
+}
+
 impl ItemsDetection {
+    /// Every candidate as an auto item, in reading order. A `Cluster` is included as one item
+    /// whose confidence is forced to Check, so the scan is held; it is never a Good item.
+    pub fn to_items(&self, pipeline_ver: u32) -> Vec<auto_crop_core::Item> {
+        self.items.iter().map(|i| i.to_item(pipeline_ver)).collect()
+    }
+
     /// The confidence of the scan: the minimum score over the items, forced to `Check` when any
     /// item or the scan itself is held, `Failed` when nothing was found.
     pub fn scan_confidence(&self) -> Confidence {
@@ -269,6 +288,20 @@ fn pieces_overlap(pieces: &[Piece]) -> bool {
 ///
 /// This is the one function the engine needs; its signature is stable.
 pub fn detect_items(src: &Raster, opts: &ItemsOptions) -> ItemsDetection {
+    detect_items_timed(src, opts, &mut Vec::new())
+}
+
+/// [`detect_items`] that also appends the cumulative milliseconds at the end of each stage to
+/// `timings` (`proxy`, `frame`, `lab`, `model`, `prepare`, `segment`, `blobs`, `gaps`, `stability`,
+/// `residual`, `finish`), for benchmarks (ROADMAP M10.61). The detection itself does not depend on
+/// the clock.
+pub fn detect_items_timed(
+    src: &Raster,
+    opts: &ItemsOptions,
+    timings: &mut Vec<(&'static str, f64)>,
+) -> ItemsDetection {
+    let t0 = std::time::Instant::now();
+    let mut mark = |name: &'static str| timings.push((name, t0.elapsed().as_secs_f64() * 1000.0));
     let proxy = if src.width.max(src.height) > opts.proxy_edge {
         resize_to_fit(src, opts.proxy_edge)
     } else {
@@ -276,9 +309,11 @@ pub fn detect_items(src: &Raster, opts: &ItemsOptions) -> ItemsDetection {
     };
     // A uniform frame around the picture (a white margin, a scanner border) is not the bed: cut
     // it off, look for items inside, and map the quads back (ROADMAP M10.02).
+    mark("proxy");
     let trim = frame::find(&proxy);
+    mark("frame");
     if trim == [0; 4] {
-        return detect_in(&proxy, opts, [false; 4]);
+        return detect_in(&proxy, opts, [false; 4], &mut mark);
     }
     let (pw, ph) = (proxy.width as usize, proxy.height as usize);
     let (x0, y0) = (trim[3], trim[0]);
@@ -288,6 +323,7 @@ pub fn detect_items(src: &Raster, opts: &ItemsOptions) -> ItemsDetection {
         &cropped,
         opts,
         [trim[0] > 0, trim[1] > 0, trim[2] > 0, trim[3] > 0],
+        &mut mark,
     );
     let map = |p: &mut Pt| {
         p.x = (x0 as f64 + p.x * cw as f64) / pw as f64;
@@ -304,7 +340,12 @@ pub fn detect_items(src: &Raster, opts: &ItemsOptions) -> ItemsDetection {
     det
 }
 
-fn detect_in(proxy: &Raster, opts: &ItemsOptions, frame_side: [bool; 4]) -> ItemsDetection {
+fn detect_in(
+    proxy: &Raster,
+    opts: &ItemsOptions,
+    frame_side: [bool; 4],
+    mark: &mut dyn FnMut(&'static str),
+) -> ItemsDetection {
     let (w, h) = (proxy.width as usize, proxy.height as usize);
     let mut diag = Diagnostics {
         proxy_width: proxy.width,
@@ -327,13 +368,16 @@ fn detect_in(proxy: &Raster, opts: &ItemsOptions, frame_side: [bool; 4]) -> Item
         };
     }
     let lab_full = color::to_lab(proxy);
+    mark("lab");
     let model = bed::BedModel::learn(&lab_full.blurred(1.0));
     diag.bed_sides_agreeing = model.triage.sides_agreeing;
     diag.bed_cells = model.cells;
     diag.bed_spread = model.triage.spread;
+    mark("model");
     let mut planes = segment::prepare(&lab_full, &model);
     planes.frame_side = frame_side;
     diag.noise = planes.noise;
+    mark("prepare");
     let seg = segment::segment(&planes, 1.0, opts.min_area_frac);
     diag.edge_threshold = seg.t_edge;
     diag.components = seg.n_components;
@@ -357,6 +401,7 @@ fn detect_in(proxy: &Raster, opts: &ItemsOptions, frame_side: [bool; 4]) -> Item
         lab: &planes.lab,
     };
 
+    mark("segment");
     let mut work: Vec<Working> = Vec::new();
     for blob in &seg.blobs {
         add_blob(
@@ -382,6 +427,7 @@ fn detect_in(proxy: &Raster, opts: &ItemsOptions, frame_side: [bool; 4]) -> Item
     }
 
     // Pairwise gaps between rectangles.
+    mark("blobs");
     let mut min_gap: Option<f64> = None;
     let mut too_close = vec![false; work.len()];
     for i in 0..work.len() {
@@ -401,6 +447,7 @@ fn detect_in(proxy: &Raster, opts: &ItemsOptions, frame_side: [bool; 4]) -> Item
     }
 
     // Stability re-runs.
+    mark("gaps");
     let mut stable = true;
     if opts.stability_check && !work.is_empty() {
         let base: Vec<[P; 4]> = seg.blobs.iter().map(|b| rect_quad(&b.rect)).collect();
@@ -425,6 +472,7 @@ fn detect_in(proxy: &Raster, opts: &ItemsOptions, frame_side: [bool; 4]) -> Item
     }
 
     // Crisp structure that no item explains (a missed low-contrast item, a hairline).
+    mark("stability");
     let unexplained = unexplained_edge(&seg, &work, w, h);
     if unexplained > 0.35 && !work.is_empty() {
         scan_reasons.push(reason(ReasonCode::LowContrastEdge));
@@ -436,6 +484,7 @@ fn detect_in(proxy: &Raster, opts: &ItemsOptions, frame_side: [bool; 4]) -> Item
     }
 
     // Per-item confidence.
+    mark("residual");
     let mut items: Vec<ItemCandidate> = work
         .into_iter()
         .map(|wk| finish_item(wk, &planes, w, h, opts.profile))
