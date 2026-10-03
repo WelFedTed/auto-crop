@@ -12,7 +12,9 @@ workflow run) the same checks also run on it, with a synthetic +10% head derived
 
 from __future__ import annotations
 
+import contextlib
 import copy
+import io
 import json
 import tempfile
 import unittest
@@ -28,7 +30,7 @@ BASE_IR = {
     "gungraun::kernels::resize::area_512x384_to_128x96": 9_804_512,
     "gungraun::kernels::warp::plain_512x384_to_256x352": 88_441_903,
     "gungraun::kernels::sauvola_w31::sauvola_w31_256x192": 12_345_678,
-    "gungraun::kernels::canary::histogram_x1000": 5_000_000,
+    "gungraun::kernels::canary::histogram_x100": 5_000_000,
 }
 
 
@@ -79,16 +81,17 @@ class Run:
         (d / "base.jsonl").write_text(base_text, encoding="utf-8")
         (d / "head.jsonl").write_text(head_text, encoding="utf-8")
         self.summary = d / "summary.md"
-        self.code = compare.main(
-            ["--base", str(d / "base.jsonl"), "--head", str(d / "head.jsonl"),
-             "--summary", str(self.summary), *extra]
-        )
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            self.code = compare.main(
+                ["--base", str(d / "base.jsonl"), "--head", str(d / "head.jsonl"),
+                 "--summary", str(self.summary), *extra]
+            )
 
     def __del__(self):
         self.dir.cleanup()
 
 
-CANARY = "gungraun::kernels::canary::histogram_x1000"
+CANARY = "gungraun::kernels::canary::histogram_x100"
 
 
 class Classify(unittest.TestCase):

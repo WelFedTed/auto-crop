@@ -136,18 +136,18 @@ fn nick_w31(gray: Vec<u8>) -> Vec<u8> {
 
 // ---- canary -------------------------------------------------------------------------------
 
-/// Repetitions of the histogram kernel for a canary percentage (`1000 + pct` for `pct` in 0..=100,
-/// so +10 is exactly 10% more kernel work).
+/// Repetitions of the histogram kernel for a canary percentage: `100 + pct` for `pct` in 0..=100,
+/// so +10 is 10% more kernel work (the fixed overhead outside the loop is far below 0.1%).
 fn canary_reps() -> u32 {
     let pct: u32 = std::env::var("AUTO_CROP_GATE_CANARY_PCT")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
-    1000 + pct.min(100)
+    100 + pct.min(100)
 }
 
 #[library_benchmark]
-#[bench::histogram_x1000(setup = make_gray)]
+#[bench::histogram_x100(setup = make_gray)]
 fn canary(gray: Vec<u8>) -> u64 {
     let mut acc = 0u64;
     for _ in 0..canary_reps() {

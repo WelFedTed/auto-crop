@@ -35,6 +35,7 @@ path = [
     "crates/imgproc/tests/fixtures/**",
     "tools/imgproc-oracles/requirements.txt",
     "tools/imgproc-oracles/requirements.lock",
+    "tools/perf_gate/fixtures/**",
     "**/*.proptest-regressions",
     "fuzz/regressions/**",
 ]
