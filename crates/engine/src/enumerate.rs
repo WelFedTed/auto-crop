@@ -12,12 +12,15 @@ pub const MAX_DEPTH: usize = 12;
 pub const MAX_FILES: usize = 20_000;
 
 /// File extensions this build opens (matched case-insensitively; the content is sniffed later).
+/// The list is the codecs' own: only formats this build can decode (JPEG, PNG, TIFF and WebP, and
+/// with the `heif` feature HEIC, HEIF and AVIF). Opening a format is not the same as being able to
+/// write it back: see `Engine::save_items`, which never replaces a source that has no writer.
 pub fn is_candidate(path: &Path) -> bool {
     let ext = path
         .extension()
         .map(|e| e.to_string_lossy().to_ascii_lowercase())
         .unwrap_or_default();
-    matches!(ext.as_str(), "jpg" | "jpeg" | "png")
+    auto_crop_codecs::supported_input_extensions().contains(&ext.as_str())
         && !path
             .file_name()
             .is_some_and(|n| n.to_string_lossy().starts_with(".autocrop-"))
@@ -122,6 +125,32 @@ mod tests {
             .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
             .collect();
         assert_eq!(names, ["a.JPG", "b.png", "c.jpeg"]);
+    }
+
+    #[test]
+    fn the_extension_list_is_what_this_build_decodes() {
+        for yes in ["a.jpg", "a.JPEG", "a.png", "a.tif", "a.TIFF", "a.webp"] {
+            assert!(is_candidate(Path::new(yes)), "{yes}");
+        }
+        for no in [
+            "a.gif",
+            "a.bmp",
+            "a.jxl",
+            "a.pdf",
+            "a.txt",
+            "a",
+            ".autocrop-1.png",
+        ] {
+            assert!(!is_candidate(Path::new(no)), "{no}");
+        }
+        // HEIC, HEIF and AVIF are candidates exactly when the codecs can decode them.
+        for heif in ["a.heic", "a.HEIF", "a.avif"] {
+            assert_eq!(
+                is_candidate(Path::new(heif)),
+                auto_crop_codecs::supported_input_formats().contains(&"avif"),
+                "{heif}"
+            );
+        }
     }
 
     #[test]

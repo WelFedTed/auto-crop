@@ -10,6 +10,10 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+# HEIC, HEIF and AVIF input (libheif, dav1d and the libde265 plugin; see docs/testing/heif-native.md).
+heif = ["auto-crop-engine/heif"]
+
 [dependencies]
 auto-crop-engine = { path = "../engine" }
 auto-crop-core = { path = "../core" }

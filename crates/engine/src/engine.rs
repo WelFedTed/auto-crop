@@ -704,6 +704,24 @@ impl Engine {
         };
         let geometry = state.quad().cloned().ok_or(ErrKind::NoCrop)?;
 
+        // Writers exist for JPEG and PNG only (PLAN 3.2.3). A source in any other format that this
+        // build can open (WebP, TIFF, HEIC, AVIF) is never replaced in place: nothing can write it
+        // back without dropping content, so the source stays byte-identical. A copy is written in a
+        // format the build can write: JPEG for HEIC (the conversion target of PLAN 3.5), PNG for
+        // the rest (lossless, carries the ICC profile).
+        let (fmt, copy_ext) = if fmt.is_encodable() {
+            (fmt, None)
+        } else if target == SaveTarget::Replace {
+            return Err(ErrKind::UnsupportedOutput);
+        } else {
+            let out = if fmt == Format::Heic {
+                Format::Jpeg
+            } else {
+                Format::Png
+            };
+            (out, Some(out.extension()))
+        };
+
         // Read the pixels' source: the file before the first save, the backup afterwards.
         let bytes = fs::read(&original_path).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -739,7 +757,13 @@ impl Engine {
                 // Saving the same item as a copy again overwrites its own copy.
                 let dest = match &saved {
                     Some(s) if s.copy && s.output_path.exists() => s.output_path.clone(),
-                    _ => free_name(&dir.join(path.file_name().ok_or(ErrKind::Internal)?)),
+                    _ => {
+                        let mut name = PathBuf::from(path.file_name().ok_or(ErrKind::Internal)?);
+                        if let Some(ext) = copy_ext {
+                            name.set_extension(ext);
+                        }
+                        free_name(&dir.join(name))
+                    }
                 };
                 let tmp = write_temp(&dir, &encoded, Some(mtime))?;
                 if let Err(e) = verify_temp(&tmp, dims, fmt).and_then(|()| swap(&tmp.path, &dest)) {

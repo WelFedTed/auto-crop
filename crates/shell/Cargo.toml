@@ -16,6 +16,8 @@ build = "build.rs"
 # without the WebKitGTK system libraries keep building until the M3.70 shell jobs exist.
 # Build the app with: cargo build -p auto-crop-shell --release --features gui,custom-protocol
 gui = ["dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-build", "dep:getrandom"]
+# HEIC, HEIF and AVIF input (libheif, dav1d and the libde265 plugin next to the executable).
+heif = ["auto-crop-engine/heif"]
 # Serve the embedded UI (ui/dist) instead of the dev server URL.
 custom-protocol = ["tauri/custom-protocol"]
 
