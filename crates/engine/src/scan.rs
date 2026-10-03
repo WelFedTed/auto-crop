@@ -701,9 +701,13 @@ impl Engine {
                 }
                 fmt
             }
+            // A copy is written in a format this build can write: JPEG for HEIC (the conversion
+            // target of PLAN 3.5), PNG for everything else.
             SaveTarget::Copy => {
                 if fmt.is_encodable() {
                     fmt
+                } else if fmt == Format::Heic {
+                    Format::Jpeg
                 } else {
                     Format::Png
                 }

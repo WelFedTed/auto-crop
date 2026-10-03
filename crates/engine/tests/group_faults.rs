@@ -771,6 +771,33 @@ fn no_output_ever_overwrites_an_existing_file_even_when_crashed_and_recovered() 
 }
 
 #[test]
+fn a_rollback_puts_the_scan_back_from_the_backup_when_it_is_gone() {
+    // The commit crashes right after the scan was removed; before the next start one output
+    // vanishes (a quarantine, a careless delete). The set can no longer be completed, so recovery
+    // goes back: the scan returns byte for byte from the verified backup, the rest of the set is
+    // taken back, nothing is left over.
+    let fx = Fx::new(Mode::Replace, 3);
+    let _ = fx.commit(&|s: &Step| {
+        if *s == Step::AfterUnlink {
+            Fault::Crash
+        } else {
+            Fault::Pass
+        }
+    });
+    assert!(!fx.src.exists(), "the crash came after the unlink");
+    fs::remove_file(fx.dir.join(name(2))).unwrap();
+    let report = recover(&fx.store, &NoFaults);
+    assert_eq!(report.rolled_back.len(), 1, "{report:?}");
+    assert_eq!(fs::read(&fx.src).unwrap(), fx.src_bytes);
+    assert!(fx.files_in_outputs_dir().is_empty());
+    assert!(stray_temps(&fx.dir).is_empty() && pending_journals(&fx.store) == 0);
+    assert!(
+        fx.store.list().is_empty(),
+        "the unused backup was discarded"
+    );
+}
+
+#[test]
 fn a_scan_that_cannot_be_removed_keeps_the_set_and_says_so() {
     let fx = Fx::new(Mode::Replace, 3);
     // Held open with read and write sharing but not delete sharing: reading works (the re-hash),

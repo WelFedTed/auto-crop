@@ -641,9 +641,7 @@ fn two_page_tiff(w: u32, h: u32, shade: [u8; 2]) -> Vec<u8> {
 fn a_multi_page_tiff_is_never_replaced_and_copies_are_png() {
     let e = env();
     let bytes = two_page_tiff(64, 48, [90, 200]);
-    // The opener filters by extension (JPEG and PNG today) and the content decides the format, so
-    // the TIFF carries a .png name here.
-    let path = e.dir.join("pages.png");
+    let path = e.dir.join("pages.tif");
     fs::write(&path, &bytes).unwrap();
     assert_eq!(auto_crop_codecs::probe(&bytes).unwrap().frames, 2);
     e.engine.set_item_detector(Stub::new(&[
@@ -659,7 +657,7 @@ fn a_multi_page_tiff_is_never_replaced_and_copies_are_png() {
     assert_eq!(out.notices, ["tiff.multi_page"]);
     assert_eq!(fs::read(&path).unwrap(), bytes, "byte-identical");
     assert!(e.engine.list_backups().runs.is_empty());
-    assert_eq!(e.files(), ["pages.png"]);
+    assert_eq!(e.files(), ["pages.tif"]);
     // Copies on opt-in: PNG, the source untouched.
     let out = e.save(v.id, SaveTarget::Copy);
     assert!(out.ok, "{out:?}");
