@@ -12,12 +12,16 @@
 //! Run: `cargo bench -p auto-crop-codecs --features fixtures[,turbojpeg] --bench decode`. Numbers
 //! from a shared or loaded machine are labelled NOISY in the ADR.
 
+use auto_crop_codecs::decode;
 use auto_crop_codecs::encoders::PngEncoder;
 use auto_crop_codecs::fixtures::{JpegSpec, TiffComp, TiffOpts, photo, tiff_rgb8, webp_lossless};
-use auto_crop_codecs::{DecodeLimits, decode, decode_scaled};
+#[cfg(feature = "turbojpeg")]
+use auto_crop_codecs::{DecodeLimits, decode_scaled};
 use auto_crop_core::CancelToken;
 use auto_crop_core::output::OutputSpec;
-use auto_crop_core::ports::{EncodeMeta, Encoder, PixelFormat, Raster, Samples, Want};
+#[cfg(feature = "turbojpeg")]
+use auto_crop_core::ports::Want;
+use auto_crop_core::ports::{EncodeMeta, Encoder, PixelFormat, Raster, Samples};
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 use std::time::Duration;
@@ -32,6 +36,7 @@ fn jpeg_12mp() -> Vec<u8> {
 
 fn bench_jpeg(c: &mut Criterion) {
     let bytes = jpeg_12mp();
+    #[cfg(feature = "turbojpeg")]
     let limits = DecodeLimits::default();
     let mut g = c.benchmark_group("jpeg_12MP_4000x3000_420_q90");
     g.sample_size(15)
@@ -42,11 +47,13 @@ fn bench_jpeg(c: &mut Criterion) {
     g.bench_function("zune_full (decode)", |b| {
         b.iter(|| black_box(decode(black_box(&bytes)).unwrap()))
     });
-    // Without the feature, decode_scaled is that decode plus a block average.
-    #[cfg(not(feature = "turbojpeg"))]
-    g.bench_function("zune_full_then_block_mean_1_4", |b| {
+    // What the safe-Rust path costs for a 1/4-size result: the full decode, then an area
+    // average to 1000 x 750 (the fallback of `decode_scaled` does a block average of the same cost
+    // class). Compare with `turbo_1_4`.
+    g.bench_function("zune_full_then_area_1_4", |b| {
         b.iter(|| {
-            black_box(decode_scaled(&bytes, Want::Scaled { min_edge: 1000 }, &limits).unwrap())
+            let full = decode(&bytes).unwrap().raster;
+            black_box(auto_crop_imgproc::scale::resize_area(&full, 1000, 750))
         })
     });
     // libjpeg-turbo through the same entry point: full, 1/2, 1/4, 1/8.

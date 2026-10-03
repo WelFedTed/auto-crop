@@ -100,6 +100,7 @@ jobs:
           export DYLD_LIBRARY_PATH="$prefix/lib:${DYLD_LIBRARY_PATH:-}"
           if command -v cygpath >/dev/null 2>&1; then export PATH="$(cygpath -u "$prefix")/bin:$PATH"; fi
           cargo bench -p auto-crop-codecs --features fixtures,turbojpeg --bench decode -- --warm-up-time 1 --measurement-time 3 --noplot
+          cargo bench -p auto-crop-imgproc-bench --bench resize -- resize_12MP_to_1024x768 --warm-up-time 1 --measurement-time 3 --noplot
       - name: Negative test - libjpeg-turbo 3.1.0 must make the build fail (red with 3.1.0)
         shell: bash
         run: |

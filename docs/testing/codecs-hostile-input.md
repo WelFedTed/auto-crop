@@ -1,6 +1,6 @@
 # Codecs: limits, probe, decode guard and the hostile-file gate
 
-Roadmap: M1.12 (sniff and probe), M1.13 (`DecodeLimits`), M1.14 (decode guard), M1.15 (JPEG, PNG), M1.16 (TIFF, WebP), M1.17 (EXIF orientation, ICC), M1.20 (lossless JPEG transform, safe-Rust variant), M1.69 (hostile-file corpus). Design: [PLAN 3.1, 3.6, 3.10](../plan/03-image-io-formats.md). Code: `crates/codecs` (all safe Rust, `forbid(unsafe_code)`) and `xtask/src/hostile.rs`.
+Roadmap: M1.12 (sniff and probe), M1.13 (`DecodeLimits`), M1.14 (decode guard), M1.15 (JPEG, PNG), M1.16 (TIFF, WebP), M1.17 (EXIF orientation, ICC), M1.18-M1.21 (libjpeg-turbo path, scaled decode, lossless transform, baseline encoders; see the last section), M1.20 (lossless JPEG transform, safe-Rust variant), M1.69 (hostile-file corpus). Design: [PLAN 3.1, 3.6, 3.10](../plan/03-image-io-formats.md). Code: `crates/codecs` (safe Rust; the lint is `deny(unsafe_code)` and the only `unsafe` is the libjpeg-turbo binding in `src/turbo/ffi/`, compiled only with the `turbojpeg` feature) and `xtask/src/hostile.rs`.
 
 ## How to run
 
@@ -60,7 +60,7 @@ Safe Rust, no libjpeg-turbo: the file is entropy-decoded to DCT coefficients, bl
 | Byte-mutation sweep of the transformer, and the JPEGs of the hostile corpus (budgets as for decode) | 0 panics |
 | 12 MP (4000x3000, 4:2:0, 383 KB smooth file) | Rotate90 215 ms, FlipH 164 ms, a 2000x1500 crop 64 ms (dev profile, one thread; a photographic file has far more entropy data and will be slower: M1.56 should measure it) |
 
-The roadmap's "1000 reused buffers ASan-clean" is an FFI concern (caller-owned `TJPARAM_NOREALLOC` buffers); this implementation has no unsafe code and no reused foreign buffers, so the reuse test checks determinism instead, and M1.18 and M1.19 still own the turbojpeg variant. Not covered by a test: progressive input (refused), non-interleaved baseline input (refused), restart-interval *preservation* (the output has no restart markers).
+The roadmap's "1000 reused buffers ASan-clean" is an FFI concern; the safe-Rust transformer has no foreign buffers, so its reuse test checks determinism, and the ASan run is on the libjpeg-turbo path (last section). Not covered by a test: progressive input (refused here, accepted by the libjpeg-turbo transformer), non-interleaved baseline input (refused), restart-interval *preservation* (the output has no restart markers).
 
 ## Findings and decisions that differ from, or add to, the plan
 
@@ -77,3 +77,22 @@ The roadmap's "1000 reused buffers ASan-clean" is an FFI concern (caller-owned `
 11. **`xtask` contains the only `unsafe` of this work**: the counting `GlobalAlloc` in `xtask/src/alloc_count.rs` (peak heap per hostile file, portable on three OSes). It is a developer tool, never shipped. The M1.72 `ci-guards` allow-list for `unsafe` must include it or move it.
 12. **Dependencies added** (all permissive, `cargo deny check` green): `image` features `tiff` and `webp` (pulls `tiff` 0.11.3, `image-webp` 0.2.4, `fax`, `weezl`), `zune-jpeg` pinned `=0.5.15`, `flate2` (already in the tree through `png`) for the bounded iCCP inflate; behind the `fixtures` feature, `jpeg-encoder` 0.7.1 (`(MIT OR Apache-2.0) AND IJG`), `tiff` and `fax` as encoders.
 13. **Subsampled JPEGs with one scan per component are `UnsupportedFeature`** (found by the M1.70 fuzzers, see [fuzzing.md](fuzzing.md)): zune-jpeg 0.5.15 panics in its AVX2 IDCT on them. The marker walk refuses them before decoding; 4:4:4 files with one scan per component still decode.
+
+## libjpeg-turbo path (M1.18 to M1.21, feature `turbojpeg`)
+
+Everything here runs in `.github/workflows/turbojpeg.yml` (the pinned libjpeg-turbo 3.2.0 built by `cargo xtask build-native --only libjpeg-turbo`, then `cargo test -p auto-crop-codecs --features turbojpeg`); run 37118012868 was green on windows-2025, macos-latest and ubuntu-22.04 (120 tests each, 3 more than the default build's 101 plus the feature-only ones), under AddressSanitizer, and for the negative tests. Locally the feature needs CMake, NASM and a C compiler; without `--features turbojpeg` nothing native is searched for or linked (the `default build has no native dependency` job proves it with a prefix that does not exist, a test binary without `turbojpeg` symbols, and a feature build that must fail with a pointer to `build-native`).
+
+| Check | Result |
+|---|---|
+| Version gate (M1.18 acceptance) | `build.rs` reads `jconfig.h` and `turbojpeg.h` and refuses < 3.1.4; `cargo build --features turbojpeg` against a copy of the prefix whose headers say 3.1.0 fails with "older than 3.1.4" on all three OSes (the negative test of the workflow); the gate itself is unit-tested for 3.1.0, 3.1.3, 3.0.2 and a missing number |
+| Constants | every `TJPARAM`, `TJXOP`, `TJXOPT`, `TJSAMP`, `TJPF` and `TJINIT` value the binding uses is compared with the pinned `turbojpeg.h` by `constants_match_the_pinned_header` |
+| Scaled decode vs full decode + block average, 40 fixtures (8 sizes incl. odd ones x 4:2:0, 4:4:4, 4:2:2, gray, progressive; 1/2, 1/4, 1/8) | worst PSNR 45.5 dB (1/2), 45.0 dB (1/4), 36.5 dB (1/8); the PROVISIONAL bound is 35 dB. A 4001 x 3001 image: 52.3 / 52.7 / 52.6 dB. The reference is a block average (output pixel (x, y) covers the `denom` x `denom` block at (x * denom, y * denom)), the geometry of DCT scaling; a stretched area average (`resize_area`) gives ~31 dB on odd sizes because it drifts by up to a pixel |
+| Same check with ImageMagick's libjpeg-turbo 3.2.0 on the default build (no feature) | worst 51.7 / 52.4 / 52.3 dB over 12 cases, so the bound is also exercised where no C library is built |
+| `Want::Scaled { min_edge }` | picks the largest of 8, 4, 2, 1 whose output long edge `ceil(long / d)` is still >= `min_edge`; never upscales; the EXIF turn is applied after scaling (all 8 orientations equal "scale, then `orient_reference`", byte for byte) |
+| Full decode, libjpeg-turbo vs zune-jpeg | mean abs diff 0.064 LSB (4:2:0), 0.059 (progressive), 0.022 (4:2:2), 0.008 (4:4:4), 0.005 (gray) |
+| Lossless transform, libjpeg-turbo vs safe Rust | all 7 ops x 2 policies x 6 inputs (incl. partial MCUs) give the same size, realised rectangle, `perfect` flag and **identical decoded pixels**; crops of off-grid rectangles realise the same rectangle (20,10 30x30 -> 16,0 48x48); progressive input is accepted (the safe transformer refuses it) |
+| 1000 reused transforms (one handle, one caller-owned buffer, `TJPARAM_NOREALLOC`) | identical output every time, buffer capacity constant after warm-up; under AddressSanitizer with a **libjpeg-turbo built with `-fsanitize=address`** (static, clang) and nightly Rust: clean. A destination that is too small is an error, never an overflow |
+| Hostile input | every JPEG of the hostile corpus and a byte-mutation sweep (header region, three values per byte, baseline, progressive and gray) through scaled decode and transform: 0 panics. The same pre-checks as every decode run first (caps, truncation, plausibility), `TJPARAM_STOPONWARNING` is on and the scan cap is passed to the library |
+| Encoders (M1.21) | libjpeg-turbo q90 4:2:0 round trip 47.8 dB on a smooth gradient and 40.3 dB on a noisy photo-like image; `jpeg-encoder` q90 47.4 dB; both embed the ICC profile byte-exact and the JFIF density; 8-bit and 16-bit PNG (RGB and grey) are bit-exact and carry `pHYs` and `iCCP` |
+
+Open policy points: `STOPONWARNING` also refuses files with harmless warnings (extraneous bytes before a marker), which zune-jpeg accepts; CMYK JPEGs fall back to the safe path because TurboJPEG cannot convert them to RGB; iMCU sizes come from TurboJPEG's subsampling table, so an unusual sampling (for example 3x1) is `UnsupportedFeature` for transforms.
