@@ -190,6 +190,81 @@ pub fn area_reference_f64(src: &Raster, out_w: u32, out_h: u32) -> Raster {
     out
 }
 
+fn srgb_to_linear(v: f64) -> f64 {
+    let c = v / 255.0;
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+fn linear_to_srgb8(l: f64) -> u8 {
+    let c = if l <= 0.003_130_8 {
+        l * 12.92
+    } else {
+        1.055 * l.powf(1.0 / 2.4) - 0.055
+    };
+    (c * 255.0 + 0.5).clamp(0.0, 255.0) as u8
+}
+
+/// Exact area-average downscale in f64 **in linear light** (sRGB decoded to linear, averaged,
+/// encoded again): what a physically correct resize produces. [`area_reference_f64`] is the same
+/// average taken on the sRGB code values (gamma space).
+pub fn area_reference_linear_f64(src: &Raster, out_w: u32, out_h: u32) -> Raster {
+    let mut lut = [0.0f64; 256];
+    for (i, l) in lut.iter_mut().enumerate() {
+        *l = srgb_to_linear(i as f64);
+    }
+    let axis = |sn: usize, dn: usize| -> Vec<(usize, Vec<f64>)> {
+        let scale = sn as f64 / dn as f64;
+        (0..dn)
+            .map(|i| {
+                let (a, b) = (i as f64 * scale, (i as f64 + 1.0) * scale);
+                let first = a.floor() as usize;
+                let last = (b.ceil() as usize).min(sn).max(first + 1);
+                let w: Vec<f64> = (first..last)
+                    .map(|s| (b.min(s as f64 + 1.0) - a.max(s as f64)).max(0.0) / scale)
+                    .collect();
+                (first, w)
+            })
+            .collect()
+    };
+    let (sw, sh, dw, dh) = (
+        src.width as usize,
+        src.height as usize,
+        out_w as usize,
+        out_h as usize,
+    );
+    let (wx, wy) = (axis(sw, dw), axis(sh, dh));
+    let mut tmp = vec![0.0f64; dw * sh * 3];
+    for y in 0..sh {
+        for (x, (start, w)) in wx.iter().enumerate() {
+            for c in 0..3 {
+                tmp[(y * dw + x) * 3 + c] = w
+                    .iter()
+                    .enumerate()
+                    .map(|(k, wk)| wk * lut[usize::from(src.data[(y * sw + start + k) * 3 + c])])
+                    .sum();
+            }
+        }
+    }
+    let mut out = Raster::new(out_w, out_h);
+    for (y, (start, w)) in wy.iter().enumerate() {
+        for x in 0..dw {
+            for c in 0..3 {
+                let v: f64 = w
+                    .iter()
+                    .enumerate()
+                    .map(|(k, wk)| wk * tmp[((start + k) * dw + x) * 3 + c])
+                    .sum();
+                out.data[(y * dw + x) * 3 + c] = linear_to_srgb8(v);
+            }
+        }
+    }
+    out
+}
+
 /// The resizers under test, each returning an RGB8 raster of `out_w` x `out_h`.
 pub mod resizers {
     use auto_crop_imgproc::Raster;
@@ -230,6 +305,105 @@ pub mod resizers {
                 &ResizeOptions::new().resize_alg(ResizeAlg::Convolution(filter)),
             )
             .expect("fast_image_resize");
+    }
+
+    /// Which colour space `pic-scale` resamples in.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum PicColour {
+        /// The sRGB code values as they are (gamma space), the `Scaler` fixed-point path.
+        Srgb,
+        /// Decoded to linear light in f32, resampled, encoded again (`LinearScaler`).
+        Linear,
+        /// Linear light in fixed point (`LinearApproxScaler`): the cheaper approximation.
+        LinearApprox,
+    }
+
+    /// A prepared `pic-scale` resize (plan, source and destination stores) so a benchmark times
+    /// the resample alone.
+    pub struct PicJob {
+        plan: std::sync::Arc<pic_scale::Resampling<u8, 3>>,
+        src: pic_scale::ImageStore<'static, u8, 3>,
+        dst: pic_scale::ImageStoreMut<'static, u8, 3>,
+        out: (u32, u32),
+    }
+
+    impl PicJob {
+        pub fn new(
+            src: &Raster,
+            out_w: u32,
+            out_h: u32,
+            colour: PicColour,
+            func: pic_scale::ResamplingFunction,
+            threads: pic_scale::ThreadingPolicy,
+        ) -> Self {
+            use pic_scale::{
+                ImageSize, ImageStore, ImageStoreMut, LinearApproxScaler, LinearScaler, Scaler,
+            };
+            let sizes = (
+                ImageSize::new(src.width as usize, src.height as usize),
+                ImageSize::new(out_w as usize, out_h as usize),
+            );
+            let plan = match colour {
+                PicColour::Srgb => {
+                    let mut s = Scaler::new(func);
+                    s.set_threading_policy(threads);
+                    s.plan_rgb_resampling(sizes.0, sizes.1)
+                }
+                PicColour::Linear => {
+                    let mut s = LinearScaler::new(func);
+                    s.set_threading_policy(threads);
+                    s.plan_rgb_resampling(sizes.0, sizes.1)
+                }
+                PicColour::LinearApprox => {
+                    let mut s = LinearApproxScaler::new(func);
+                    s.set_threading_policy(threads);
+                    s.plan_rgb_resampling(sizes.0, sizes.1)
+                }
+            }
+            .expect("pic-scale plan");
+            Self {
+                plan,
+                src: ImageStore::<u8, 3>::new(
+                    src.data.clone(),
+                    src.width as usize,
+                    src.height as usize,
+                )
+                .expect("pic-scale source"),
+                dst: ImageStoreMut::<u8, 3>::alloc(out_w as usize, out_h as usize),
+                out: (out_w, out_h),
+            }
+        }
+
+        pub fn run(&mut self) {
+            self.plan
+                .resample(&self.src, &mut self.dst)
+                .expect("pic-scale resample");
+        }
+
+        pub fn output(&self) -> Raster {
+            Raster::from_raw(self.out.0, self.out.1, self.dst.as_bytes().to_vec())
+                .expect("pic-scale output size")
+        }
+    }
+
+    /// One-shot `pic-scale` resize (single thread).
+    pub fn pic_scale(
+        src: &Raster,
+        out_w: u32,
+        out_h: u32,
+        colour: PicColour,
+        func: pic_scale::ResamplingFunction,
+    ) -> Raster {
+        let mut job = PicJob::new(
+            src,
+            out_w,
+            out_h,
+            colour,
+            func,
+            pic_scale::ThreadingPolicy::Single,
+        );
+        job.run();
+        job.output()
     }
 
     pub fn image_crate(

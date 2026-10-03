@@ -2,13 +2,15 @@
 // SPDX-FileCopyrightText: 2026 Auto Crop contributors
 
 //! M1.56: the in-tree area resize against `fast_image_resize` and `image::imageops::resize`
-//! (the decoders are compared in `crates/codecs`; `pic-scale` is not in the tree). Timing only;
+//! and `pic-scale` (sRGB, linear-light f32 and linear-light fixed point; the decoders are compared in
+//! `crates/codecs`, benches/decode.rs). Timing only;
 //! PSNR and SSIM against an exact f64 area average come from
 //! `cargo run --release -p auto-crop-imgproc-bench --example resize_quality`.
 //!
 //! The `clone` cost of building the library input is excluded: `fir` runs on a prebuilt image.
 
 use auto_crop_imgproc::scale::resize_area;
+use auto_crop_imgproc_bench::resizers::{PicColour, PicJob};
 use auto_crop_imgproc_bench::{resizers, synthetic_photo};
 use criterion::{Criterion, criterion_group, criterion_main};
 use fast_image_resize::images::Image;
@@ -50,6 +52,27 @@ fn bench_resize(c: &mut Criterion) {
                         p.install(|| resizers::fir_view(&fir_src, &mut dst, &mut resizer, filter))
                     });
                 });
+            }
+        }
+        // pic-scale does its own threading (Single or Fixed(8)), prepared plan and buffers excluded.
+        for (cname, colour) in [
+            ("srgb", PicColour::Srgb),
+            ("linear", PicColour::Linear),
+            ("linear_approx", PicColour::LinearApprox),
+        ] {
+            for (fname, func) in [
+                ("bilinear", pic_scale::ResamplingFunction::Bilinear),
+                ("lanczos3", pic_scale::ResamplingFunction::Lanczos3),
+            ] {
+                for (tname, policy) in [
+                    ("1t", pic_scale::ThreadingPolicy::Single),
+                    ("8t", pic_scale::ThreadingPolicy::Fixed(8)),
+                ] {
+                    let mut job = PicJob::new(&src, ow, oh, colour, func, policy);
+                    group.bench_function(format!("pic_{cname}_{fname}/{tname}"), |b| {
+                        b.iter(|| job.run());
+                    });
+                }
             }
         }
         // The `image` crate is single-threaded; one run each.
