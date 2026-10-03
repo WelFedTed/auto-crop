@@ -51,6 +51,10 @@ Every random choice comes from a stream named by `(seed, keys)` (BLAKE2b into Nu
 
 `requirements.txt` lists the direct pins; `requirements.lock` is `uv pip compile --universal --generate-hashes` of it with `overrides.txt` (Augraphy asks for `opencv-python`, which would overwrite `opencv-python-headless`). Install with `pip install --require-hashes --no-deps -r requirements.lock`. Augraphy 8.2.6 (MIT, 2023 release) is imported in `degrade.py` only. **AlbumentationsX (AGPL-3.0) is banned**: the lock must not contain it (tested), and `python -m synth licences` fails on any GPL, AGPL or non-commercial package. Fonts come from the pinned `matplotlib` wheel (DejaVu, STIX); backgrounds are procedural (DTD is excluded); text, names and prices are generated from word lists written for this project. See [docs/provenance.md](../../docs/provenance.md).
 
+## What it showed about the detector
+
+The classical detector scores mean IoU 0.98 and 1.85% failures on the Rust stand-in suite and 0.63 and 44% failures on this generator's 5,200-image suite (31 silent failures among 1,456 auto-accepted, 2.1%), with nothing changed in the detector. The failures sit in partial framing, long and strip receipts and look-alike desks with distractor sheets, compound, and do not depend on EXIF, format, colour space, tilt or blur. Details and the one-factor sweep: [docs/perf/detector-baseline.md](../../docs/perf/detector-baseline.md).
+
 ## Known gaps
 
 No multi-item scenes (M10.51), no negatives (pages absent), no hands or fingers, no glare, no thermal-paper dot structure at pixel level, no handwriting, no real photographs or real scanner artefacts, curl is a smooth lift with no self-occlusion, one page per picture, backgrounds are flat-on to the camera. A detector that does well here is not thereby good on photographs.

@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 ALLOWED_IMPORTS = {
-    "__future__", "argparse", "ast", "collections", "concurrent", "dataclasses", "functools", "hashlib", "importlib",
+    "__future__", "argparse", "ast", "collections", "concurrent", "difflib", "dataclasses", "functools", "hashlib", "importlib",
     "io", "json", "math", "multiprocessing", "os", "pathlib", "random", "re", "shutil", "struct",
     "subprocess", "sys", "tempfile", "time", "typing", "unittest",
     "augraphy", "barcode", "cv2", "numpy", "PIL", "segno", "skimage", "synth", "matplotlib",

@@ -97,13 +97,17 @@ class Sheet:
     def font(self, family: str, pt: float, bold: bool = False):
         return fonts.load(family, max(5, round(pt * PT_MM * self.ppm)), bold)
 
-    def text(self, x: int, y: int, s: str, font, align: str = "l", record: bool = True):
-        """Draw ``s`` with its baseline at ``y`` (``align``: l, r or m)."""
+    def text(
+        self, x: int, y: int, s: str, font, align: str = "l", record: bool = True, graphic: bool = False
+    ):
+        """Draw ``s`` with its baseline at ``y`` (``align``: l, r or m). ``graphic`` marks a row of
+        dashes or stars that is drawing, not text: it goes on the page but not on the text layer."""
         if not s:
             return
         anchor = {"l": "ls", "r": "rs", "m": "ms"}[align]
         self.d.text((x, y), s, fill=255, font=font, anchor=anchor)
-        self.dt.text((x, y), s, fill=255, font=font, anchor=anchor)
+        if not graphic:
+            self.dt.text((x, y), s, fill=255, font=font, anchor=anchor)
         if record:
             self.lines.append(s)
 
@@ -371,7 +375,7 @@ def render_receipt(rng, aspect_class: str, paper: str, ppm: float = RECEIPT_PPM)
     y += lh
     s.text(x0, y, _col_line(f"STORE {g.between(1, 99):03d}", f"TILL {g.between(1, 9)}", chars), f)
     y += lh
-    s.text(xm, y, "-" * chars, f, "m", record=False)
+    s.text(xm, y, "-" * chars, f, "m", record=False, graphic=True)
     y += lh
 
     # Reserve room for everything from the totals down so the receipt ends where it should.
@@ -391,16 +395,16 @@ def render_receipt(rng, aspect_class: str, paper: str, ppm: float = RECEIPT_PPM)
         n += 1
         if aspect_class in ("long", "strip") and n == next_promo and y + 5 * lh < items_budget_end:
             next_promo += g.between(18, 30)
-            s.text(xm, y, "*" * chars, f, "m", record=False)
+            s.text(xm, y, "*" * chars, f, "m", record=False, graphic=True)
             y += lh
             for line in s.wrap(g.pick(textgen.POLICY) + " " + textgen.sentence(g).upper(), f, content_w):
                 s.text(x0, y, line, f)
                 y += lh
-            s.text(xm, y, "*" * chars, f, "m", record=False)
+            s.text(xm, y, "*" * chars, f, "m", record=False, graphic=True)
             y += lh
     # Tail: totals, payment, codes, footer.
     tax = round(total * 0.07)
-    s.text(xm, y, "-" * chars, f, "m", record=False)
+    s.text(xm, y, "-" * chars, f, "m", record=False, graphic=True)
     y += lh
     s.text(x0, y, _col_line("SUBTOTAL", textgen.money(total), chars), f)
     y += lh

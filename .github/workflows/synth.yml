@@ -90,9 +90,6 @@ jobs:
       - name: Rust decoders reproduce the upright reference for every variant
         if: steps.changes.outputs.relevant == 'true'
         run: cargo xtask synth-check variants
-      - name: Tesseract 5 CER on the clean render (<= 5%, PROVISIONAL; M1.31)
-        if: steps.changes.outputs.relevant == 'true'
-        run: cargo xtask synth-check ocr --require
       - name: Generate the smoke suite from its seed
         if: steps.changes.outputs.relevant == 'true'
         run: cargo xtask synth --suite smoke
@@ -124,6 +121,10 @@ jobs:
             sed -n '1,9p' smoke-py.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+      # Last, so that a miss of this PROVISIONAL bar still leaves every other result of the job.
+      - name: Tesseract 5 CER on the clean render (<= 5%, PROVISIONAL; M1.31)
+        if: steps.changes.outputs.relevant == 'true'
+        run: cargo xtask synth-check ocr --require
 
   full:
     name: full suite (nightly)

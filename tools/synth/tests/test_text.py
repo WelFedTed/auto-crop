@@ -40,6 +40,21 @@ class MetricTests(unittest.TestCase):
         self.assertEqual(verify.cer(ref, ocr), 0.0)
         self.assertEqual(verify.normalise("a ---- b\n=====\nc"), "a ---- b c")  # a rule is a whole line
 
+    def test_tall_pages_are_cut_at_blank_rows_into_chunks_of_bounded_height(self):
+        mask = np.zeros((1000, 40), dtype=np.uint8)
+        for y in range(10, 990, 20):
+            mask[y : y + 12, 5:30] = 255  # a 12 px text line every 20 px, 8 px gaps
+        chunks = verify.row_chunks(mask, 300)
+        self.assertEqual(chunks[0][0], 0)
+        self.assertEqual(chunks[-1][1], 1000)
+        for (a, b), (c, d) in zip(chunks, chunks[1:]):
+            self.assertEqual(b, c)  # contiguous
+        for a, b in chunks:
+            self.assertLessEqual(b - a, 300)
+        for a, b in chunks[:-1]:
+            self.assertEqual(int(mask[b - 1].sum()), 0, "cut through a line of text")
+        self.assertEqual(verify.row_chunks(mask, 5000), [(0, 1000)])
+
     def test_cer_normalises_whitespace_and_counts_edits(self):
         self.assertEqual(verify.cer("a  b\nc", "a b c"), 0.0)
         self.assertAlmostEqual(verify.cer("abcd", "abxd"), 0.25)
@@ -98,6 +113,10 @@ class PageTests(unittest.TestCase):
                 self.assertLess(int((p.text_ink > 127).sum()), int((p.ink > 127).sum()) * 0.8, layout)
         r = page.render(R.stream(15, "r"), "receipt", "white")
         self.assertLess(int((r.text_ink > 127).sum()), int((r.ink > 127).sum()))  # the codes are not text
+        # the rows of dashes and stars are drawing: on the page, absent from the text layer
+        lng = page.render(R.stream(16, "long"), "long", "white")
+        graphic_rows = int((lng.ink > 127).any(axis=1).sum()) - int((lng.text_ink > 127).any(axis=1).sum())
+        self.assertGreater(graphic_rows, 10)
         self.assertEqual(r.clean_gray(text_only=True).shape, r.clean_gray().shape)
 
     def test_scene_axes_choose_the_page_kind(self):

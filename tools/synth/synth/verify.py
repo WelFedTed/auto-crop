@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import difflib
 import hashlib
 import importlib.metadata as md
 import io
@@ -42,6 +43,7 @@ from . import rng as R
 SSIM_MIN = 0.98  # PROVISIONAL (ROADMAP M1.32)
 CER_MAX = 0.05  # PROVISIONAL (ROADMAP M1.31)
 OCR_PPM = 10.0  # pixels per millimetre of the OCR renders (254 dpi)
+OCR_MAX_ROWS = 3000  # taller pages are read in pieces
 
 
 # ---------------------------------------------------------------------------------------------
@@ -170,6 +172,21 @@ def normalise(text: str) -> str:
     return re.sub(r"\s+", " ", " ".join(lines)).strip()
 
 
+def row_chunks(mask: np.ndarray, max_h: int) -> list[tuple[int, int]]:
+    """Row ranges of at most ``max_h`` rows, cut at blank rows (between lines of text) when there is
+    one in the second half of a chunk. OCR engines are tuned for page-shaped pictures, so a 9:1
+    receipt is read in pieces, as a scanning pipeline would."""
+    h = mask.shape[0]
+    blank = ~(mask > 0).any(axis=1)
+    cuts = [0]
+    while h - cuts[-1] > max_h:
+        lo, hi = cuts[-1] + max_h // 2, cuts[-1] + max_h
+        idx = np.nonzero(blank[lo:hi])[0]
+        cuts.append(int(lo + idx[-1]) if idx.size else hi)
+    cuts.append(h)
+    return list(zip(cuts[:-1], cuts[1:]))
+
+
 def cer(reference: str, hypothesis: str) -> float:
     ref, hyp = normalise(reference), normalise(hypothesis)
     return levenshtein(ref, hyp) / max(1, len(ref))
@@ -215,20 +232,34 @@ def check_ocr(argv: list[str]) -> int:
             cv2.imwrite(str(path), gray)
             # Page segmentation: columns for the report layout, one block of lines otherwise.
             psm = "3" if pg.layout == "report" else "6"
-            r = subprocess.run(
-                ["tesseract", str(path), "stdout", "-l", "eng", "--oem", "1", "--psm", psm, "--dpi", str(round(OCR_PPM * 25.4))],
-                capture_output=True, text=True, encoding="utf8", errors="replace",
-                env={**os.environ, "OMP_THREAD_LIMIT": "1"},  # one thread: same output on any machine
-            )
-            if r.returncode != 0:
-                print(f"tesseract failed on page {i}: {r.stderr[:200]}", file=sys.stderr)
-                return 2
-            c = cer(pg.text, r.stdout)
+            texts = []
+            for k, (r0, r1) in enumerate(row_chunks(pg.text_ink, OCR_MAX_ROWS)):
+                part = Path(tmp) / f"p{i}-{k}.png"
+                cv2.imwrite(str(part), gray[r0:r1])
+                r = subprocess.run(
+                    ["tesseract", str(part), "stdout", "-l", "eng", "--oem", "1", "--psm", psm, "--dpi", str(round(OCR_PPM * 25.4))],
+                    capture_output=True, text=True, encoding="utf8", errors="replace",
+                    env={**os.environ, "OMP_THREAD_LIMIT": "1"},  # one thread: same output on any machine
+                )
+                if r.returncode != 0:
+                    print(f"tesseract failed on page {i}: {r.stderr[:200]}", file=sys.stderr)
+                    return 2
+                texts.append(r.stdout)
+            hypothesis = "\n".join(texts)
+            c = cer(pg.text, hypothesis)
             results[kind].append(c)
+            if c > a.max_cer:
+                # Enough to see what went wrong from a CI log: the first lines that differ.
+                ref_lines = [normalise(ln) for ln in pg.text.splitlines() if normalise(ln)]
+                hyp_lines = [normalise(ln) for ln in hypothesis.splitlines() if normalise(ln)]
+                diff = [d for d in difflib.unified_diff(ref_lines, hyp_lines, "transcript", "tesseract", n=0, lineterm="")]
+                print(f"page {i} ({kind}, {pg.layout}, {pg.ink.shape[1]}x{pg.ink.shape[0]}, {len(row_chunks(pg.text_ink, OCR_MAX_ROWS))} piece(s)): CER {c:.3f}", file=sys.stderr)
+                for d in diff[:14]:
+                    print("    " + d[:110], file=sys.stderr)
             if keep:
                 shutil.copy(path, keep / f"p{i}.png")
                 (keep / f"p{i}.ref.txt").write_text(pg.text, encoding="utf8")
-                (keep / f"p{i}.ocr.txt").write_text(r.stdout, encoding="utf8")
+                (keep / f"p{i}.ocr.txt").write_text(hypothesis, encoding="utf8")
     print(f"{ver}; CER on the clean text render ({OCR_PPM:g} px/mm = {round(OCR_PPM * 25.4)} dpi), threshold {a.max_cer:.0%} (PROVISIONAL)")
     bad = False
     for k in kinds:
