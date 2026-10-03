@@ -34,7 +34,7 @@ LGPL libraries are separate, dynamically linked, replaceable shared libraries (B
 | `onnxruntime-linux-x64` | native library (prebuilt) | MIT | as above | https://github.com/microsoft/onnxruntime | verified 2026-10-02 (native-deps.toml) |
 | `onnxruntime-osx-arm64` | native library (prebuilt) | MIT | as above | https://github.com/microsoft/onnxruntime | verified 2026-10-02 (native-deps.toml) |
 
-### Python packages for the dev oracles (`tools/imgproc-oracles`, never shipped)
+### Python packages for the dev oracles (`tools/imgproc-oracles`, `tools/ocr_oracle`, never shipped)
 
 Pinned in `tools/imgproc-oracles/requirements.txt`, hash-locked in `requirements.lock` (Python 3.12 or newer). They generate the committed numeric oracle fixtures under `crates/imgproc/tests/fixtures/`; the fixtures are data computed by this project, not copies of any library.
 
@@ -42,6 +42,7 @@ Pinned in `tools/imgproc-oracles/requirements.txt`, hash-locked in `requirements
 |---|---|---|---|---|---|
 | `numpy` | Python package | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | float64 reference Lanczos3 warp (`warp_numpy_lanczos3.json`) | https://pypi.org/project/numpy/ | verified 2026-10-02 (wheel metadata, 2.5.3) |
 | `opencv-python-headless` | Python package | Apache-2.0 | homography and warp reference (`cv2.getPerspectiveTransform`, `cv2.warpPerspective`) used only to produce fixtures; the wheel bundles third-party libraries (including LGPL FFmpeg) that are never redistributed by this project | https://pypi.org/project/opencv-python-headless/ | verified 2026-10-02 (wheel metadata, 5.0.0.93) for the package; bundled libraries to verify |
+| `pillow` | Python package | MIT-CMU | renders the synthetic receipts of the OCR oracle (`tools/ocr_oracle`, M1.66; pinned in `tools/ocr_oracle/requirements.txt`, hash-locked, Python 3.10 or newer); the images are generated at run time and never committed | https://pypi.org/project/pillow/ | verified 2026-10-03 (package metadata, 12.3.0) |
 
 ### Developer and CI tools (run, never linked, never shipped)
 
@@ -62,7 +63,8 @@ GPL-licensed tools below are executed as separate programs for measurement and c
 | `nasm` | build tool | BSD-2-Clause | SIMD assembly for libjpeg-turbo on x86 | https://www.nasm.us | to verify |
 | `node` | build tool | MIT | builds the UI (Vite, Svelte) | https://nodejs.org | to verify |
 | `valgrind` | dev tool | GPL-2.0-or-later | heap and leak profiling on Linux (M1.60), run only | https://valgrind.org | to verify |
-| `tesseract` | dev tool | Apache-2.0 | OCR oracle for the enhancement CER metric (M1.66), 5.x, run only; OCR is not a product feature (B19) | https://github.com/tesseract-ocr/tesseract | to verify |
+| `gungraun` / `gungraun-runner` | dev tool (crate, CI binary) | Apache-2.0 OR MIT | Valgrind instruction-count benchmarks and the PR gate (M1.58); `gungraun` is a dev-dependency of `crates/imgproc-bench`, `gungraun-runner` 0.20.0 is installed by `perf-gate.yml`; neither is shipped | https://github.com/gungraun/gungraun | verified 2026-10-03 (crates.io metadata, 0.20.0) |
+| `tesseract` | dev tool | Apache-2.0 | OCR oracle for the enhancement CER metric (M1.66), 5.x, run only; OCR is not a product feature (B19); the CI job installs 5.5.1 from `ppa:alex-p/tesseract-ocr5` with `eng.traineddata` (tessdata_fast, Apache-2.0) | https://github.com/tesseract-ocr/tesseract | version verified in CI run 37117596234; licence to verify |
 | `imagemagick` | dev tool | ImageMagick | reference conversions and comparisons, run only | https://imagemagick.org | to verify |
 | `unpaper` | dev tool | GPL-2.0-or-later | deskew and border comparison baseline, run only, Linux | https://github.com/unpaper/unpaper | to verify |
 
@@ -73,6 +75,7 @@ GPL-licensed tools below are executed as separate programs for measurement and c
 | `@fontsource/ibm-plex-sans` | font (npm package) | OFL-1.1 | UI text; bundled through the npm package (imported in `ui/src/main.ts`), no font CDN | https://fontsource.org/fonts/ibm-plex-sans | to verify. The OFL text and copyright notice must ship with the app: open item for the third-party notices (M13). |
 | `@fontsource/ibm-plex-mono` | font (npm package) | OFL-1.1 | UI monospace text and numerals | https://fontsource.org/fonts/ibm-plex-mono | to verify, same notice duty |
 | Hershey vector fonts (`cv2.putText`) | font | Apache-2.0 | glyphs in the throwaway `spikes/strips` receipt generator; not used by shipped code | part of OpenCV | to verify |
+| DejaVu Sans Mono (`fonts-dejavu-core`) | font (Ubuntu package) | Bitstream-Vera AND LicenseRef-DejaVu-public-domain-changes | glyphs of the synthetic receipts rendered by `tools/ocr_oracle` in the CI job (M1.66); the rendered images are generated at run time, never committed or shipped | https://dejavu-fonts.github.io | to verify |
 
 ### Datasets, test images and weights
 
