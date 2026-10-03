@@ -64,12 +64,19 @@ FIXED = {
 # Metrics
 
 
+RULE_RE = re.compile(r"^[-=_*.~#—–─]{4,}$")
+
+
 def normalise(text: str) -> str:
-    """Whitespace runs inside a line collapse to one space, blank lines and form feeds go."""
+    """Whitespace runs inside a line collapse to one space; blank lines, form feeds and separator
+    rules (a line of four or more `-=_*.~#` or dash characters) are dropped. Rules are drawing, not
+    content: Tesseract skips or garbles them (measured: it dropped every rule line of the synthetic
+    receipts, which alone was 32% CER of otherwise perfect text), so scoring them would measure
+    that instead of readability. The same filter applies to the reference and the OCR text."""
     lines = []
     for raw in text.replace("\f", "\n").replace("\r", "").split("\n"):
         line = " ".join(raw.split())
-        if line:
+        if line and not RULE_RE.match(line.replace(" ", "")):
             lines.append(line)
     return "\n".join(lines)
 

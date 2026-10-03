@@ -39,6 +39,12 @@ class Cer(unittest.TestCase):
         ref = "TOTAL      12.50\nVAT  2.08\n"
         self.assertEqual(o.cer(ref, "TOTAL 12.50\n\n\nVAT 2.08"), 0.0)
 
+    def test_separator_rules_are_not_scored(self):
+        ref = "TOTAL 1.00\n--------------------------------\nTHANK YOU\n"
+        self.assertEqual(o.cer(ref, "TOTAL 1.00\nTHANK YOU"), 0.0)  # OCR dropped the rule
+        self.assertEqual(o.cer(ref, "TOTAL 1.00\n_____\nTHANK YOU"), 0.0)  # or garbled it
+        self.assertGreater(o.cer(ref, "TOTAL 1.00\n- 5 -\nTHANK YOU"), 0.0)  # short debris counts
+
     def test_one_wrong_digit(self):
         ref = "TOTAL 12.50"  # 11 characters
         self.assertAlmostEqual(o.cer(ref, "TOTAL 12.60"), 1 / 11)
