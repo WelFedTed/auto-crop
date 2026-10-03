@@ -4,6 +4,7 @@
 //! Lab planes, Gaussian blur and gradient fields on the detection proxy.
 
 use crate::Raster;
+use rayon::prelude::*;
 
 /// CIE Lab (D65) planes of an image, row-major, one `f32` per pixel.
 pub struct Lab {
@@ -38,20 +39,33 @@ fn f_lab(t: f32) -> f32 {
 pub fn to_lab(r: &Raster) -> Lab {
     let (w, h) = (r.width as usize, r.height as usize);
     let lut = srgb_lut();
-    let (mut l, mut a, mut b) = (vec![0.0; w * h], vec![0.0; w * h], vec![0.0; w * h]);
-    for (i, px) in r.data.as_chunks::<3>().0.iter().enumerate() {
-        let (rl, gl, bl) = (
-            lut[px[0] as usize],
-            lut[px[1] as usize],
-            lut[px[2] as usize],
-        );
-        let x = (0.412_456_4 * rl + 0.357_576_1 * gl + 0.180_437_5 * bl) / 0.950_47;
-        let y = 0.212_672_9 * rl + 0.715_152_2 * gl + 0.072_175 * bl;
-        let z = (0.019_333_9 * rl + 0.119_192 * gl + 0.950_304_1 * bl) / 1.088_83;
-        let (fx, fy, fz) = (f_lab(x), f_lab(y), f_lab(z));
-        l[i] = 116.0 * fy - 16.0;
-        a[i] = 500.0 * (fx - fy);
-        b[i] = 200.0 * (fy - fz);
+    let px = r.data.as_chunks::<3>().0;
+    let lab: Vec<[f32; 3]> = px
+        .par_chunks((w * 8).max(1))
+        .flat_map_iter(|chunk| {
+            chunk.iter().map(|px| {
+                let (rl, gl, bl) = (
+                    lut[px[0] as usize],
+                    lut[px[1] as usize],
+                    lut[px[2] as usize],
+                );
+                let x = (0.412_456_4 * rl + 0.357_576_1 * gl + 0.180_437_5 * bl) / 0.950_47;
+                let y = 0.212_672_9 * rl + 0.715_152_2 * gl + 0.072_175 * bl;
+                let z = (0.019_333_9 * rl + 0.119_192 * gl + 0.950_304_1 * bl) / 1.088_83;
+                let (fx, fy, fz) = (f_lab(x), f_lab(y), f_lab(z));
+                [116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz)]
+            })
+        })
+        .collect();
+    let (mut l, mut a, mut b) = (
+        Vec::with_capacity(w * h),
+        Vec::with_capacity(w * h),
+        Vec::with_capacity(w * h),
+    );
+    for p in &lab {
+        l.push(p[0]);
+        a.push(p[1]);
+        b.push(p[2]);
     }
     Lab { w, h, l, a, b }
 }
@@ -101,13 +115,49 @@ pub fn blur(src: &[f32], w: usize, h: usize, sigma: f32) -> Vec<f32> {
 
 impl Lab {
     pub fn blurred(&self, sigma: f32) -> Lab {
-        Lab {
-            w: self.w,
-            h: self.h,
-            l: blur(&self.l, self.w, self.h, sigma),
-            a: blur(&self.a, self.w, self.h, sigma),
-            b: blur(&self.b, self.w, self.h, sigma),
-        }
+        let (w, h) = (self.w, self.h);
+        let (l, (a, b)) = rayon::join(
+            || blur(&self.l, w, h, sigma),
+            || rayon::join(|| blur(&self.a, w, h, sigma), || blur(&self.b, w, h, sigma)),
+        );
+        Lab { w, h, l, a, b }
+    }
+
+    /// Gradient magnitude at a coarse scale: the planes are halved, blurred at `sigma` (in
+    /// full-resolution pixels), differentiated and brought back up. About four times cheaper than
+    /// blurring at full size, and the scale is wide enough that nothing is lost.
+    pub fn coarse_gradient(&self, sigma: f32) -> Vec<f32> {
+        let (w, h) = (self.w, self.h);
+        let (hw, hh) = (w.div_ceil(2), h.div_ceil(2));
+        let half = |p: &[f32]| -> Vec<f32> {
+            let mut o = vec![0.0f32; hw * hh];
+            for y in 0..hh {
+                let (y0, y1) = (2 * y, (2 * y + 1).min(h - 1));
+                for x in 0..hw {
+                    let (x0, x1) = (2 * x, (2 * x + 1).min(w - 1));
+                    o[y * hw + x] =
+                        0.25 * (p[y0 * w + x0] + p[y0 * w + x1] + p[y1 * w + x0] + p[y1 * w + x1]);
+                }
+            }
+            o
+        };
+        let small = Lab {
+            w: hw,
+            h: hh,
+            l: half(&self.l),
+            a: half(&self.a),
+            b: half(&self.b),
+        };
+        let g = small.blurred(sigma / 2.0).gradient();
+        // The half-size gradient is per half-size pixel: halve it for per-pixel units.
+        let mut out = vec![0.0f32; w * h];
+        out.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
+            let sy = (y / 2).min(hh - 1);
+            for (x, o) in row.iter_mut().enumerate() {
+                *o = 0.5 * g[sy * hw + (x / 2).min(hw - 1)];
+            }
+        });
+        out
     }
 
     /// Gradient magnitude of the three planes together (central differences; Lab units per pixel).
@@ -115,9 +165,9 @@ impl Lab {
         let (w, h) = (self.w, self.h);
         let mut g = vec![0.0f32; w * h];
         let at = |p: &[f32], x: usize, y: usize| p[y * w + x];
-        for y in 0..h {
+        g.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
             let (y0, y1) = (y.saturating_sub(1), (y + 1).min(h - 1));
-            for x in 0..w {
+            for (x, out) in row.iter_mut().enumerate() {
                 let (x0, x1) = (x.saturating_sub(1), (x + 1).min(w - 1));
                 let mut s = 0.0f32;
                 for p in [&self.l, &self.a, &self.b] {
@@ -125,9 +175,9 @@ impl Lab {
                     let dy = (at(p, x, y1) - at(p, x, y0)) / (y1 - y0).max(1) as f32;
                     s += dx * dx + dy * dy;
                 }
-                g[y * w + x] = s.sqrt();
+                *out = s.sqrt();
             }
-        }
+        });
         g
     }
 

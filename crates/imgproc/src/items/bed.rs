@@ -138,6 +138,47 @@ fn triage(lab: &Lab) -> Triage {
     }
 }
 
+/// Colour clusters of the candidate cells (single linkage within two cells per axis); keeps the
+/// cells of every cluster whose total count is at least 40% of the largest cluster's.
+fn keep_main_clusters(core: &[usize], count: &[u32]) -> Vec<usize> {
+    use std::collections::HashMap;
+    let index: HashMap<usize, usize> = core.iter().enumerate().map(|(i, c)| (*c, i)).collect();
+    let mut cluster = vec![usize::MAX; core.len()];
+    let mut totals: Vec<u64> = Vec::new();
+    for start in 0..core.len() {
+        if cluster[start] != usize::MAX {
+            continue;
+        }
+        let id = totals.len();
+        totals.push(0);
+        let mut stack = vec![start];
+        cluster[start] = id;
+        while let Some(i) = stack.pop() {
+            totals[id] += u64::from(count[core[i]]);
+            let (l, a, b) = unpack(core[i]);
+            for dl in -2isize..=2 {
+                for da in -2isize..=2 {
+                    for db in -2isize..=2 {
+                        if let Some(j) = pack(l + dl, a + da, b + db)
+                            && let Some(&k) = index.get(&j)
+                            && cluster[k] == usize::MAX
+                        {
+                            cluster[k] = id;
+                            stack.push(k);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let biggest = totals.iter().copied().max().unwrap_or(0);
+    core.iter()
+        .enumerate()
+        .filter(|(i, _)| totals[cluster[*i]] * 5 >= biggest * 2)
+        .map(|(_, c)| *c)
+        .collect()
+}
+
 impl BedModel {
     pub fn learn(lab: &Lab) -> BedModel {
         let (w, h) = (lab.w, lab.h);
@@ -184,11 +225,18 @@ impl BedModel {
             idx.sort_by_key(|&c| std::cmp::Reverse(count[c]));
             core = idx.into_iter().take(12).collect();
         }
+        // Items lying on the frame put their own colours into the ring. Group the candidate cells
+        // into colour clusters (cells within two steps of each other) and keep a cluster only if it
+        // is at least 40% as common as the commonest one: a wood grain or a two-tone checker
+        // passes, a few white print borders on a dark table do not.
+        core = keep_main_clusters(&core, &count);
         let mut tight = vec![false; n_cells];
         let mut soft = vec![false; n_cells];
         for &c in &core {
             let (l, a, b) = unpack(c);
-            for dl in -3isize..=3 {
+            // A little off the bed colour: up to 12 units darker or chroma-shifted, but only 4 units
+            // lighter (a lighter pixel is paper, not bed).
+            for dl in -3isize..=1 {
                 for da in -3isize..=3 {
                     for db in -3isize..=3 {
                         let Some(j) = pack(l + dl, a + da, b + db) else {

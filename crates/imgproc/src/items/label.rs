@@ -85,8 +85,9 @@ pub struct Comp {
     pub y0: usize,
     pub x1: usize,
     pub y1: usize,
-    /// Pixels on the first or last row or column of the frame.
-    pub border_px: usize,
+    /// Pixels on the first row, last column, last row and first column of the frame (top, right,
+    /// bottom, left).
+    pub border: [usize; 4],
 }
 
 /// 8-connected labelling. Label 0 is background; components are numbered from 1 in scan order.
@@ -106,7 +107,7 @@ pub fn label8(m: &[bool], w: usize, h: usize) -> (Vec<u32>, Vec<Comp>) {
             y0: usize::MAX,
             x1: 0,
             y1: 0,
-            border_px: 0,
+            border: [0; 4],
         };
         lab[start] = id;
         stack.push(start);
@@ -117,9 +118,10 @@ pub fn label8(m: &[bool], w: usize, h: usize) -> (Vec<u32>, Vec<Comp>) {
             c.x1 = c.x1.max(x);
             c.y0 = c.y0.min(y);
             c.y1 = c.y1.max(y);
-            if x == 0 || y == 0 || x + 1 == w || y + 1 == h {
-                c.border_px += 1;
-            }
+            c.border[0] += usize::from(y == 0);
+            c.border[1] += usize::from(x + 1 == w);
+            c.border[2] += usize::from(y + 1 == h);
+            c.border[3] += usize::from(x == 0);
             for dy in -1i32..=1 {
                 for dx in -1i32..=1 {
                     if dx == 0 && dy == 0 {
@@ -306,7 +308,7 @@ mod tests {
         let (lab, comps) = label8(&m, 30, 20);
         assert_eq!(comps.len(), 2);
         assert_eq!(comps[0].area, 25);
-        assert!(comps[0].border_px > 0 && comps[1].border_px == 0);
+        assert!(comps[0].border.iter().sum::<usize>() > 0 && comps[1].border == [0; 4]);
         assert_eq!(lab[0], 1);
         assert_eq!(lab[10 * 30 + 10], 2);
     }

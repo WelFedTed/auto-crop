@@ -19,6 +19,8 @@ pub struct Planes {
     pub noise: f32,
     /// Lightness of the bed (median of the agreeing border strips).
     pub bed_l: f32,
+    /// Sides of the working image that were cut at a uniform frame (top, right, bottom, left).
+    pub frame_side: [bool; 4],
 }
 
 impl Planes {
@@ -60,7 +62,7 @@ pub fn prepare(lab_full: &Lab, model: &BedModel) -> Planes {
     let (w, h) = (lab_full.w, lab_full.h);
     let lab = lab_full.blurred(1.0);
     let g1 = lab.gradient();
-    let g4 = lab.blurred(3.8).gradient();
+    let g4 = lab.coarse_gradient(3.8);
     let class = model.classify(&lab);
     let bed_g: Vec<f32> = g1
         .iter()
@@ -79,6 +81,7 @@ pub fn prepare(lab_full: &Lab, model: &BedModel) -> Planes {
         class,
         noise,
         bed_l: model.triage.bed_lab[0],
+        frame_side: [false; 4],
     }
 }
 
@@ -115,7 +118,7 @@ pub fn component_hull(labels: &[u32], w: usize, h: usize, c: &Comp) -> Vec<P> {
 /// re-runs).
 pub fn segment(p: &Planes, gain: f32, min_area_frac: f32) -> Segmentation {
     let (w, h) = (p.w, p.h);
-    let t_edge = (4.0 * p.noise.max(0.4)).clamp(3.0, 12.0) * gain;
+    let t_edge = (4.0 * p.noise.max(0.4)).clamp(1.6, 12.0) * gain;
     let crisp: Vec<bool> = (0..w * h)
         .map(|i| p.g1[i] >= t_edge && p.g1[i] >= 1.8 * p.g4[i])
         .collect();

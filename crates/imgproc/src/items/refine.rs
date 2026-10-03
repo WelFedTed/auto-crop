@@ -332,8 +332,8 @@ pub fn inspect_inside(q: &[P; 4], f: &Fields) -> Inside {
         } else {
             (v, u, lv, lu)
         };
-        let steps = n_along as usize;
-        let samples = (n_across as usize).max(16);
+        let steps = (n_along as usize).min(240);
+        let samples = (n_across as usize).clamp(16, 256);
         let mut bits = vec![false; samples];
         let an = (along.0 / n_along, along.1 / n_along);
         let cn = (across.0 / n_across, across.1 / n_across);
@@ -368,8 +368,8 @@ pub fn inspect_inside(q: &[P; 4], f: &Fields) -> Inside {
             }
             let (r0, r1) = best_run;
             let span = (r1 + 1 - r0) as f64 / samples as f64;
-            let touches = r0 as f64 <= 0.015 * samples as f64 + 1.0
-                || r1 as f64 >= 0.985 * samples as f64 - 1.0;
+            let touches = r0 as f64 <= 0.012 * samples as f64 + 1.0
+                || r1 as f64 >= 0.988 * samples as f64 - 2.0;
             if span >= 0.97 {
                 full_lines.push(s);
             }

@@ -30,6 +30,7 @@
 
 mod bed;
 mod color;
+mod frame;
 mod geom;
 mod label;
 mod refine;
@@ -273,6 +274,37 @@ pub fn detect_items(src: &Raster, opts: &ItemsOptions) -> ItemsDetection {
     } else {
         src.clone()
     };
+    // A uniform frame around the picture (a white margin, a scanner border) is not the bed: cut
+    // it off, look for items inside, and map the quads back (ROADMAP M10.02).
+    let trim = frame::find(&proxy);
+    if trim == [0; 4] {
+        return detect_in(&proxy, opts, [false; 4]);
+    }
+    let (pw, ph) = (proxy.width as usize, proxy.height as usize);
+    let (x0, y0) = (trim[3], trim[0]);
+    let (cw, ch) = (pw - trim[1] - trim[3], ph - trim[0] - trim[2]);
+    let cropped = frame::crop(&proxy, x0, y0, cw, ch);
+    let mut det = detect_in(
+        &cropped,
+        opts,
+        [trim[0] > 0, trim[1] > 0, trim[2] > 0, trim[3] > 0],
+    );
+    let map = |p: &mut Pt| {
+        p.x = (x0 as f64 + p.x * cw as f64) / pw as f64;
+        p.y = (y0 as f64 + p.y * ch as f64) / ph as f64;
+    };
+    for it in &mut det.items {
+        it.quad.iter_mut().for_each(map);
+    }
+    for r in &mut det.diagnostics.rejected {
+        r.quad.iter_mut().for_each(map);
+    }
+    det.diagnostics.proxy_width = proxy.width;
+    det.diagnostics.proxy_height = proxy.height;
+    det
+}
+
+fn detect_in(proxy: &Raster, opts: &ItemsOptions, frame_side: [bool; 4]) -> ItemsDetection {
     let (w, h) = (proxy.width as usize, proxy.height as usize);
     let mut diag = Diagnostics {
         proxy_width: proxy.width,
@@ -294,12 +326,13 @@ pub fn detect_items(src: &Raster, opts: &ItemsOptions) -> ItemsDetection {
             diagnostics: diag,
         };
     }
-    let lab_full = color::to_lab(&proxy);
+    let lab_full = color::to_lab(proxy);
     let model = bed::BedModel::learn(&lab_full.blurred(1.0));
     diag.bed_sides_agreeing = model.triage.sides_agreeing;
     diag.bed_cells = model.cells;
     diag.bed_spread = model.triage.spread;
-    let planes = segment::prepare(&lab_full, &model);
+    let mut planes = segment::prepare(&lab_full, &model);
+    planes.frame_side = frame_side;
     diag.noise = planes.noise;
     let seg = segment::segment(&planes, 1.0, opts.min_area_frac);
     diag.edge_threshold = seg.t_edge;
@@ -452,7 +485,9 @@ fn add_blob(
     // edge: a narrow window keeps the snap on the outer edge instead of an inner one (a card's
     // header band, a picture inside its border).
     let window = |r: &Rect| (0.03 * r.hw.min(r.hh) * 2.0).clamp(3.5, 8.0);
-    let partial = c.border_px >= ((0.02 * planes.short() as f32) as usize).max(3);
+    let min_contact = ((0.02 * planes.short() as f32) as usize).max(3);
+    // Contact with a side that is the edge of a trimmed frame is not a cut-off item.
+    let partial = (0..4).any(|s| !planes.frame_side[s] && c.border[s] >= min_contact);
     if blob.fill >= 0.9 {
         let q = canonical_quad(rect_quad(&blob.rect));
         let mut r = refine::refine(&q, fields, window(&blob.rect));
@@ -780,3 +815,33 @@ fn reading_order(items: &mut Vec<ItemCandidate>) {
 
 #[cfg(test)]
 mod tests;
+
+/// A picture of what the segmentation saw, for local debugging (not a stable API): grey = pixels
+/// the flood fill reached (bed and soft shadow), white = foreground, red = crisp edge pixels,
+/// green marks pixels of bed-coloured class that the flood did not reach.
+#[doc(hidden)]
+pub fn debug_masks(src: &Raster, opts: &ItemsOptions) -> Raster {
+    let proxy = if src.width.max(src.height) > opts.proxy_edge {
+        resize_to_fit(src, opts.proxy_edge)
+    } else {
+        src.clone()
+    };
+    let (w, h) = (proxy.width as usize, proxy.height as usize);
+    let lab_full = color::to_lab(&proxy);
+    let model = bed::BedModel::learn(&lab_full.blurred(1.0));
+    let planes = segment::prepare(&lab_full, &model);
+    let seg = segment::segment(&planes, 1.0, opts.min_area_frac);
+    let mut out = Raster::new(w as u32, h as u32);
+    for i in 0..w * h {
+        let fg = seg.labels[i] != 0;
+        let mut c = if fg { [255, 255, 255] } else { [70, 70, 70] };
+        if !fg && planes.class[i] == bed::CLASS_FG {
+            c = [0, 120, 0];
+        }
+        if seg.crisp[i] {
+            c = [230, 40, 40];
+        }
+        out.data[i * 3..i * 3 + 3].copy_from_slice(&c);
+    }
+    out
+}
