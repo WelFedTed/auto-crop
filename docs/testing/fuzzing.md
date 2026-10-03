@@ -25,11 +25,23 @@ The libFuzzer inputs are capped at 1 MiB (`-max_len`). AddressSanitizer is cargo
 
 ## CI (`.github/workflows/fuzz.yml`)
 
-- **PR smoke**: 60 s per target in a matrix (one job each, always reporting). The path filter is a step inside the job (a diff against the base for `crates/codecs/`, `crates/core/`, `fuzz/`, the workflow itself); when nothing matches, the remaining steps are skipped and the job is green. Reason: a required check skipped by a `paths:` filter never reports (see [ci-guards](../policy/ci-guards.md) section 3).
+- **PR smoke**: 60 s per target in a matrix (one job each, always reporting). The path filter is a step inside the job (a diff against the base for `crates/codecs/`, `crates/core/`, `fuzz/`, the root `Cargo.toml` and `Cargo.lock` so a dependency bump is fuzzed too, the workflow itself); when nothing matches, the remaining steps are skipped and the job is green. Reason: a required check skipped by a `paths:` filter never reports (see [ci-guards](../policy/ci-guards.md) section 3).
 - **Nightly**: 1 h per target; the corpus is restored from and saved to the Actions cache so the hours accumulate (the roadmap wants at least 72 h per target before 1.0; the run time of every job is in its log).
 - **Manual**: `workflow_dispatch` with `seconds` (default 300, the M1.70 acceptance) and `targets`.
 - The fuzzers build against the same dependency versions as the product: the workflow copies the root `Cargo.lock` to `fuzz/Cargo.lock` before building. Nightly is pinned to a date (`FUZZ_NIGHTLY`), cargo-fuzz to 0.13.
-- A crash fails the job and uploads `fuzz/artifacts/` (the crashing input and its minimised form are in the log as hex and base64).
+- A crash fails the job and uploads `fuzz/artifacts/` (the crashing input is also in the log as base64, first 4 KiB).
+- **Cargo-fuzz and the musl default**: the prebuilt cargo-fuzz binary is musl and defaults to the musl target, which cannot use a sanitizer; the workflow passes `--target x86_64-unknown-linux-gnu`.
+
+## Acceptance evidence (M1.70)
+
+Manual runs of `fuzz.yml` with `seconds=300`, ubuntu-22.04, nightly-2026-10-01, ASan:
+
+| Run | Result |
+|---|---|
+| [37117026606](https://github.com/WelFedTed/auto-crop/actions/runs/37117026606) | `probe`, `limits`, `metadata` 5 minutes, no crash; `editstate_json` crashed after 2.4 M executions (the float round trip below) |
+| [37118704754](https://github.com/WelFedTed/auto-crop/actions/runs/37118704754) (after the two fixes in the table below) | all four targets 5 minutes, no crash: `probe` 1.57 M executions (5.2 k/s), `limits` 0.45 M (1.5 k/s), `metadata` 0.55 M (1.8 k/s), `editstate_json` 8.4 M (27.9 k/s); peak RSS 421 to 571 MB; each started from the corpus the previous run saved to the cache (767 to 3,246 files) plus the seeds |
+
+Not met yet: the 1 h nightly (the first scheduled run is the next 02:23 UTC), and 72 h per target (M1.71, before 1.0). The turbojpeg ASan runs wait for that feature.
 
 ## From a crash to a test
 
