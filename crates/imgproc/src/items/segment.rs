@@ -17,8 +17,6 @@ pub struct Planes {
     pub g4: Vec<f32>,
     pub class: Vec<u8>,
     pub noise: f32,
-    /// Lightness of the bed (median of the agreeing border strips).
-    pub bed_l: f32,
     /// Sides of the working image that were cut at a uniform frame (top, right, bottom, left).
     pub frame_side: [bool; 4],
 }
@@ -80,7 +78,6 @@ pub fn prepare(lab_full: &Lab, model: &BedModel) -> Planes {
         g4,
         class,
         noise,
-        bed_l: model.triage.bed_lab[0],
         frame_side: [false; 4],
     }
 }

@@ -13,6 +13,10 @@
 use super::color::{Lab, de76};
 use super::geom::{P, area, cross, len, sub};
 
+/// How far outward of the mask outline an edge is looked for, in pixels (the mask is, if anything,
+/// a little too big, not too small).
+const OUTWARD: f64 = 4.0;
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SideStat {
     /// Share of sample points that have a crisp edge on the fitted line (0..1).
@@ -133,22 +137,49 @@ pub fn snap(quad: &[P; 4], f: &Fields, window: f64) -> Option<Refined> {
         for k in 0..n_samples {
             let s = l * (0.1 + 0.8 * (k as f64 + 0.5) / n_samples as f64);
             let b = (p0.0 + t.0 * s, p0.1 + t.1 * s);
-            let (mut best, mut best_d, mut best_v) = (f64::MIN, 0.0f64, 0.0f32);
-            let steps = (window * 2.0) as i32;
+            let steps = (window * 2.0 + 2.0 * OUTWARD) as i32;
+            // The gradient profile along the normal; its crisp local maxima are the candidate edges.
+            let mut prof: Vec<(f64, f32)> = Vec::with_capacity(steps as usize + 1);
             for j in 0..=steps {
                 let d = -window + j as f64 * 0.5;
                 let (x, y) = (b.0 + n.0 * d, b.1 + n.1 * d);
                 if x < 0.0 || y < 0.0 || x > (f.w - 1) as f64 || y > (f.h - 1) as f64 {
                     continue;
                 }
-                let v = bilinear(f, f.g, x, y);
-                let score = f64::from(v) * (1.0 - 0.35 * d.abs() / window);
-                if score > best {
-                    best = score;
-                    best_d = d;
-                    best_v = v;
+                prof.push((d, bilinear(f, f.g, x, y)));
+            }
+            let mut peaks: Vec<(f64, f32)> = Vec::new();
+            for k in 0..prof.len() {
+                let v = prof[k].1;
+                let left = if k > 0 { prof[k - 1].1 } else { 0.0 };
+                let right = prof.get(k + 1).map_or(0.0, |p| p.1);
+                if v >= left
+                    && v >= right
+                    && crisp_near(f, b.0 + n.0 * prof[k].0, b.1 + n.1 * prof[k].0)
+                {
+                    peaks.push(prof[k]);
                 }
             }
+            // The outermost crisp edge that is at least a quarter as strong as the strongest: a
+            // print's white border has a weaker outer edge than the picture edge inside it, and the
+            // outline belongs on the outer one.
+            let vmax = peaks.iter().map(|p| p.1).fold(0.0f32, f32::max);
+            let chosen = peaks
+                .iter()
+                .filter(|p| p.1 >= 0.25 * vmax)
+                .max_by(|a, b| a.0.total_cmp(&b.0))
+                .copied();
+            let (best_d, best_v) = chosen.unwrap_or_else(|| {
+                // Nothing crisp: the strongest gradient near the outline, as before.
+                prof.iter()
+                    .copied()
+                    .max_by(|a, b| {
+                        let sa = f64::from(a.1) * (1.0 - 0.35 * a.0.abs() / window);
+                        let sb = f64::from(b.1) * (1.0 - 0.35 * b.0.abs() / window);
+                        sa.total_cmp(&sb)
+                    })
+                    .unwrap_or((0.0, 0.0))
+            });
             let sup = best_v > 0.0 && crisp_near(f, b.0 + n.0 * best_d, b.1 + n.1 * best_d);
             pts.push((s, best_d, sup));
         }
@@ -370,10 +401,10 @@ pub fn inspect_inside(q: &[P; 4], f: &Fields) -> Inside {
             let span = (r1 + 1 - r0) as f64 / samples as f64;
             let touches = r0 as f64 <= 0.012 * samples as f64 + 1.0
                 || r1 as f64 >= 0.988 * samples as f64 - 2.0;
-            if span >= 0.97 {
+            if span >= 0.85 {
                 full_lines.push(s);
             }
-            if span >= 0.55 && span < 0.97 && touches {
+            if (0.55..0.97).contains(&span) && touches {
                 any_line = true;
             }
         }
@@ -421,110 +452,4 @@ pub fn cut_quad(q: &[P; 4], axis: usize, s: f64) -> ([P; 4], [P; 4]) {
         let (left, right) = (lerp(q[0], q[3], s), lerp(q[1], q[2], s));
         ([q[0], q[1], right, left], [left, right, q[2], q[3]])
     }
-}
-
-/// The white border of a print on a white bed is the colour of the bed, so the mask stops at the
-/// picture. This looks outward from each side for a faint straight step (the print's own edge or
-/// the start of its shadow), averaged along the whole side so noise cancels, and accepts it only
-/// when the band between the picture and the step is as bright and flat as the bed itself
-/// (paper), not darker (a shadow). Needs three sides with similar widths; the fourth takes their
-/// median. Returns the grown quad and the mean width in pixels.
-pub fn extend_border(q: &[P; 4], f: &Fields, class: &[u8], bed_l: f32) -> Option<([P; 4], f32)> {
-    // Only a bed as light as paper can swallow a print's white border; elsewhere the faint steps
-    // next to a strong edge are JPEG ringing, not a border.
-    if bed_l < 80.0 {
-        return None;
-    }
-    let mut found: [Option<f64>; 4] = [None; 4];
-    for i in 0..4 {
-        let (p0, p1) = (q[i], q[(i + 1) % 4]);
-        let l = len(sub(p1, p0));
-        let t = ((p1.0 - p0.0) / l, (p1.1 - p0.1) / l);
-        let n = (t.1, -t.0);
-        let dmax = (0.14 * l.min(len(sub(q[(i + 2) % 4], q[(i + 1) % 4])))).clamp(4.0, 30.0);
-        let ns = ((l * 0.76 / 1.5) as usize).clamp(12, 120);
-        let nd = dmax as usize + 3;
-        let mut prof = vec![0.0f64; nd + 2];
-        let mut bed_frac = vec![0.0f64; nd + 2];
-        let mut valid = true;
-        for (di, (pv, bf)) in prof.iter_mut().zip(bed_frac.iter_mut()).enumerate() {
-            let d = di as f64 - 2.0;
-            let (mut sum, mut cnt, mut bed) = (0.0f64, 0usize, 0usize);
-            for k in 0..ns {
-                let s = l * (0.12 + 0.76 * (k as f64 + 0.5) / ns as f64);
-                let (x, y) = (p0.0 + t.0 * s + n.0 * d, p0.1 + t.1 * s + n.1 * d);
-                if x < 1.0 || y < 1.0 || x > (f.w - 2) as f64 || y > (f.h - 2) as f64 {
-                    continue;
-                }
-                sum += f64::from(Lab::sample(&f.lab.l, f.w, f.h, x - 0.5, y - 0.5));
-                bed += usize::from(class[y as usize * f.w + x as usize] == 2);
-                cnt += 1;
-            }
-            if cnt < ns / 2 {
-                valid = false;
-                break;
-            }
-            *pv = sum / cnt as f64;
-            *bf = bed as f64 / cnt as f64;
-        }
-        if !valid {
-            continue;
-        }
-        // |D(d)| = |P(d+1) - P(d-1)| for d from 3 up.
-        let mut ds: Vec<(usize, f64)> = Vec::new();
-        for di in 5..nd {
-            ds.push((di, (prof[di + 1] - prof[di - 1]).abs()));
-        }
-        if ds.is_empty() {
-            continue;
-        }
-        let mut mags: Vec<f64> = ds.iter().map(|x| x.1).collect();
-        mags.sort_by(f64::total_cmp);
-        let med = mags[mags.len() / 2];
-        let &(pk, val) = ds.iter().max_by(|a, b| a.1.total_cmp(&b.1))?;
-        if val < 2.2 || val < 2.5 * med.max(0.2) {
-            continue;
-        }
-        // The band between the picture and the step (offsets 2..pk-1) must be bed-bright, flat.
-        let band = &prof[4..pk.saturating_sub(1).max(5)];
-        if band.is_empty() {
-            continue;
-        }
-        let mean = band.iter().sum::<f64>() / band.len() as f64;
-        let spread = band.iter().fold(f64::MIN, |a, b| a.max(*b))
-            - band.iter().fold(f64::MAX, |a, b| a.min(*b));
-        let bedness =
-            bed_frac[4..pk.saturating_sub(1).max(5)].iter().sum::<f64>() / band.len() as f64;
-        if (mean - f64::from(bed_l)).abs() > 7.0 || spread > 6.0 || bedness < 0.7 {
-            continue;
-        }
-        found[i] = Some(pk as f64 - 2.0 + 0.5);
-    }
-    let have: Vec<f64> = found.iter().flatten().copied().collect();
-    if have.len() < 3 {
-        return None;
-    }
-    let mut sorted = have.clone();
-    sorted.sort_by(f64::total_cmp);
-    let med = sorted[sorted.len() / 2];
-    if have.iter().any(|w| *w < 0.4 * med || *w > 2.5 * med) {
-        return None;
-    }
-    let widths: Vec<f64> = found.iter().map(|w| w.unwrap_or(med)).collect();
-    let mut lines: Vec<Line> = Vec::with_capacity(4);
-    for i in 0..4 {
-        let (p0, p1) = (q[i], q[(i + 1) % 4]);
-        let l = len(sub(p1, p0));
-        let t = ((p1.0 - p0.0) / l, (p1.1 - p0.1) / l);
-        let n = (t.1, -t.0);
-        lines.push(Line {
-            p: (p0.0 + n.0 * widths[i], p0.1 + n.1 * widths[i]),
-            d: t,
-        });
-    }
-    let mut out = [(0.0, 0.0); 4];
-    for i in 0..4 {
-        out[i] = intersect(&lines[(i + 3) % 4], &lines[i])?;
-    }
-    Some((out, (widths.iter().sum::<f64>() / 4.0) as f32))
 }

@@ -40,7 +40,7 @@ fn dist(a: [f32; 3], b: [f32; 3]) -> f32 {
 fn depth(
     n: usize,
     line: &dyn Fn(usize) -> ([f32; 3], f32),
-    band: &dyn Fn(usize, usize) -> [f32; 3],
+    step: &dyn Fn(usize, usize) -> f32,
 ) -> usize {
     let limit = ((MAX_FRAC * n as f32) as usize).max(2);
     let (first_mean, first_std) = line(0);
@@ -64,10 +64,10 @@ fn depth(
     if s <= MAX_STD && dist(m, first_mean) <= 15.0 {
         return 0;
     }
-    // What lies beyond must not be the same colour as the frame: a margin of empty bed in front of
-    // some items is no frame, a white margin around a dark table is.
-    let beyond = band(d, (d + (0.08 * n as f32) as usize + 4).min(n));
-    if dist(beyond, first_mean) < 25.0 {
+    // The frame ends in a straight line across the whole side: nearly every position changes
+    // colour at once. A margin of empty bed in front of some items does not (only the columns of
+    // the items change, at different rows).
+    if step(d - 1, (d + 2).min(n - 1)) < 0.9 {
         return 0;
     }
     d
@@ -81,57 +81,58 @@ pub fn find(r: &Raster) -> [usize; 4] {
         return [0; 4];
     }
     let px = |x: usize, y: usize| r.pixel(x as u32, y as u32);
-    let median3 = |mut v: [Vec<u8>; 3]| -> [f32; 3] {
-        std::array::from_fn(|c| {
-            v[c].sort_unstable();
-            v[c].get(v[c].len() / 2).map_or(0.0, |x| f32::from(*x))
-        })
-    };
-    let band_rows = |from_top: bool| {
-        move |a: usize, b: usize| -> [f32; 3] {
-            let mut v: [Vec<u8>; 3] = Default::default();
-            for i in a..b {
-                let y = if from_top { i } else { h - 1 - i };
-                for x in (0..w).step_by(2) {
-                    let p = px(x, y);
-                    (0..3).for_each(|c| v[c].push(p[c]));
-                }
-            }
-            median3(v)
+    // The share of positions along a side where line `a` and line `b` differ clearly in colour.
+    let step_rows = |from_top: bool| {
+        move |a: usize, b: usize| -> f32 {
+            let row = |i: usize| if from_top { i } else { h - 1 - i };
+            let n = (0..w)
+                .step_by(2)
+                .filter(|&x| {
+                    let (p, q) = (px(x, row(a)), px(x, row(b)));
+                    let d: f32 = (0..3)
+                        .map(|c| (f32::from(p[c]) - f32::from(q[c])).powi(2))
+                        .sum();
+                    d.sqrt() > 25.0
+                })
+                .count();
+            n as f32 / w.div_ceil(2) as f32
         }
     };
-    let band_cols = |from_left: bool| {
-        move |a: usize, b: usize| -> [f32; 3] {
-            let mut v: [Vec<u8>; 3] = Default::default();
-            for i in a..b {
-                let x = if from_left { i } else { w - 1 - i };
-                for y in (0..h).step_by(2) {
-                    let p = px(x, y);
-                    (0..3).for_each(|c| v[c].push(p[c]));
-                }
-            }
-            median3(v)
+    let step_cols = |from_left: bool| {
+        move |a: usize, b: usize| -> f32 {
+            let col = |i: usize| if from_left { i } else { w - 1 - i };
+            let n = (0..h)
+                .step_by(2)
+                .filter(|&y| {
+                    let (p, q) = (px(col(a), y), px(col(b), y));
+                    let d: f32 = (0..3)
+                        .map(|c| (f32::from(p[c]) - f32::from(q[c])).powi(2))
+                        .sum();
+                    d.sqrt() > 25.0
+                })
+                .count();
+            n as f32 / h.div_ceil(2) as f32
         }
     };
     let top = depth(
         h,
         &|i| line_stats(r, (0..w).map(|x| px(x, i))),
-        &band_rows(true),
+        &step_rows(true),
     );
     let bottom = depth(
         h,
         &|i| line_stats(r, (0..w).map(|x| px(x, h - 1 - i))),
-        &band_rows(false),
+        &step_rows(false),
     );
     let left = depth(
         w,
         &|i| line_stats(r, (0..h).map(|y| px(i, y))),
-        &band_cols(true),
+        &step_cols(true),
     );
     let right = depth(
         w,
         &|i| line_stats(r, (0..h).map(|y| px(w - 1 - i, y))),
-        &band_cols(false),
+        &step_cols(false),
     );
     let mut t = [top, right, bottom, left];
     // A real frame is at least 1.2% of its side (a few pixels of bed above a print are not one),

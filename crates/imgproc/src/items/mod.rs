@@ -175,6 +175,8 @@ pub struct Diagnostics {
     pub bed_sides_agreeing: u8,
     pub bed_cells: usize,
     pub bed_spread: f32,
+    /// Median Lab colour of the bed (the agreeing border strips).
+    pub bed_lab: [f32; 3],
     pub noise: f32,
     pub edge_threshold: f32,
     pub components: usize,
@@ -373,6 +375,7 @@ fn detect_in(
     diag.bed_sides_agreeing = model.triage.sides_agreeing;
     diag.bed_cells = model.cells;
     diag.bed_spread = model.triage.spread;
+    diag.bed_lab = model.triage.bed_lab;
     mark("model");
     let mut planes = segment::prepare(&lab_full, &model);
     planes.frame_side = frame_side;
@@ -487,7 +490,7 @@ fn detect_in(
     mark("residual");
     let mut items: Vec<ItemCandidate> = work
         .into_iter()
-        .map(|wk| finish_item(wk, &planes, w, h, opts.profile))
+        .map(|wk| finish_item(wk, w, h, opts.profile))
         .collect();
     reading_order(&mut items);
 
@@ -539,17 +542,8 @@ fn add_blob(
     let partial = (0..4).any(|s| !planes.frame_side[s] && c.border[s] >= min_contact);
     if blob.fill >= 0.9 {
         let q = canonical_quad(rect_quad(&blob.rect));
-        let mut r = refine::refine(&q, fields, window(&blob.rect));
+        let r = refine::refine(&q, fields, window(&blob.rect));
         let mut reasons = Vec::new();
-        if let Some((grown, _)) =
-            refine::extend_border(&r.quad, fields, &planes.class, planes.bed_l)
-        {
-            // The print's white border is the colour of the bed: the outline sits on the faint
-            // outer edge instead, which is held as low contrast.
-            r.quad = grown;
-            refine::measure_contrast(&mut r, fields);
-            reasons.push(reason(ReasonCode::LowContrastEdge));
-        }
         let inside = refine::inspect_inside(&r.quad, fields);
         if let refine::Inside::Seam { axis, pos } = inside {
             // Two parallel crisp lines across the whole rectangle, opposite in polarity: the white
@@ -701,16 +695,7 @@ fn unexplained_edge(seg: &segment::Segmentation, work: &[Working], w: usize, h: 
         / short as f64
 }
 
-/// Bed lightness (CIE L*) from which a print's white border cannot be told from the bed.
-const BRIGHT_BED_L: f32 = 88.0;
-
-fn finish_item(
-    wk: Working,
-    planes: &Planes,
-    w: usize,
-    h: usize,
-    profile: SplitProfile,
-) -> ItemCandidate {
+fn finish_item(wk: Working, w: usize, h: usize, profile: SplitProfile) -> ItemCandidate {
     let q = canonical_quad(wk.quad);
     let (e0, e1) = (
         geom::len(geom::sub(q[1], q[0])),
@@ -747,16 +732,6 @@ fn finish_item(
                 reasons.push(reason(ReasonCode::LowContrastEdge));
             }
         }
-    }
-    // A white lid (L* 88 and up): the white border of a print is the colour of the bed, so the
-    // outline may be missing it and no gap can be trusted (M10.11, M10.60). Held, never Good.
-    if planes.bed_l >= BRIGHT_BED_L
-        && wk.kind == ItemKind::Rect
-        && !reasons
-            .iter()
-            .any(|r| r.code == ReasonCode::LowContrastEdge)
-    {
-        reasons.push(reason(ReasonCode::LowContrastEdge));
     }
     if wk.partial {
         reasons.push(reason(ReasonCode::PartialFrame));

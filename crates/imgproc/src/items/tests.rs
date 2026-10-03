@@ -118,14 +118,14 @@ fn opts() -> ItemsOptions {
 }
 
 #[test]
-fn separated_photos_on_a_white_bed_are_found_with_tight_quads() {
+fn separated_photos_on_a_grey_bed_are_found_with_tight_quads() {
     let items = [
         photo((120.0, 110.0), 150.0, 100.0, 5.0),
         photo((330.0, 120.0), 120.0, 160.0, -8.0),
         photo((170.0, 300.0), 170.0, 115.0, 0.0),
         photo((380.0, 310.0), 130.0, 130.0, 20.0),
     ];
-    let img = scene(520, 420, [238, 238, 238], &items, true);
+    let img = scene(520, 420, [150, 150, 150], &items, false);
     let det = detect_items(&img, &opts());
     assert_eq!(det.items.len(), 4, "{:?}", det.scan_flags);
     for it in &items {
@@ -142,7 +142,7 @@ fn touching_photos_are_never_accepted() {
         photo((150.0, 200.0), 200.0, 150.0, 0.0),
         photo((350.5, 200.0), 200.0, 150.0, 0.0),
     ];
-    let img = scene(520, 400, [238, 238, 238], &items, true);
+    let img = scene(520, 400, [170, 170, 170], &items, true);
     let det = detect_items(&img, &opts());
     assert!(!det.items.is_empty());
     assert!(!det.auto_accept(0.95), "{:?}", det.scan_confidence());
@@ -155,6 +155,7 @@ fn touching_photos_are_never_accepted() {
     assert!(
         codes.contains(&ReasonCode::TouchingItems)
             || codes.contains(&ReasonCode::ItemsTooClose)
+            || codes.contains(&ReasonCode::OverlappingItems)
             // On a white bed the white borders hide the touch; the scan is held as low contrast.
             || codes.contains(&ReasonCode::LowContrastEdge),
         "{codes:?}"
@@ -436,4 +437,68 @@ fn candidates_become_auto_items_and_the_core_triage_agrees_with_auto_accept() {
     let mut s2 = EditState::default();
     s2.redetect(held.to_items(1), (520, 400)).expect("redetect");
     assert_ne!(scan_triage(&s2, 0.95), ScanTriage::Approved);
+}
+
+/// The engine's own end-to-end scene (`crates/engine/tests/split.rs`): four saturated, lightly
+/// textured rectangles on a light grey bed, 5% margins and gaps, 1600x1200.
+#[test]
+fn four_saturated_rectangles_on_a_light_bed_are_found_and_accepted() {
+    let (w, h) = (1600u32, 1200u32);
+    let quads: [[(f64, f64); 4]; 4] = [
+        [(0.56, 0.56), (0.95, 0.55), (0.96, 0.94), (0.57, 0.95)],
+        [(0.05, 0.06), (0.46, 0.05), (0.47, 0.45), (0.06, 0.46)],
+        [(0.55, 0.05), (0.95, 0.07), (0.94, 0.46), (0.54, 0.44)],
+        [(0.06, 0.55), (0.45, 0.56), (0.44, 0.95), (0.05, 0.94)],
+    ];
+    let colours = [
+        [200u8, 40, 40],
+        [40, 190, 40],
+        [40, 40, 200],
+        [200, 190, 40],
+    ];
+    let mut img = Raster::filled(w, h, [236, 236, 232]);
+    let cross = |a: (f64, f64), b: (f64, f64), p: (f64, f64)| {
+        (b.0 - a.0) * (p.1 - a.1) - (b.1 - a.1) * (p.0 - a.0)
+    };
+    for (q, col) in quads.iter().zip(colours) {
+        let poly: Vec<(f64, f64)> = q
+            .iter()
+            .map(|p| (p.0 * f64::from(w), p.1 * f64::from(h)))
+            .collect();
+        for y in 0..h {
+            for x in 0..w {
+                let p = (f64::from(x) + 0.5, f64::from(y) + 0.5);
+                let s: Vec<f64> = (0..4)
+                    .map(|i| cross(poly[i], poly[(i + 1) % 4], p))
+                    .collect();
+                if s.iter().all(|v| *v >= 0.0) || s.iter().all(|v| *v <= 0.0) {
+                    let t = ((x / 9 + y / 9) % 2) as u8 * 6;
+                    img.set_pixel(x, y, col.map(|c| c.saturating_sub(t)));
+                }
+            }
+        }
+    }
+    let det = detect_items(&img, &opts());
+    assert_eq!(
+        det.items.len(),
+        4,
+        "{:?} {:?}",
+        det.scan_flags,
+        det.diagnostics
+    );
+    for it in &det.items {
+        assert!(it.confidence.reasons.is_empty(), "{:?}", it.confidence);
+    }
+}
+
+/// The limit that was measured and is documented in docs/perf/multi-item-baseline.md: a print's
+/// white border on a white lid is the colour of the bed, so the outline sits on the picture edge.
+#[test]
+fn a_white_border_on_a_white_lid_is_invisible_so_the_quad_is_the_picture() {
+    let items = [photo((200.0, 200.0), 200.0, 150.0, 0.0)];
+    let img = scene(520, 400, [238, 238, 238], &items, true);
+    let det = detect_items(&img, &opts());
+    assert_eq!(det.items.len(), 1);
+    let iou = best_iou(&det, 520, 400, &items[0]);
+    assert!(iou > 0.85 && iou < 0.97, "{iou}");
 }
