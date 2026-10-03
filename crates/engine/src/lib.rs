@@ -27,7 +27,9 @@ pub mod util;
 pub use api::*;
 pub use engine::{Engine, Notify};
 pub use error::ErrKind;
-pub use items_detect::{DetectedItem, ItemDetector, NoSplit, SplitDetection};
+pub use items_detect::{
+    ClassicalItemDetector, DetectedItem, ItemDetector, NoSplit, SplitDetection,
+};
 pub use paths::AppPaths;
 pub use scan::{CropImage, ProcessedInfo};
 pub use settings::Settings;

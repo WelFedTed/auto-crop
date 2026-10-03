@@ -10,7 +10,7 @@ use crate::commit::{free_name, swap, verify_temp, write_temp};
 use crate::enumerate;
 use crate::error::{ErrKind, Result, codec_err};
 use crate::fsplan::ReservedKeys;
-use crate::items_detect::{ItemDetector, NoSplit, worst_confidence};
+use crate::items_detect::{ClassicalItemDetector, ItemDetector, worst_confidence};
 use crate::paths::AppPaths;
 use crate::scan::{GroupOut, crop_views};
 use crate::settings::Settings;
@@ -258,7 +258,7 @@ pub(crate) struct Inner {
     pub(crate) renders: Mutex<RenderCache>,
     queue: Mutex<VecDeque<u32>>,
     workers: AtomicUsize,
-    /// The multi-item detector (M10); `NoSplit` until one is installed.
+    /// The multi-item detector (M10): the classical one of `imgproc::items` unless one is installed.
     pub(crate) detector: Mutex<Arc<dyn ItemDetector>>,
     /// Output names of split saves in flight, so two scans never plan the same file (M10.22).
     pub(crate) reserved: Mutex<ReservedKeys>,
@@ -313,7 +313,7 @@ impl Engine {
                 renders: Mutex::new(RenderCache::default()),
                 queue: Mutex::new(VecDeque::new()),
                 workers: AtomicUsize::new(0),
-                detector: Mutex::new(Arc::new(NoSplit)),
+                detector: Mutex::new(Arc::new(ClassicalItemDetector)),
                 reserved: Mutex::new(ReservedKeys::default()),
                 session: Mutex::new(auto_crop_core::SessionHistory::new()),
             }),

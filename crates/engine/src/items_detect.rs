@@ -55,6 +55,68 @@ impl ItemDetector for NoSplit {
     }
 }
 
+/// The classical detector of `imgproc::items` (M10.01-M10.15) behind the seam.
+///
+/// Only `Outcome::Many` is a split; every other outcome (no items, one item, the single-item
+/// route) is "nothing to say" and the engine's single-item route runs. Scan-level hold reasons
+/// (unstable split, uncertain bed, too many items, unexplained edges) are copied onto every item,
+/// because the engine holds a scan by its items and "any of them holds the whole scan". A cluster
+/// of touching or overlapping items stays ONE crop with its hold reason: it is never accepted
+/// as a rectangle, and the user can cut it.
+pub struct ClassicalItemDetector;
+
+impl ItemDetector for ClassicalItemDetector {
+    fn detect(
+        &self,
+        raster: &Raster,
+        policy: SplitPolicy,
+        profile: SplitProfile,
+    ) -> Option<SplitDetection> {
+        use auto_crop_imgproc::items as im;
+        let opts = im::ItemsOptions {
+            policy: match policy {
+                SplitPolicy::Auto => im::SplitPolicy::Auto,
+                SplitPolicy::Always => im::SplitPolicy::Always,
+                SplitPolicy::Never => im::SplitPolicy::Never,
+            },
+            profile: match profile {
+                SplitProfile::Photos => im::SplitProfile::Photos,
+                SplitProfile::Receipts => im::SplitProfile::Receipts,
+            },
+            ..im::ItemsOptions::default()
+        };
+        let det = im::detect_items(raster, &opts);
+        if !matches!(det.scan_flags.outcome, im::Outcome::Many(_)) {
+            return None;
+        }
+        let scan_reasons = det.scan_flags.reasons.clone();
+        let items = det
+            .items
+            .iter()
+            .map(|i| {
+                let mut c = i.confidence.clone();
+                for r in &scan_reasons {
+                    if !c.reasons.contains(r) {
+                        c.reasons.push(*r);
+                    }
+                }
+                if !scan_reasons.is_empty() && c.forced.is_none() {
+                    c.forced = Some(auto_crop_core::Forced::Check);
+                }
+                DetectedItem {
+                    quad: i.quad,
+                    confidence: c,
+                    quarter_turns: 0,
+                }
+            })
+            .collect();
+        Some(SplitDetection {
+            items,
+            rejected: det.diagnostics.rejected.iter().map(|r| r.quad).collect(),
+        })
+    }
+}
+
 /// The scan-level confidence of a split: the worst item (lowest score, a forced band wins, every
 /// reason kept once).
 pub fn worst_confidence(items: &[DetectedItem]) -> Confidence {

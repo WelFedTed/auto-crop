@@ -1410,3 +1410,81 @@ fn a_panic_in_the_middle_of_a_save_fails_that_scan_and_the_next_start_repairs_th
         assert_eq!(fs::read(e.dir.join("scan.jpg")).unwrap(), scan);
     }
 }
+
+// ------------------------------------------------------------------ the real detector
+
+/// IoU of two convex quads in pixels (the engine's own geometry is in `core`, but a test needs
+/// only a rough check): the share of the bounding boxes' overlap is enough at these separations.
+fn bbox_iou(a: &Quad, b: &Quad) -> f64 {
+    let bb = |q: &Quad| {
+        let xs = q.iter().map(|p| p.x);
+        let ys = q.iter().map(|p| p.y);
+        (
+            xs.clone().fold(f64::MAX, f64::min),
+            ys.clone().fold(f64::MAX, f64::min),
+            xs.fold(f64::MIN, f64::max),
+            ys.fold(f64::MIN, f64::max),
+        )
+    };
+    let (a, b) = (bb(a), bb(b));
+    let (iw, ih) = (
+        (a.2.min(b.2) - a.0.max(b.0)).max(0.0),
+        (a.3.min(b.3) - a.1.max(b.1)).max(0.0),
+    );
+    let inter = iw * ih;
+    inter / ((a.2 - a.0) * (a.3 - a.1) + (b.2 - b.0) * (b.3 - b.1) - inter)
+}
+
+#[test]
+fn the_classical_detector_splits_a_synthetic_scan_and_the_whole_flow_works() {
+    // The engine's default detector is the classical one: no stub installed here.
+    let e = env();
+    let v = e.open("scan.jpg", &grid4());
+    assert_eq!(v.status, auto_crop_engine::ItemStatus::Ready);
+    assert_eq!(v.crops.len(), 4, "{:?}", v.confidence);
+    // Every known item is found, once, close to where it is.
+    let truth = {
+        let mut t = grid4();
+        t.sort_by(|a, b| {
+            (a[0].y.round(), a[0].x)
+                .partial_cmp(&(b[0].y.round(), b[0].x))
+                .unwrap()
+        });
+        t
+    };
+    for (c, t) in v.crops.iter().zip(&truth) {
+        let got = c.edit.as_ref().unwrap().quad;
+        assert!(
+            bbox_iou(&got, t) > 0.9,
+            "crop {} off: {:?} vs {:?}",
+            c.id,
+            got,
+            t
+        );
+    }
+    // Held by default; accepted by the user; saved as four files; restored.
+    // A clean scene may be Approved by triage, but the default still holds a split.
+    assert_eq!(
+        e.save(v.id, SaveTarget::Replace).error,
+        Some(ErrKind::HeldForReview)
+    );
+    e.engine.accept_scan(v.id).unwrap();
+    let out = e.save(v.id, SaveTarget::Replace);
+    assert!(out.ok, "{out:?}");
+    assert_eq!(out.saved.unwrap().outputs.len(), 4);
+    assert_eq!(e.files().len(), 4);
+}
+
+#[test]
+fn a_single_document_on_a_desk_still_takes_the_single_item_route() {
+    // The existing sample set: none of these is a multi-item scan, so the classical detector must
+    // leave every one on the single-item route and the old results unchanged.
+    let e = env();
+    let files = auto_crop_engine::samples::write_samples(&e.dir).unwrap();
+    let s = e.engine.open_paths(&files, false);
+    for id in s.ids {
+        let v = e.engine.analyse(id).unwrap();
+        assert!(v.crops.len() <= 1, "{}: {} crops", v.name, v.crops.len());
+        assert!(!v.split.as_ref().unwrap().is_split, "{}", v.name);
+    }
+}

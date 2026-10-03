@@ -137,10 +137,14 @@ backup's output list, so any of the N outputs of a split is recognised (`outputI
 
 ## Detector seam
 
-`Engine::set_item_detector(Arc<dyn ItemDetector>)`. Until `imgproc::items` is installed the app uses
-`NoSplit` (every scan takes the single-item route) and `redetect` with a split policy finds nothing.
-`ItemDetector::detect` returns the accepted items with their per-item `Confidence` (hold codes in
-`reasons`) and `detect_at` finds the item at a tapped point.
+`Engine::set_item_detector(Arc<dyn ItemDetector>)`. The default is `ClassicalItemDetector`, the adapter
+over `imgproc::items::detect_items`: only `Outcome::Many` is a split, every other outcome leaves the
+scan on the single-item route; scan-level hold reasons (unstable split, uncertain bed, too many
+items) are copied onto every item so one holds the whole scan; a cluster of touching or overlapping
+items stays one flagged crop that the user can cut. `NoSplit` turns splitting off; tests install a
+stub. `ItemDetector::detect` returns the accepted items with their per-item `Confidence` (hold codes
+in `reasons`) and `detect_at` finds the item at a tapped point (the classical detector does not
+implement it yet, so `add_crop(at)` falls back to a box around the point).
 
 ## Not in the engine (for the UI session)
 
