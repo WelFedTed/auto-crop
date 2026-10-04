@@ -59,7 +59,7 @@ jobs:
           if [ "$EVENT" = "pull_request" ] || [ "$EVENT" = "push" ]; then
             changed=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" 2>/dev/null || echo unknown)
           fi
-          if [ "$changed" = "unknown" ] || echo "$changed" | grep -Eq '^(tools/(synth|ci)/|crates/|xtask/|Cargo\.toml$|Cargo\.lock$|rust-toolchain\.toml$|\.github/workflows/eval-parity\.yml$)'; then
+          if [ "$changed" = "unknown" ] || echo "$changed" | grep -Eq '^(tools/(synth|ci|metrics)/|crates/|xtask/|Cargo\.toml$|Cargo\.lock$|rust-toolchain\.toml$|\.github/workflows/eval-parity\.yml$)'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "relevant=false" >> "$GITHUB_OUTPUT"
@@ -177,7 +177,9 @@ jobs:
           pattern: parity-results-*
           path: results
       - name: Parity script unit tests
-        run: python3 -m unittest discover -s tools/ci -v
+        run: |
+          python3 -m unittest discover -s tools/ci -v
+          python3 -m unittest discover -s tools/metrics -v
       - name: Compare every OS against Linux
         run: |
           status=0

@@ -41,7 +41,7 @@ Pinned in `tools/imgproc-oracles/requirements.txt`, hash-locked in `requirements
 | Name | Kind | SPDX | Use | Source | Checked |
 |---|---|---|---|---|---|
 | `numpy` | Python package | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | float64 reference Lanczos3 warp (`warp_numpy_lanczos3.json`); also the arrays of `tools/synth` | https://pypi.org/project/numpy/ | verified 2026-10-02 (wheel metadata, 2.5.3) |
-| `opencv-python-headless` | Python package | Apache-2.0 | homography and warp reference (`cv2.getPerspectiveTransform`, `cv2.warpPerspective`) used only to produce fixtures; also the perspective warp, blur and drawing of `tools/synth`; the wheel bundles third-party libraries (including LGPL FFmpeg) that are never redistributed by this project | https://pypi.org/project/opencv-python-headless/ | verified 2026-10-02 (wheel metadata, 5.0.0.93) for the package; bundled libraries to verify |
+| `opencv-python-headless` | Python package | Apache-2.0 | homography and warp reference (`cv2.getPerspectiveTransform`, `cv2.warpPerspective`) used only to produce fixtures; also the perspective warp, blur and drawing of `tools/synth`, and the classic quad finder baseline `tools/baselines/cv_quad.py` (M1.29; hash-locked in `tools/baselines/requirements.lock`); the wheel bundles third-party libraries (including LGPL FFmpeg) that are never redistributed by this project | https://pypi.org/project/opencv-python-headless/ | verified 2026-10-02 (wheel metadata, 5.0.0.93) for the package; bundled libraries to verify |
 | `pillow` | Python package | MIT-CMU | renders the synthetic receipts of the OCR oracle (`tools/ocr_oracle`, M1.66; pinned in `tools/ocr_oracle/requirements.txt`, hash-locked, Python 3.10 or newer); the images are generated at run time and never committed; also the text drawing (FreeType) and the JPEG, PNG, TIFF and WebP encoding of `tools/synth`, which pins 12.3.0 in its own hash-locked lock | https://pypi.org/project/pillow/ | verified 2026-10-03 (package metadata, 12.3.0) |
 
 ### Python packages for the synthetic generator (`tools/synth`, never shipped)
@@ -77,8 +77,8 @@ GPL-licensed tools below are executed as separate programs for measurement and c
 | `valgrind` | dev tool | GPL-2.0-or-later | heap and leak profiling on Linux (M1.60), run only | https://valgrind.org | to verify |
 | `gungraun` / `gungraun-runner` | dev tool (crate, CI binary) | Apache-2.0 OR MIT | Valgrind instruction-count benchmarks and the PR gate (M1.58); `gungraun` is a dev-dependency of `crates/imgproc-bench`, `gungraun-runner` 0.20.0 is installed by `perf-gate.yml`; neither is shipped | https://github.com/gungraun/gungraun | verified 2026-10-03 (crates.io metadata, 0.20.0) |
 | `tesseract` | dev tool | Apache-2.0 | OCR oracle for the enhancement CER metric (M1.66), 5.x, run only; OCR is not a product feature (B19); the CI job installs 5.5.1 from `ppa:alex-p/tesseract-ocr5` with `eng.traineddata` (tessdata_fast, Apache-2.0) | https://github.com/tesseract-ocr/tesseract | version verified in CI run 37117596234; licence to verify |
-| `imagemagick` | dev tool | ImageMagick | reference conversions and comparisons, run only | https://imagemagick.org | to verify |
-| `unpaper` | dev tool | GPL-2.0-or-later | deskew and border comparison baseline, run only, Linux | https://github.com/unpaper/unpaper | to verify |
+| `imagemagick` | dev tool | ImageMagick | reference conversions and comparisons, run only; the `-deskew` baseline adapter `tools/baselines/im_deskew.py` (M1.29, separate process, Linux CI and the owner's machine) | https://imagemagick.org | to verify |
+| `unpaper` | dev tool | GPL-2.0-or-later | deskew and mask-detection baseline adapter `tools/baselines/unpaper_deskew.py` (M1.29): external process only, never linked, vendored or bundled; Linux CI and the devcontainer only, no Windows build | https://github.com/unpaper/unpaper | to verify |
 
 ### Fonts
 

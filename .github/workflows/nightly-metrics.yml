@@ -1,0 +1,215 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+# Nightly public suites (ROADMAP M1.81) and the metrics branch with its static dashboard (M1.64).
+#
+# Linux, synthetic data only: `eval` on the full Python suite (5,200 images, generated in the job,
+# never stored) with the classical detector and the full-frame reference, and `eval --multi` on the
+# multi-item suite (1,200 scenes). Only `auto-crop-eval publish` output (aggregates, slices with
+# n >= 30, leak-checked, no per-image row) leaves the job. It is committed to the orphan `metrics`
+# branch of THIS repository (`data/<suite>/<predictor>/<stamp>-<sha7>.json`) together with
+# `index.html`, a self-contained dashboard built by tools/metrics/build_dashboard.py. Nothing serves
+# that page: enabling GitHub Pages (source: the `metrics` branch) is the owner's decision.
+#
+# Non-blocking. When the detector's mean IoU falls by 0.3 points or the failure rate rises by 0.5
+# points against the previous nightly, an issue labelled `accuracy-regression` is opened (or
+# commented on, if one is open). The same commit must also give identical numbers twice: the job
+# runs the detector twice and compares, and tools/metrics/regress.py compares across nights.
+#
+# Safety: no pull_request trigger, no secrets beyond the job token. `contents: write` is granted to
+# the `publish` job only (it pushes the metrics branch, never main and never a PR) and
+# `issues: write` to the `issue` job only; the evaluation job runs with a read-only token.
+# Git credentials are not persisted by checkout; the push passes the token for that one command.
+
+name: Nightly metrics
+
+on:
+  schedule:
+    - cron: "47 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-metrics
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  evaluate:
+    name: evaluate the full suites
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Build the harness and the Python environment (hash-locked)
+        run: |
+          cargo build --release -p auto-crop-eval
+          cargo xtask synth-setup
+      - name: Generate the full suite (5,200 images) and the multi-item suite (1,200 scenes)
+        run: |
+          cargo xtask synth --suite full --truth none
+          cargo xtask synth --suite multi-full
+      - name: Quotas, manifests and splits
+        run: |
+          for m in full multi-full; do
+            ./target/release/auto-crop-eval validate-manifest "target/synth/$m/manifest.jsonl"
+            cargo xtask check-splits "target/synth/$m/manifest.jsonl"
+          done
+          PYTHONPATH=tools/synth target/synth-venv/bin/python -m synth quotas target/synth/full/manifest.jsonl
+      - name: Score, publish aggregates only, leak-check
+        env:
+          COMMIT: ${{ github.sha }}
+        run: |
+          e=./target/release/auto-crop-eval
+          stamp=$(date -u +%Y%m%dT%H%M%SZ)
+          name="$stamp-${COMMIT::7}"
+          mkdir -p work
+          score() { # suite predictor spec [extra run flags]
+            local suite=$1 slug=$2 spec=$3 manifest=$4; shift 4
+            local dir="staging/$suite/$slug"
+            mkdir -p "$dir"
+            $e run "$@" --manifest "$manifest" --predictor "$spec" --suite "$suite" --commit "$COMMIT" --out "work/$suite-$slug.json" > "work/$suite-$slug.log"
+            head -4 "work/$suite-$slug.log"
+            if [ "$1" = "--multi" ]; then
+              $e publish --multi --results "work/$suite-$slug.json" --out "$dir/$name.json"
+            else
+              $e publish --results "work/$suite-$slug.json" --out "$dir/$name.json"
+            fi
+            cp "work/$suite-$slug.json.timings.json" "$dir/$name.timings.json"
+          }
+          score full-py detector detector target/synth/full/manifest.jsonl
+          score full-py full-frame full-frame target/synth/full/manifest.jsonl
+          score multi-full items items target/synth/multi-full/manifest.jsonl --multi
+          # The same build over the same images twice: the published aggregates must be identical.
+          $e run --manifest target/synth/full/manifest.jsonl --predictor detector --suite full-py --commit "$COMMIT" --out work/again.json > /dev/null
+          $e publish --results work/again.json --out work/again.pub.json > /dev/null
+          cmp work/again.pub.json "staging/full-py/detector/$name.json"
+          echo "The detector run twice in this job published byte-identical aggregates." | tee -a "$GITHUB_STEP_SUMMARY"
+          {
+            echo '### Nightly suites (synthetic, aggregates only)'
+            echo '```'
+            head -3 work/full-py-detector.json.timings.json
+            find staging -name '*.json' ! -name '*.timings.json' | sort
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: metrics-staging
+          path: staging
+          retention-days: 7
+
+  publish:
+    name: publish to the metrics branch
+    needs: evaluate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    outputs:
+      regressed: ${{ steps.regress.outputs.regressed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          path: src
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: metrics-staging
+          path: staging
+      - name: Fetch the metrics branch (or start the orphan branch)
+        run: |
+          url="https://github.com/${GITHUB_REPOSITORY}.git"
+          if git ls-remote --exit-code --heads "$url" metrics > /dev/null; then
+            git clone --quiet --branch metrics "$url" metrics-branch
+          else
+            git init --quiet --initial-branch=metrics metrics-branch
+            git -C metrics-branch remote add origin "$url"
+            echo "No metrics branch yet: starting the orphan branch." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Compare with the previous nightly
+        id: regress
+        run: python src/tools/metrics/regress.py --data metrics-branch/data --new staging --out regression.md
+      - name: Add tonight's records and rebuild the dashboard
+        run: |
+          mkdir -p metrics-branch/data
+          cp -r staging/. metrics-branch/data/
+          python src/tools/metrics/build_dashboard.py --data metrics-branch/data --out metrics-branch/index.html
+          cp src/tools/metrics/branch-readme.md metrics-branch/README.md
+          cp metrics-branch/index.html dashboard.html
+          {
+            echo "### Against the previous nightly"
+            cat regression.md
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Commit and push the metrics branch (never main, never a pull request)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          cd metrics-branch
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit --quiet -m "metrics: nightly records for ${COMMIT::7}"
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          for attempt in 1 2 3; do
+            if git -c "http.https://github.com/.extraheader=$auth" push origin HEAD:metrics; then exit 0; fi
+            git -c "http.https://github.com/.extraheader=$auth" pull --quiet --rebase origin metrics || true
+          done
+          echo "could not push the metrics branch" >&2
+          exit 1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dashboard
+          path: |
+            dashboard.html
+            regression.md
+          retention-days: 30
+
+  issue:
+    name: open an accuracy-regression issue
+    needs: publish
+    if: needs.publish.outputs.regressed == 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dashboard
+          path: report
+      - name: Open the issue, or comment on the open one
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          {
+            echo "The nightly synthetic suites regressed against the previous nightly (commit \`${COMMIT::7}\`, run $RUN_URL)."
+            echo
+            cat report/regression.md
+            echo
+            echo "Synthetic data detects change between builds; it says nothing about real-world accuracy. This issue is the only signal: nothing was blocked."
+          } > body.md
+          gh label create accuracy-regression --repo "$GITHUB_REPOSITORY" --color B60205 \
+            --description "A nightly synthetic suite regressed past the smoke thresholds" 2> /dev/null || true
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --label accuracy-regression --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body-file body.md
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --label accuracy-regression \
+              --title "Nightly accuracy regression (${COMMIT::7})" --body-file body.md
+          fi
