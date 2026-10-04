@@ -8,7 +8,7 @@
 //!
 //! * Metric core, independent of the code it measures (imports no project crate): [`geom`],
 //!   [`metrics`], [`stats`], [`calib`], [`multi`] (multi-item metrics and the `run --multi` path).
-//! * Data and plumbing: [`manifest`], [`predictor`], [`run`], [`report`], [`compare`], [`noise`],
+//! * Data and plumbing: [`manifest`], [`golden`] (the private golden-set label format and its bridge to the manifest), [`predictor`], [`run`], [`report`], [`compare`], [`noise`],
 //!   [`publish`] (the publishing guard type), [`splits`] (`check-splits`) and [`selfcheck`].
 //! * Adapters and data that do use the app crates: [`detector`] (the real classical detector),
 //!   [`synth`] (the Rust STAND-IN synthetic suite writer; the real generator is the Python tool in
@@ -22,6 +22,7 @@ pub mod calib;
 pub mod compare;
 pub mod detector;
 pub mod geom;
+pub mod golden;
 pub mod manifest;
 pub mod metrics;
 pub mod multi;

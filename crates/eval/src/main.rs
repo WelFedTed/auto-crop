@@ -36,8 +36,9 @@ Commands:
   compare --base FILE --head FILE [--waiver] [--out FILE] [--min-gate-n N]
         Paired regression gate. Exit 1 when mean IoU falls 0.3 pt or the failure rate rises 0.5 pt
         (or a slice with n >= gate floor does), unless --waiver (the accuracy-waiver label).
-  noise-floor --a FILE --b FILE [--out FILE]
-        Disagreement between two annotators' label files (JSON lines: id, width, height, quad).
+  noise-floor --a FILE|DIR --b FILE|DIR [--out FILE]
+        Disagreement between two annotators' labels: a JSON-lines file (id, width, height, quad) or
+        a directory of golden label files (<image>.json; blank-quad single-item labels only).
   publish --results FILE --out FILE [--multi]
         Write the publishable aggregate view (no per-image rows; slices n >= 30 only) and leak-check it.
         --multi reads a `run --multi` result and writes the multi-item aggregate view.
@@ -291,10 +292,15 @@ fn cmd_compare(a: &Args) -> Result<ExitCode, String> {
 }
 
 fn cmd_noise_floor(a: &Args) -> Result<ExitCode, String> {
-    let (la, lb) = (
-        noise::parse_labels(&read(&a.required("--a")?)?)?,
-        noise::parse_labels(&read(&a.required("--b")?)?)?,
+    let ((la, skipped_a), (lb, skipped_b)) = (
+        noise::load_labels(Path::new(&a.required("--a")?))?,
+        noise::load_labels(Path::new(&a.required("--b")?))?,
     );
+    if skipped_a + skipped_b > 0 {
+        eprintln!(
+            "note: left out {skipped_a} + {skipped_b} assisted, multi-item or negative labels (only blank-quad single-item labels are compared)"
+        );
+    }
     let nf = noise::noise_floor(&la, &lb);
     let json = serde_json::to_string_pretty(&nf).map_err(|e| e.to_string())? + "\n";
     print!("{json}");

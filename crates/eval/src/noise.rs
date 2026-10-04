@@ -41,6 +41,48 @@ pub fn parse_labels(text: &str) -> Result<BTreeMap<String, LabelRow>, String> {
     Ok(out)
 }
 
+/// Label rows from either a JSON-lines file or a directory of golden label files
+/// (`<image>.json`, [`crate::golden`]). From a directory only blank-quad labels of single-item
+/// images are used (assisted labels, negatives and multi-item images are left out, because the
+/// two annotators' item order is not comparable), and the second return value counts what was
+/// left out. Label files that do not parse are an error, never silently skipped.
+pub fn load_labels(path: &std::path::Path) -> Result<(BTreeMap<String, LabelRow>, usize), String> {
+    if !path.is_dir() {
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        return Ok((parse_labels(&text)?, 0));
+    }
+    let mut out = BTreeMap::new();
+    let mut left_out = 0;
+    for lf in crate::golden::read_label_dir(path)? {
+        let l = lf
+            .label
+            .map_err(|e| format!("{}: {e}", lf.path.display()))?;
+        let found = crate::golden::validate_label(&l, Some(&lf.stem));
+        if !found.errors.is_empty() {
+            return Err(format!(
+                "{}: {}",
+                lf.path.display(),
+                found.errors.join("; ")
+            ));
+        }
+        if l.assisted || l.items.len() != 1 {
+            left_out += 1;
+            continue;
+        }
+        out.insert(
+            l.id.clone(),
+            LabelRow {
+                id: l.id,
+                width: l.width,
+                height: l.height,
+                quad: l.items[0].quad,
+            },
+        );
+    }
+    Ok((out, left_out))
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NoiseFloor {
     /// Images labelled by both annotators.
@@ -143,6 +185,38 @@ mod tests {
         assert!((nf.corner_err_pct_p95.expect("n > 0") - 100.0 * 37.05 / diag).abs() < 1e-9);
         assert!(nf.skew_deg_p95.expect("n > 0") < 1e-9);
         assert!(nf.iou_p05.expect("n > 0") < nf.iou_median.expect("n > 0"));
+    }
+
+    #[test]
+    fn label_directories_load_blank_single_item_labels_only() {
+        use crate::golden::{GoldenItem, GoldenLabel, label_to_json, new_label};
+        let dir = tempfile::tempdir().expect("tempdir");
+        let q: Quad = [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]];
+        let write = |name: &str, f: &dyn Fn(&mut GoldenLabel)| {
+            let mut l = new_label(name, &"b".repeat(64), 100, 80);
+            l.slices = vec!["flatbed-single".to_owned()];
+            l.items = vec![GoldenItem::new(q)];
+            f(&mut l);
+            std::fs::write(dir.path().join(format!("{name}.json")), label_to_json(&l))
+                .expect("write");
+        };
+        write("one.jpg", &|_| {});
+        write("assisted.jpg", &|l| l.assisted = true);
+        write("multi.jpg", &|l| l.items.push(GoldenItem::new(q)));
+        let (rows, left_out) = load_labels(dir.path()).expect("loads");
+        assert_eq!(rows.keys().collect::<Vec<_>>(), ["one.jpg"]);
+        assert_eq!(left_out, 2);
+        // The same rows serve as annotator B: identical quads, no disagreement.
+        let nf = noise_floor(&rows, &rows);
+        assert_eq!(nf.n, 1);
+        assert!((nf.iou_median.expect("n") - 1.0).abs() < 1e-12);
+        // A file path still means JSON lines.
+        let jl = dir.path().join("l.jsonl");
+        std::fs::write(&jl, label("x", q)).expect("write");
+        assert_eq!(load_labels(&jl).expect("loads").0.len(), 1);
+        // A broken label is an error, not a silent skip.
+        std::fs::write(dir.path().join("broken.json"), "{").expect("write");
+        assert!(load_labels(dir.path()).is_err());
     }
 
     #[test]

@@ -221,6 +221,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
 ]
 
 [[package]]
@@ -5936,7 +5937,9 @@ dependencies = [
  "auto-crop-engine",
  "auto-crop-eval",
  "auto-crop-fuzz",
+ "auto-crop-imgproc",
  "flate2",
+ "getrandom 0.3.4",
  "goblin",
  "serde",
  "serde_json",
