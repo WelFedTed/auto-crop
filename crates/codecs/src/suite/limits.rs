@@ -221,9 +221,10 @@ fn max_est_bytes_caps_the_decode_memory_estimate() {
 
 #[test]
 fn max_decode_ms_returns_a_timeout_through_decode_guarded() {
-    // A decode of a 15 MB raster cannot finish within a millisecond: the guard returns the typed
-    // timeout at once while the worker thread runs on (the thread's end is tested in `guard`).
-    let big: std::sync::Arc<[u8]> = png_rgb(2500, 2000).into();
+    // A decode of a 72 MB raster (24 MP) cannot finish within a millisecond on any machine: the
+    // guard returns the typed timeout at once while the worker thread runs on (the thread's end is
+    // tested in `guard`). A 5 MP image was once fast enough to win the race on a quick runner.
+    let big: std::sync::Arc<[u8]> = png_rgb(6000, 4000).into();
     let l = DecodeLimits {
         max_decode_ms: Some(1),
         ..DecodeLimits::default()
