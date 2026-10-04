@@ -1,0 +1,119 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+# Analysis stand-ins (ROADMAP M1.55, ADR-0007): the random-weight 256x256 MobileNetV3-class net runs
+# through the `InferenceBackend` trait on ONNX Runtime (our SHA-256-pinned runtime from
+# native-deps.toml, loaded by absolute path) and on rten, the two must agree within 1e-3, and the
+# loader must refuse a runtime that is not the pinned build. Also Canny + contours (imageproc).
+# Everything here is a STAND-IN (random weights, no accuracy meaning); no M4 claim.
+# Nothing needs a C++ toolchain: ONNX Runtime is a prebuilt archive fetched by `cargo xtask fetch-ort`
+# through the same hash-checked downloader as `build-native` (ADR-0004).
+name: Analysis stand-ins
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "crates/**"
+      - "xtask/**"
+      - "spikes/inference/**"
+      - "native-deps.toml"
+      - "Cargo.lock"
+      - ".github/workflows/standin.yml"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # A missing net or runtime is a failure here, never a quiet skip.
+  AUTOCROP_REQUIRE_STANDIN: "1"
+  PIP_BREAK_SYSTEM_PACKAGES: "1" # throwaway runner; Homebrew Python enforces PEP 668
+
+jobs:
+  standin:
+    name: ${{ matrix.os }}${{ matrix.best-effort && ' (best-effort, rten only)' || '' }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.best-effort }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-22.04, best-effort: false, ort: true }
+          - { os: macos-latest, best-effort: false, ort: true }
+          - { os: windows-2025, best-effort: false, ort: true }
+          # No ONNX Runtime binary exists for Intel Macs (ADR-0007 finding 5): rten only.
+          - { os: macos-26-intel, best-effort: true, ort: false }
+    defaults:
+      run:
+        shell: bash
+    env:
+      HAS_ORT: ${{ matrix.ort }}
+      INFER_FEATURES: ${{ matrix.ort && 'ort,rten' || 'rten' }}
+      ENGINE_FEATURES: ${{ matrix.ort && 'standin-ort,standin-rten,standin-canny' || 'standin-rten,standin-canny' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Python tools for the net generator
+        run: |
+          PY=$(command -v python3 || command -v python)
+          "$PY" -m pip install --quiet numpy onnx
+          "$PY" --version
+      - name: Fetch the pinned ONNX Runtime (hash-checked archive, library checked against the loader pin)
+        if: matrix.ort
+        run: |
+          ORT=$(cargo xtask fetch-ort --path-only)
+          echo "runtime: $ORT"
+          echo "AUTOCROP_ORT_DYLIB=$ORT" >> "$GITHUB_ENV"
+      - name: Generate the random-weight stand-in net
+        run: cargo xtask make-standin-net
+      - name: Backends, loader refusals and ort vs rten agreement (bar 1e-3; ADR-0007 measured 5e-7)
+        run: cargo test -p auto-crop-infer --features "$INFER_FEATURES" -- --nocapture
+      - name: Stand-ins inside the pipeline skeleton
+        run: cargo test -p auto-crop-engine --features "$ENGINE_FEATURES" standin -- --nocapture
+      - name: Command-line smoke, label and refusal of a wrong runtime
+        run: |
+          cargo build --release -p auto-crop-cli --features "$ENGINE_FEATURES"
+          cargo build --release -p xtask --features "$ENGINE_FEATURES"
+          XT=target/release/xtask; [ -f "$XT.exe" ] && XT="$XT.exe"
+          CLI=target/release/auto-crop; [ -f "$CLI.exe" ] && CLI="$CLI.exe"
+          "$XT" perf gen --mp 2 --count 1
+          IMG=$(ls target/perf/batch-2mp/*.jpg | head -1)
+          BACKEND=rten
+          if [ "$HAS_ORT" = "true" ]; then BACKEND=ort; fi
+          for mode in standin-canny standin-net; do
+            "$CLI" dev-pipeline "$IMG" --timings --analyse "$mode" --net-backend "$BACKEND" | tee out.txt
+            grep -q "STAND-IN" out.txt
+          done
+          "$CLI" dev-pipeline "$IMG" --timings --analyse standin-net --net-backend rten --net-threads 1 | grep -q "rten 1 thread"
+          if [ "$HAS_ORT" = "true" ]; then
+            # A runtime that is not the pinned build (one byte changed) must be refused before it is loaded.
+            PY=$(command -v python3 || command -v python)
+            "$PY" - <<'EOF'
+          import os, shutil
+          src = os.environ["AUTOCROP_ORT_DYLIB"]
+          dst = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(src))), "planted-" + os.path.basename(src))
+          shutil.copyfile(src, dst)
+          with open(dst, "r+b") as f:
+              f.seek(1 << 20); b = f.read(1); f.seek(1 << 20); f.write(bytes([b[0] ^ 0xFF]))
+          open("planted.path", "w").write(os.path.abspath(dst))
+          EOF
+            if AUTOCROP_ORT_DYLIB="$(cat planted.path)" "$CLI" dev-pipeline "$IMG" --analyse standin-net --net-backend ort > refused.txt 2>&1; then
+              echo "a modified runtime was accepted"; exit 1
+            fi
+            cat refused.txt
+            grep -q "REFUSED ONNX Runtime" refused.txt
+            # A relative path (a search-path style load) must be refused as well.
+            if AUTOCROP_ORT_DYLIB="onnxruntime.dll" "$CLI" dev-pipeline "$IMG" --analyse standin-net --net-backend ort > rel.txt 2>&1; then
+              echo "a relative runtime path was accepted"; exit 1
+            fi
+            grep -q "not absolute" rel.txt
+          fi
+      - name: Measured analysis rows (shared runner, NOISY, STAND-IN)
+        run: |
+          XT=target/release/xtask; [ -f "$XT.exe" ] && XT="$XT.exe"
+          "$XT" perf standin --runs 20 | tee perf.md
+          { echo "### $RUNNER_OS stand-in analysis timings (shared runner: NOISY, STAND-IN)"; echo; cat perf.md; } >> "$GITHUB_STEP_SUMMARY"
