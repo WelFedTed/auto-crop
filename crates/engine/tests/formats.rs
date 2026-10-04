@@ -77,14 +77,10 @@ fn check_not_replaceable(e: &Env, name: &str, bytes: &[u8], copy_ext: &str) -> P
         !out[0].ok,
         "{name}: a replace of a format without a writer succeeded"
     );
-    assert!(
-        matches!(
-            out[0].error,
-            Some(ErrKind::NotReplaceable | ErrKind::UnsupportedOutput)
-        ),
-        "{name}: {:?}",
-        out[0].error
-    );
+    // One code for "this source is never replaced" on the single-item and the split path, with
+    // the reason in the notice.
+    assert_eq!(out[0].error, Some(ErrKind::NotReplaceable), "{name}");
+    assert_eq!(out[0].notices, ["format.write_unavailable"], "{name}");
     assert_eq!(
         fs::read(&path).unwrap(),
         bytes,

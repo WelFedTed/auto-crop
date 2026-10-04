@@ -52,7 +52,7 @@ would be saved as several files, or was), `included`.
 ## New error codes (`ErrorCode` in `ui/src/lib/types.ts` and a message each)
 
 `PLAN_STALE`, `GROUP_COMMIT_FAILED`, `SAVED_SOURCE_IN_USE`, `HELD_FOR_REVIEW`, `ITEM_OP`,
-`NOT_REPLACEABLE` (message keys `err.plan_stale` and so on, B20). `HELD_FOR_REVIEW` is not a failure:
+`NOT_REPLACEABLE` (message keys `err.plan_stale` and so on, B20; `NOT_REPLACEABLE` is the one code for a source that is never replaced in place, split or single, with the reason in the notice). `HELD_FOR_REVIEW` is not a failure:
 nothing was written and the scan waits for the user.
 
 ## Operations (each is ONE undo step; every one returns the new `ItemView`)
@@ -83,7 +83,7 @@ scan; `Src` is unchanged. A panic while rendering fails that call only.
 
 ## The hold rule (0.x preview, M10.29)
 
-`save_items` of an image that would become two or more files writes NOTHING unless one of these holds:
+`save_items(.., Replace)` of an image that would become two or more files writes NOTHING unless one of these holds:
 
 1. the user accepted the scan: `accept_scan(id)` records the exact state (its render hash). Any later
    edit withdraws it (`split.accepted` goes false); undoing back to the accepted state restores it;
@@ -91,7 +91,8 @@ scan; `Src` is unchanged. A panic while rendering fails that call only.
    crop is Good at the Strict cutoff 0.95 and raised no hold code).
 
 Otherwise the outcome is `{ok: false, error: "HELD_FOR_REVIEW", notices: ["split.held"]}` and nothing
-changes on disk, for `replace` and `copy` alike. The UI's "Save" on a reviewed scan is
+changes on disk. `copy` is not held (owner confirmation 2026-10-04): a copy removes and overwrites
+nothing, so it is written without acceptance and does not accept the split. The UI's "Save" on a reviewed scan is
 `accept_scan` followed by `save_items`; "Save all" on a batch sends only what the user may auto-save.
 
 ## Saving
@@ -102,10 +103,11 @@ the scan with `saved.outputs` (names in output order). Behaviour:
 * **Replace**: the scan is backed up (verified), N outputs named `{name}_{n}` (zero-padded to
   `max(2, digits(N))`) are written as one group, the scan is removed last. A taken name moves the whole
   group to `name (2)_01...`; names of other open images and of saves in flight are never planned.
-* **Copy**: outputs go to `<folder>/AutoCrop/`, the scan stays, no backup. A TIFF or other source this
+* **Copy**: outputs go to `<folder>/AutoCrop/`, the scan stays, no backup, no acceptance needed. A TIFF or other source this
   build cannot write is saved as PNG copies.
 * A multi-page or non-writable source is never replaced: `NOT_REPLACEABLE` with
-  `notices: ["tiff.multi_page"]` (or `format.write_unavailable`); the file is untouched.
+  `notices: ["tiff.multi_page"]` (or `format.write_unavailable`); the file is untouched. The single-item
+  path answers the same way.
 * `notes` after a successful save: `SAVED_SOURCE_IN_USE` (the set is complete, the scan could not be
   removed because another program has it open) or `SOURCE_CHANGED` (the scan was changed meanwhile and
   is left alone).

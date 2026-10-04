@@ -831,7 +831,9 @@ impl Engine {
         let (fmt, copy_ext) = if fmt.is_encodable() {
             (fmt, None)
         } else if target == SaveTarget::Replace {
-            return Err(ErrKind::UnsupportedOutput);
+            // The same code as a split scan's refusal; the notice with the reason is added by
+            // the dispatcher (`not_replaceable_notice`).
+            return Err(ErrKind::NotReplaceable);
         } else {
             let out = if fmt == Format::Heic {
                 Format::Jpeg

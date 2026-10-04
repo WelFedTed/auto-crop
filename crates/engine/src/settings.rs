@@ -139,7 +139,9 @@ mod tests {
     #[test]
     fn splitting_is_found_but_not_saved_unseen_by_default() {
         let d = Settings::default();
+        // Owner confirmation 2026-10-04: Auto with the Photos profile; Receipts is selectable.
         assert_eq!(d.split_policy, SplitPolicy::Auto);
+        assert_eq!(d.split_profile, SplitProfile::Photos);
         assert!(
             !d.auto_save_splits,
             "auto-saving splits is Experimental and off"

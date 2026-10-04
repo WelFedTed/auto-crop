@@ -678,7 +678,15 @@ impl Engine {
                 notes: Vec::new(),
                 notices: Vec::new(),
             },
-            Err(e) => SaveOutcome::failed(id, e),
+            Err(e) => {
+                let mut o = SaveOutcome::failed(id, e);
+                if e == ErrKind::NotReplaceable {
+                    // The same code and the same notice vocabulary as a split scan's refusal.
+                    let frames = self.item(id).map_or(1, |i| lock(&i).frames);
+                    o.notices = vec![not_replaceable_notice(frames).to_owned()];
+                }
+                o
+            }
         }
     }
 
@@ -758,11 +766,13 @@ impl Engine {
         }
         let mut notices: Vec<String> = Vec::new();
 
-        // The 0.x preview rule (M10.29): a scan that would become several files is written only
-        // when every crop is Good at the Strict cutoff and the owner has switched automatic
-        // splitting on (Experimental), or when the user looked and accepted this exact state.
-        // Otherwise nothing is written.
-        if crops.len() >= 2 {
+        // The 0.x preview rule (M10.29): a scan that would become several files replaces the
+        // original only when every crop is Good at the Strict cutoff and the owner has switched
+        // automatic splitting on (Experimental), or when the user looked and accepted this exact
+        // state. Otherwise nothing is written. A copy needs no acceptance (owner confirmation
+        // 2026-10-04): it destroys nothing, the scan stays byte-identical, and the copies go to
+        // names that are free (`a_copy_of_an_unaccepted_split_...` in tests/split.rs).
+        if crops.len() >= 2 && target == SaveTarget::Replace {
             let settings = self.settings();
             let approved = settings.auto_save_splits
                 && scan_triage(&state, STRICT_CUTOFF) == ScanTriage::Approved;
@@ -775,13 +785,10 @@ impl Engine {
         // What may be replaced (PLAN 2.7): single-frame sources this build can write back.
         let out_fmt = match target {
             SaveTarget::Replace => {
-                if frames > 1 {
-                    return Err((ErrKind::NotReplaceable, vec!["tiff.multi_page".to_owned()]));
-                }
-                if !fmt.is_encodable() {
+                if frames > 1 || !fmt.is_encodable() {
                     return Err((
                         ErrKind::NotReplaceable,
-                        vec!["format.write_unavailable".to_owned()],
+                        vec![not_replaceable_notice(frames).to_owned()],
                     ));
                 }
                 fmt
@@ -1052,6 +1059,16 @@ impl Engine {
                 output_count: m.outputs.len(),
                 restored: m.state == crate::store::BackupState::Restored,
             })
+    }
+}
+
+/// The reason a source is never replaced in place, as a notice (one vocabulary for the split and
+/// the single-item path; the code is `NOT_REPLACEABLE` for both).
+fn not_replaceable_notice(frames: u32) -> &'static str {
+    if frames > 1 {
+        "tiff.multi_page"
+    } else {
+        "format.write_unavailable"
     }
 }
 

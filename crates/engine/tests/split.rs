@@ -376,12 +376,100 @@ fn by_default_a_split_scan_is_held_and_nothing_is_written() {
     assert_eq!(e.files(), before);
     assert_eq!(sha(&e.dir.join("scan.jpg")), sha_before);
     assert!(e.engine.list_backups().runs.is_empty());
-    // Copies are held the same way: the output is all or nothing.
+    // A replacement stays held on every retry; only a copy is allowed without acceptance (next test).
     assert_eq!(
-        e.save(v.id, SaveTarget::Copy).error,
+        e.save(v.id, SaveTarget::Replace).error,
         Some(ErrKind::HeldForReview)
     );
     assert_eq!(e.files(), before);
+}
+
+#[test]
+fn a_copy_of_an_unaccepted_split_is_written_and_destroys_nothing() {
+    // Owner confirmation 2026-10-04: a copy needs no acceptance because it removes and overwrites
+    // nothing; replace-in-place stays held until the split is accepted.
+    let e = env();
+    e.engine.set_item_detector(Stub::new(&grid4()));
+    let v = e.open("scan.jpg", &grid4());
+    assert!(!v.split.as_ref().unwrap().accepted);
+    let scan_path = e.dir.join("scan.jpg");
+    let scan = fs::read(&scan_path).unwrap();
+    let mtime = fs::metadata(&scan_path).unwrap().modified().unwrap();
+    // Files that already sit where the copies would go, under the first names and one other.
+    let out_dir = e.dir.join("AutoCrop");
+    fs::create_dir_all(&out_dir).unwrap();
+    let foreign = [
+        ("scan_01.jpg", &b"mine 1"[..]),
+        ("scan_03.jpg", &b"mine 3"[..]),
+    ];
+    for (n, b) in foreign {
+        fs::write(out_dir.join(n), b).unwrap();
+    }
+    let out = e.save(v.id, SaveTarget::Copy);
+    assert!(out.ok, "{out:?}");
+    let saved = out.saved.unwrap();
+    assert!(saved.copy);
+    assert_eq!(saved.outputs.len(), 4);
+    // The scan is byte-identical, still where it was, with its modification time, and no backup
+    // was needed.
+    assert_eq!(fs::read(&scan_path).unwrap(), scan);
+    assert_eq!(fs::metadata(&scan_path).unwrap().modified().unwrap(), mtime);
+    assert_eq!(e.files(), ["scan.jpg"]);
+    assert!(e.engine.list_backups().runs.is_empty());
+    // Nothing that was there before was overwritten: the whole set moved to another base name.
+    for (n, b) in foreign {
+        assert_eq!(fs::read(out_dir.join(n)).unwrap(), b, "{n}");
+    }
+    assert!(
+        saved.outputs.iter().all(|n| n.starts_with("scan (2)_")),
+        "{:?}",
+        saved.outputs
+    );
+    for n in &saved.outputs {
+        assert!(decode(&fs::read(out_dir.join(n)).unwrap()).is_ok(), "{n}");
+    }
+    assert_eq!(fs::read_dir(&out_dir).unwrap().count(), 6);
+    // The copy did not accept the split: replacing is still held, and still writes nothing.
+    assert!(
+        !e.engine
+            .item_view(v.id)
+            .unwrap()
+            .split
+            .as_ref()
+            .unwrap()
+            .accepted
+    );
+    let before = e.files();
+    let out = e.save(v.id, SaveTarget::Replace);
+    assert_eq!(out.error, Some(ErrKind::HeldForReview));
+    assert_eq!(e.files(), before);
+    assert_eq!(fs::read(&scan_path).unwrap(), scan);
+    assert!(e.engine.list_backups().runs.is_empty());
+}
+
+#[test]
+fn a_copy_of_a_split_that_needs_review_is_written_too() {
+    let e = env();
+    let stub = Stub::new(&grid4());
+    stub.items.lock().unwrap()[1].1 = check();
+    e.engine.set_item_detector(stub);
+    let v = e.open("scan.jpg", &grid4());
+    assert_eq!(
+        v.split.as_ref().unwrap().triage,
+        ScanTriage::HeldForReview {
+            items_need_check: 1
+        }
+    );
+    let scan = sha(&e.dir.join("scan.jpg"));
+    let out = e.save(v.id, SaveTarget::Copy);
+    assert!(out.ok, "{out:?}");
+    assert_eq!(out.saved.unwrap().outputs.len(), 4);
+    assert_eq!(sha(&e.dir.join("scan.jpg")), scan);
+    assert_eq!(e.files(), ["scan.jpg"]);
+    assert_eq!(
+        e.save(v.id, SaveTarget::Replace).error,
+        Some(ErrKind::HeldForReview)
+    );
 }
 
 #[test]
