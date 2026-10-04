@@ -591,7 +591,13 @@ fn xform_of(w: &Walk<'_>, bx: Bx) -> Option<Xform> {
         b"clap" => {
             let n = |i: usize| w.u32(bx.body + 4 * i);
             let (wn, wd, hn, hd) = (n(0)?, n(1)?, n(2)?, n(3)?);
-            let size = |num: u32, den: u32| (den != 0).then(|| (num + den / 2) / den);
+            // u64 so a hostile numerator close to u32::MAX cannot overflow the rounding term (found by the
+            // `probe` fuzzer); a quotient that does not fit u32 is not a size.
+            let size = |num: u32, den: u32| {
+                (den != 0)
+                    .then(|| (u64::from(num) + u64::from(den) / 2) / u64::from(den))
+                    .and_then(|v| u32::try_from(v).ok())
+            };
             Some(Xform::Crop(match (size(wn, wd), size(hn, hd)) {
                 (Some(cw), Some(ch)) if cw > 0 && ch > 0 => Some((cw, ch)),
                 _ => None,
