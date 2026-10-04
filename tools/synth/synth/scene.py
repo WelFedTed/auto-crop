@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
-from . import backgrounds, camera, degrade, page as pagemod
+from . import backgrounds, camera, degrade, occluders, page as pagemod
 from . import rng as R
 from .plan import ImageSpec, SceneSpec
 
@@ -103,11 +103,15 @@ def _illumination(spec: ImageSpec, rng, h: int, w: int, centre: np.ndarray) -> t
     return light * exposure, exposure
 
 
-def render_image(assets: SceneAssets, spec: ImageSpec, max_edge: int, geometry_only: bool = False):
+def render_image(assets: SceneAssets, spec: ImageSpec, max_edge: int, geometry_only: bool = False, extras: dict | None = None):
     """Photograph the scene. Returns ``(upright uint8 RGB, quad_norm float64 4x2, meta)``.
 
     ``geometry_only`` skips background clutter, lighting, blur and noise (only the camera, the
     page texture and a flat background): the picture `verify.geometry_check` unwarps.
+
+    ``extras`` is for the TRAINING mode only (``trainset``): ``{"hand_p": probability}`` draws a hand
+    that holds the page, from a stream of its own, so the default path (``extras=None``) draws the
+    same random numbers and makes the same bytes as before.
     """
     rng = R.stream(spec.seed, "image")
     pitch, yaw, roll = _pose(spec, rng)
@@ -158,7 +162,17 @@ def render_image(assets: SceneAssets, spec: ImageSpec, max_edge: int, geometry_o
     inner = cv2.erode(alpha, np.ones((3, 3), np.uint8))
     rim = np.clip(alpha - inner, 0, 1)
     page_rgb = page_rgb * (1.0 - 0.10 * rim[..., None])
-    out = (bg * (1 - alpha[..., None]) + page_rgb * alpha[..., None]) * light
+    hand = None
+    if extras and extras.get("hand_p", 0.0) > 0.0:
+        hrng = R.stream(spec.seed, "train-hand")
+        if hrng.random() < float(extras["hand_p"]):
+            hand = occluders.plan_hand(hrng, quad_px, (cw, ch), assets.page.size_mm)
+            occluders.draw_hand(bg, hand, "behind", hrng)
+    comp = bg * (1 - alpha[..., None]) + page_rgb * alpha[..., None]
+    if hand is not None:
+        occluders.draw_hand(comp, hand, "front", hrng)
+        meta["hand"] = hand["kind"]
+    out = comp * light
     out = np.clip(out + 0.5, 0, 255).astype(np.uint8)
 
     if spec.lighting in ("normal", "colour-cast") and rng.random() < 0.5:

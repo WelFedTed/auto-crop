@@ -36,6 +36,11 @@ def _generate_parser() -> argparse.ArgumentParser:
     p.add_argument("--pin", action="append", default=[], metavar="AXIS=VALUE",
                    help="always draw this tag value (repeatable), for single-factor experiments, e.g. "
                    "--pin lighting=normal --pin clutter=none; the quotas no longer apply")
+    p.add_argument("--train", action="store_true",
+                   help="TRAINING mode: failure-biased quotas, four extra desk textures, hands holding the page, "
+                   "exif 1 and sRGB only; refuses the seeds of the evaluation suites (the suites themselves are unchanged)")
+    p.add_argument("--hands", type=float, default=None, metavar="P",
+                   help="with --train: share of the pictures with a hand (default 0.4)")
     p.add_argument("--backend", choices=["auto", "builtin"], default="auto",
                    help="degradation backend: Augraphy when importable (auto) or the builtin NumPy one")
     return p
@@ -48,6 +53,10 @@ def run_generate(argv: list[str]) -> int:
     if (a.suite or "") in multi_item.SUITES or (a.name or "").startswith("multi"):
         return run_generate_multi(a)
     preset = plan.SUITES.get(a.suite or "", {})
+    if a.train:
+        from . import trainset
+
+        preset = {"max_edge": trainset.DEFAULT_MAX_EDGE}
     seed = a.seed if a.seed is not None else preset.get("seed", 1)
     count = a.count if a.count is not None else preset.get("count", 200)
     name = a.name or a.suite or "synth"
@@ -57,7 +66,12 @@ def run_generate(argv: list[str]) -> int:
     from . import suite
 
     overrides = {**preset.get("overrides", {}), **plan.pins_to_overrides(a.pin)}
-    s = suite.generate(Path(a.out), name, seed, count, max_edge, a.jobs, a.truth, overrides=overrides)
+    extras = None
+    if a.train:
+        trainset.check_seed(seed)
+        overrides = trainset.overrides(plan.pins_to_overrides(a.pin))
+        extras = trainset.extras(a.hands if a.hands is not None else trainset.DEFAULT_HAND_SHARE)
+    s = suite.generate(Path(a.out), name, seed, count, max_edge, a.jobs, a.truth, overrides=overrides, extras=extras)
     print(
         f"wrote {s['count']} images ({s['image_bytes'] / 1e6:.1f} MB) in {s['scenes']} scenes and "
         f"manifest.jsonl to {a.out} in {s['seconds']}s [{GENERATOR}, {s['degrade_backend']}, "

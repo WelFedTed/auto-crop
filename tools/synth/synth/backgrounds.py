@@ -126,6 +126,69 @@ _MAKERS = {
 }
 
 
+# --- Training-only desks (see `trainset`): textures the evaluation suites do not use. They add
+# parallel plank gaps and veins that look like page edges, and busy speckle, to teach a learned
+# detector that desk texture is not a page. Registered below the defaults, never drawn by them.
+
+
+def planks(rng, h, w):
+    """Wood planks with dark gaps and a different tone per plank (long parallel false edges)."""
+    ang = rng.uniform(0, math.pi)
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    u = (xx * math.cos(ang) + yy * math.sin(ang)) / max(h, w)
+    v = (-xx * math.sin(ang) + yy * math.cos(ang)) / max(h, w)
+    width = float(rng.uniform(0.07, 0.2))
+    off = float(rng.uniform(0, width))
+    idx = np.floor((v + off) / width)
+    tone = (np.sin(idx * 12.9898 + float(rng.uniform(0, 100))) * 43758.5453) % 1.0
+    grain = fbm(rng, h, w, 3, 28)
+    streak = 0.5 + 0.5 * np.sin(2 * math.pi * (u * rng.uniform(1.5, 4.0) + 2.0 * fbm(rng, h, w, 3, 3)))
+    tex = 0.4 * tone.astype(np.float32) + 0.3 * grain + 0.3 * streak
+    base = _rgb(rng, (100, 60, 30), (210, 165, 110))
+    img = _tint(base, tex, 0.6)
+    frac = ((v + off) / width) % 1.0
+    gap = (frac < 0.012) | (frac > 0.988)
+    img[gap] = img[gap] * float(rng.uniform(0.25, 0.5))
+    return img
+
+
+def marble(rng, h, w):
+    """Bright polished stone with sharp dark veins."""
+    n = fbm(rng, h, w, 6, 2)
+    veins = np.abs(np.sin(8.0 * math.pi * (fbm(rng, h, w, 5, 2) + 0.35 * n)))
+    veins = veins ** float(rng.uniform(6, 18))
+    base = _rgb(rng, (190, 190, 185), (240, 238, 232))
+    img = _tint(base, n, 0.10)
+    return np.clip(img * (1.0 - float(rng.uniform(0.3, 0.6)) * veins[..., None]), 0, 255)
+
+
+def terrazzo(rng, h, w):
+    """Light cement with random coloured chips: busy speckle at every scale."""
+    base = _rgb(rng, (170, 165, 155), (235, 232, 225))
+    img = _tint(base, fbm(rng, h, w, 3, 3), 0.12)
+    scale = max(h, w)
+    for _ in range(int(rng.integers(120, 360))):
+        cx, cy = float(rng.uniform(0, w)), float(rng.uniform(0, h))
+        r = scale * float(rng.uniform(0.004, 0.02))
+        col = tuple(float(c) for c in rng.uniform(40, 220, size=3))
+        pts = np.array([[cx + r * math.cos(a + rng.uniform(-0.4, 0.4)) * rng.uniform(0.6, 1.2), cy + r * math.sin(a + rng.uniform(-0.4, 0.4)) * rng.uniform(0.6, 1.2)] for a in np.linspace(0, 2 * math.pi, int(rng.integers(5, 8)), endpoint=False)], dtype=np.float32)
+        cv2.fillPoly(img, [np.round(pts).astype(np.int32)], col, lineType=cv2.LINE_AA)
+    return img
+
+
+def carpet(rng, h, w):
+    """Dense fibre noise, low contrast and mid brightness (felt, carpet, a sofa)."""
+    fine = rng.random((h, w)).astype(np.float32)
+    fine = cv2.GaussianBlur(fine, (0, 0), 0.8)
+    tex = 0.55 * (fine - fine.min()) / max(float(fine.max() - fine.min()), 1e-6) + 0.45 * fbm(rng, h, w, 4, 4)
+    base = _rgb(rng, (50, 50, 50), (210, 205, 200)) * rng.uniform(0.9, 1.1, size=3).astype(np.float32)
+    return _tint(base, tex, 0.35)
+
+
+TRAIN_KINDS = ("planks", "marble", "terrazzo", "carpet")
+_MAKERS.update({"planks": planks, "marble": marble, "terrazzo": terrazzo, "carpet": carpet})
+
+
 def make(kind: str, rng, h: int, w: int) -> np.ndarray:
     """A float32 RGB background (0..255) of ``h x w`` pixels."""
     return _MAKERS[kind](rng, h, w).astype(np.float32)

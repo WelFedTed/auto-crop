@@ -62,12 +62,13 @@ def _truth(assets: scene.SceneAssets, spec: plan.ImageSpec, quad: np.ndarray, me
 
 def _render_scene(task):
     """Worker: render every image of one scene and write its files; returns manifest rows."""
-    sc, imgs, out, max_edge, truth_mode, suite = task
+    sc, imgs, out, max_edge, truth_mode, suite, *rest = task
+    extras = rest[0] if rest else None  # training mode only (`trainset`)
     out = Path(out)
     assets = scene.build_scene(sc)
     rows = []
     for spec in imgs:
-        img, quad, meta = scene.render_image(assets, spec, max_edge)
+        img, quad, meta = scene.render_image(assets, spec, max_edge, extras=extras)
         data = encode.encode(
             img,
             spec.format,
@@ -110,6 +111,8 @@ def _render_scene(task):
             "licence": LICENCE,
             "source": "tools/synth",
         }
+        if extras:
+            row["train_hand"] = meta.get("hand")
         if truth_mode != "none":
             (out / "truth").mkdir(exist_ok=True)
             t = _truth(assets, spec, quad, meta)
@@ -140,6 +143,7 @@ def generate(
     quiet: bool = False,
     overrides: dict | None = None,
     _worker=None,
+    extras: dict | None = None,
 ) -> dict:
     """Write a suite under ``out``. Returns a summary dict (also written as ``suite.json``)."""
     out = Path(out)
@@ -147,7 +151,8 @@ def generate(
         shutil.rmtree(out / stale, ignore_errors=True)
     (out / "images").mkdir(parents=True, exist_ok=True)
     scenes, images = plan.build(name, seed, count, overrides)
-    tasks = [(sc, imgs, str(out), max_edge, truth, name) for sc, imgs in _group_by_scene(images)]
+    extra_task = (extras,) if extras else ()  # only the training mode adds a 7th element
+    tasks = [(sc, imgs, str(out), max_edge, truth, name, *extra_task) for sc, imgs in _group_by_scene(images)]
     jobs = jobs or min(os.cpu_count() or 1, 8)
     worker = _worker or _render_scene  # replaceable so a test can make a worker die
     started = time.time()
