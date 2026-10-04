@@ -1,0 +1,132 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+# Baseline adapters (ROADMAP M1.29): the classical detector against OpenCV's textbook quad finder
+# (tools/baselines/cv_quad.py), ImageMagick `-deskew -trim`, unpaper (mask-scan and deskew), the
+# full frame and the oracle, per slice, on the Python smoke suite.
+#
+# DEV ONLY and informational: nothing here gates a pull request. OpenCV (Apache-2.0) is installed
+# from the hash-locked tools/baselines/requirements.lock into a throw-away virtual environment.
+# unpaper (GPL-2.0-or-later) and ImageMagick are installed from the distribution and run strictly as
+# separate processes on files; nothing of them is linked into, vendored in or bundled with the
+# application, and unpaper is Linux CI and devcontainer only (no Windows build).
+#
+# Safety: read-only token, no secrets, no pull_request_target. The job always reports; the path
+# filter is a step inside it (docs/policy/ci-guards.md section 3). Synthetic data only.
+
+name: Baselines
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: baselines-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  baselines:
+    name: baseline adapters and per-slice table
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Did anything the baselines depend on change?
+        id: changes
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          changed=unknown
+          if [ "$EVENT" = "pull_request" ] || [ "$EVENT" = "push" ]; then
+            changed=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" 2>/dev/null || echo unknown)
+          fi
+          if [ "$changed" = "unknown" ] || echo "$changed" | grep -Eq '^(tools/(baselines|synth)/|crates/eval/|xtask/|Cargo\.lock$|\.github/workflows/baselines\.yml$)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing the baseline adapters depend on changed: skipped." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: steps.changes.outputs.relevant == 'true'
+        with:
+          python-version: "3.12"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: steps.changes.outputs.relevant == 'true'
+      - name: Install ImageMagick and unpaper (separate processes, never linked)
+        if: steps.changes.outputs.relevant == 'true'
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends imagemagick unpaper
+          (magick -version || convert -version) | head -1
+          unpaper --version
+      - name: Python environment for the adapters (hash-locked)
+        if: steps.changes.outputs.relevant == 'true'
+        run: |
+          python -m venv target/baselines-venv
+          target/baselines-venv/bin/python -m pip install --require-hashes -r tools/baselines/requirements.lock
+      - name: Build the harness and generate the Python smoke suite
+        if: steps.changes.outputs.relevant == 'true'
+        run: |
+          cargo build --release -p auto-crop-eval
+          cargo xtask synth-setup
+          cargo xtask synth --suite smoke
+      - name: Adapter tests (OpenCV, ImageMagick and unpaper on pages of known skew)
+        if: steps.changes.outputs.relevant == 'true'
+        working-directory: tools/baselines
+        run: ../../target/baselines-venv/bin/python -m unittest -v test_baselines
+      - name: What unpaper prints (the adapter reads its log)
+        if: steps.changes.outputs.relevant == 'true'
+        run: |
+          for id in 00001 00002 00003; do
+            f=$(ls target/synth/smoke/images/smoke-$id.* | head -1)
+            echo "== $f"
+            target/baselines-venv/bin/python tools/baselines/unpaper_deskew.py --log "$f"
+          done
+      - name: Run the adapters over the smoke suite
+        if: steps.changes.outputs.relevant == 'true'
+        run: |
+          py=target/baselines-venv/bin/python
+          m=target/synth/smoke/manifest.jsonl
+          mkdir -p target/baselines
+          $py tools/baselines/cv_quad.py --manifest $m --out target/baselines/cv_quad.jsonl
+          $py tools/baselines/im_deskew.py --manifest $m --out target/baselines/im_deskew.jsonl
+          $py tools/baselines/unpaper_deskew.py --manifest $m --out target/baselines/unpaper.jsonl
+      - name: Score everything and write the per-slice table
+        if: steps.changes.outputs.relevant == 'true'
+        run: |
+          e=./target/release/auto-crop-eval
+          m=target/synth/smoke/manifest.jsonl
+          for p in oracle detector full-frame; do
+            $e run --manifest $m --predictor $p --suite smoke-py --threads 2 --out target/baselines/$p.json > /dev/null
+          done
+          for p in cv_quad im_deskew unpaper; do
+            $e run --manifest $m --predictor jsonl:target/baselines/$p.jsonl --suite smoke-py --threads 2 --out target/baselines/$p.json > /dev/null
+          done
+          cd target/baselines
+          python3 ../../tools/baselines/slice_table.py oracle=oracle.json detector=detector.json cv_quad=cv_quad.json \
+            im_deskew=im_deskew.json unpaper=unpaper.json full-frame=full-frame.json | tee table.md
+          {
+            echo "### Detector against the baselines, per slice (Python smoke suite, synthetic, informational)"
+            cat table.md
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: steps.changes.outputs.relevant == 'true'
+        with:
+          name: baselines-table
+          path: |
+            target/baselines/table.md
+            target/baselines/*.jsonl
+          retention-days: 14

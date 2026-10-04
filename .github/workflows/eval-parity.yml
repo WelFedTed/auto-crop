@@ -181,16 +181,18 @@ jobs:
       - name: Compare every OS against Linux
         run: |
           status=0
-          python3 tools/ci/eval_parity.py results/parity-results-Linux/shared.json results/parity-results-macOS/shared.json results/parity-results-Windows/shared.json | tee parity.md || status=$?
+          r=results/parity-results
           {
             echo "### Detector parity across operating systems (same images, same build)"
-            cat parity.md
+            python3 tools/ci/eval_parity.py "$r-Linux/shared.json" "$r-macOS/shared.json" "$r-Windows/shared.json" || status=$?
             echo
-            echo "Linux is the reference: numeric thresholds are enforced there (accuracy-smoke.yml). The perfect and trivial predictors are compared too:"
+            echo "Linux is the reference: numeric thresholds are enforced there (accuracy-smoke.yml). The perfect and the trivial predictors are compared too."
             for p in oracle full-frame; do
-              echo '```'
-              python3 tools/ci/eval_parity.py "results/parity-results-Linux/$p.json" "results/parity-results-macOS/$p.json" "results/parity-results-Windows/$p.json" || status=$?
-              echo '```'
+              echo
+              echo "#### $p"
+              python3 tools/ci/eval_parity.py "$r-Linux/$p.json" "$r-macOS/$p.json" "$r-Windows/$p.json" || status=$?
             done
-          } >> "$GITHUB_STEP_SUMMARY"
+          } > parity.md
+          cat parity.md
+          cat parity.md >> "$GITHUB_STEP_SUMMARY"
           exit "$status"

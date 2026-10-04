@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+# Dev-only baseline adapters (ROADMAP M1.29). Never shipped, never imported by the application.
+# Same pins as tools/synth (the versions its lock already verified); regenerate requirements.lock
+# with: pip-compile --generate-hashes --allow-unsafe tools/baselines/requirements.txt
+# opencv-python-headless: Apache-2.0 (OpenCV 4.5+), a DEV tool here only.
+opencv-python-headless==5.0.0.93
+numpy==2.5.3
+# Fallback image reader for files OpenCV's bundled TIFF reader refuses (HPND).
+pillow==12.3.0
