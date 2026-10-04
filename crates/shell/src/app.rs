@@ -270,6 +270,8 @@ fn image_response(status: StatusCode, mime: &str, body: Vec<u8>) -> Response<Vec
 }
 
 pub fn run() {
+    // Packaged builds keep the HEIC plugin folder beside the executable; set before any decode.
+    auto_crop_engine::packaged::configure_heif_from_exe();
     // `AUTO_CROP_HOME` keeps all data (settings, backups, samples) under one folder: for tests and
     // for trying the app without touching the real per-user store.
     let paths = std::env::var_os("AUTO_CROP_HOME")

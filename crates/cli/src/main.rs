@@ -162,6 +162,8 @@ fn dev_pipeline(args: &[String]) -> Result<(), String> {
 }
 
 fn main() -> ExitCode {
+    // A packaged build keeps the HEIC plugin folder beside the executable (no-op otherwise).
+    auto_crop_engine::packaged::configure_heif_from_exe();
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("dev-pipeline") => match dev_pipeline(&args[1..]) {

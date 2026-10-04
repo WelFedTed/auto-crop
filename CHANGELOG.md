@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Save as copy of a scan with several items no longer waits for the split to be accepted: a copy destroys nothing, so it is written at once; replacing the original stays held until the split is accepted.
+- One error code, `NOT_REPLACEABLE`, for a source that is never replaced in place (multi-page TIFF, a format with no writer), on the single-item and the multi-item path; the reason is in the notice. The single-item path used to answer `UNSUPPORTED_OUTPUT`.
+- A Windows package with HEIC, HEIF and AVIF input can be built in CI (`package-windows.yml`); the app and the CLI point libheif at the `libheif` folder beside the executable. HEIC and AVIF are parsed in-process (the sandboxed worker pool is not built yet).
+
 ## 0.0.1 (2026-10-02), pre-release, Windows only
 
 The first public build: an early, owner-directed test build of the desktop app. It is **not** the

@@ -61,3 +61,11 @@ Not done here; this is the list for whoever owns packaging (ADR-0004, ADR-0005, 
 6. Decode threads: `heif::set_codec_threads(n)` bounds the threads dav1d and libde265 use per decode (default 0 = every core); lower it while the engine decodes several files at once.
 7. dav1d and libheif print diagnostics (`Error parsing OBU data`) on stderr for damaged files; they are not errors of the app and cannot be silenced through the libheif API.
 8. The decode must run in the sandboxed worker pool (ADR-0006): this crate decodes in-process; libheif and its plugins are loaded before the sandbox is entered.
+
+## A Windows package for the owner's own use (`package-windows.yml`)
+
+`.github/workflows/package-windows.yml` (manual: `gh workflow run package-windows.yml --ref main`) builds the native libraries, the UI, the Tauri shell and the CLI with the `heif` feature on `windows-2025` and assembles `auto-crop-windows-x64-<version>.zip`: `AutoCrop.exe`, `auto-crop.exe`, `heif.dll`, `dav1d.dll`, `libde265.dll`, `libheif/heif-libde265.dll`, the licence texts, `THIRD_PARTY_NOTICES.md` and `README-PACKAGE.txt` (template: `packaging/windows/README-PACKAGE.txt`). The zip is uploaded as a workflow artifact for 14 days; no release and no tag is created. Download: `gh run download <run-id> -n auto-crop-windows-x64-<version>`.
+
+Start-up wiring: the shell and the CLI call `auto_crop_engine::packaged::configure_heif_from_exe()` first, which runs `heif::configure(Some(<exe dir>/libheif))` when that folder exists (a development build has none and keeps libheif's built-in directory and `LIBHEIF_PLUGIN_PATH`).
+
+What CI proves: the zip is unzipped into a clean folder, the build prefix is moved away, `PATH` is reduced to System32 and `LIBHEIF_PLUGIN_PATH` is cleared; then `auto-crop.exe dev-pipeline` decodes a committed AVIF (48x32) and the HEIC of the pinned libheif archive (`rainbow-451x461.heic`). With the `libheif/` folder renamed the HEIC fails with `HevcDecoderMissing` and the AVIF still decodes; with `heif.dll` renamed the tool does not start. What it does not prove: the GUI window (a start-and-stay-alive check is informational only), the sandboxed worker pool (it does not exist: HEIC and AVIF are parsed in-process, acceptable for the owner's own use, not for a public release), code signing.

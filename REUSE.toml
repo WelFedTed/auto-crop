@@ -11,6 +11,7 @@ SPDX-PackageDownloadLocation = "https://github.com/WelFedTed/auto-crop"
 path = [
     "**/*.md",
     "docs/**",
+    "packaging/windows/**",
     ".github/**",
     ".gitattributes",
     ".gitignore",

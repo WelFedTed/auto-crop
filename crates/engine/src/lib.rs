@@ -14,6 +14,7 @@ pub mod items_detect;
 pub mod logging;
 pub mod memory;
 pub mod migrate;
+pub mod packaged;
 pub mod paths;
 mod restore;
 pub mod samples;

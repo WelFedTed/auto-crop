@@ -1,0 +1,243 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+# A Windows x64 build of the desktop app WITH the `heif` feature (AVIF, HEIC and HEIF input), for the
+# owner's own use. The owner's machine has no cmake, ninja, meson or nasm, so the pinned native
+# libraries (`cargo xtask build-native`, as heif.yml does) and the app are built here. The result is
+# one zip, uploaded as a workflow artifact (14 days). Nothing is published: no release, no tag.
+#
+# The zip is proven by running the PACKAGED layout: it is unzipped into a clean folder, the build
+# tree is moved away and PATH and LIBHEIF_PLUGIN_PATH are cleared, then the command-line tool of the
+# package decodes a committed AVIF and the HEIC of the pinned libheif archive. Taking the plugin
+# folder away must make the HEIC fail with `HevcDecoderMissing` (so the plugin really comes from the
+# folder beside the executable) while the AVIF still decodes. The GUI window is not driven by a test.
+name: Package Windows
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  package:
+    name: windows-2025 x64 with heif
+    runs-on: windows-2025
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install NASM
+        shell: pwsh
+        run: |
+          if (-not (Get-Command nasm -ErrorAction SilentlyContinue)) { choco install nasm -y --no-progress }
+          $dir = "C:\Program Files\NASM"
+          if (Test-Path $dir) { $dir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8 }
+      - name: Install Meson and Ninja (they build dav1d)
+        shell: pwsh
+        run: python -m pip install --quiet meson ninja
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - name: Install cargo-about
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        with:
+          tool: cargo-about
+      - name: Toolchain report
+        shell: bash
+        run: |
+          rustc --version && cargo --version && node --version && npm --version && cmake --version | head -1
+          python -m meson --version; ninja --version; nasm --version
+      - name: Build the pinned libheif, dav1d and libde265 (and libjpeg-turbo)
+        run: cargo xtask build-native
+      - name: Check the built libraries (no GPL or AV1 encoders, allowed dependencies, libheif links dav1d)
+        run: cargo xtask check-native
+      - name: Build the UI
+        shell: bash
+        working-directory: ui
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+          test -f dist/index.html
+      - name: Build the app and the command-line tool with the heif feature (release)
+        shell: pwsh
+        env:
+          AUTOCROP_NATIVE_PREFIX: ${{ github.workspace }}\target\native\prefix
+        run: |
+          cargo build --release -p auto-crop-shell --features "gui,custom-protocol,heif"
+          if ($LASTEXITCODE -ne 0) { throw "shell build failed" }
+          cargo build --release -p auto-crop-cli --features heif
+          if ($LASTEXITCODE -ne 0) { throw "cli build failed" }
+          foreach ($f in 'AutoCrop.exe', 'auto-crop.exe') {
+            $p = Join-Path 'target\release' $f
+            if (-not (Test-Path $p)) { throw "$p was not built" }
+            Get-Item $p | Select-Object Name, Length
+          }
+      - name: Third-party notices (cargo about)
+        shell: bash
+        run: |
+          # The shell tree first (Tauri and wry are not in the default workspace build); the default
+          # tree is the fallback so the notices file always exists.
+          if cargo about generate about.hbs --manifest-path crates/shell/Cargo.toml --features gui,heif -o THIRD_PARTY_NOTICES.md; then
+            echo "notices: shell tree"
+          else
+            echo "::warning::cargo about failed for the shell tree; using the default workspace tree"
+            cargo about generate about.hbs -o THIRD_PARTY_NOTICES.md
+          fi
+          test -s THIRD_PARTY_NOTICES.md
+      - name: Assemble the package
+        id: pkg
+        shell: pwsh
+        env:
+          COMMIT: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ver = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          if (-not $ver) { throw "workspace version not found" }
+          $name = "auto-crop-windows-x64-$ver"
+          $prefix = Join-Path $env:GITHUB_WORKSPACE 'target\native\prefix'
+          Write-Host "native prefix contents:"
+          Get-ChildItem -Path $prefix -Recurse -Include *.dll, *.lib | ForEach-Object { $_.FullName.Substring($prefix.Length) }
+          $pick = {
+            param($file)
+            $f = Get-ChildItem -Path $prefix -Recurse -Filter $file -File | Select-Object -First 1
+            if (-not $f) { throw "$file not found under $prefix" }
+            $f.FullName
+          }
+          $dist = Join-Path $env:GITHUB_WORKSPACE "dist\$name"
+          New-Item -ItemType Directory -Force -Path $dist, "$dist\libheif", "$dist\licenses" | Out-Null
+          Copy-Item 'target\release\AutoCrop.exe', 'target\release\auto-crop.exe' -Destination $dist
+          foreach ($dll in 'heif.dll', 'dav1d.dll', 'libde265.dll') { Copy-Item (& $pick $dll) -Destination $dist }
+          Copy-Item (& $pick 'heif-libde265.dll') -Destination "$dist\libheif"
+          Copy-Item LICENSE-MIT, LICENSE-APACHE, THIRD_PARTY_NOTICES.md -Destination $dist
+          # Licence texts of the native libraries, from the hash-checked source archives.
+          foreach ($lib in 'libheif', 'libde265', 'dav1d') {
+            $src = Get-ChildItem -Path 'target\native' -Recurse -Directory -Filter "$lib-*" |
+              Where-Object { $_.FullName -match '[\\/]src[\\/]' } | Select-Object -First 1
+            if (-not $src) { throw "source of $lib not found under target\native" }
+            $texts = Get-ChildItem -Path $src.FullName -File | Where-Object { $_.Name -match '^(COPYING|LICENSE|COPYRIGHT)' }
+            if (-not $texts) { throw "no licence text found in $($src.FullName)" }
+            foreach ($t in $texts) { Copy-Item $t.FullName -Destination "$dist\licenses\$lib-$($t.Name)" }
+          }
+          Copy-Item native-deps.toml -Destination "$dist\licenses\native-deps.toml"
+          (Get-Content packaging\windows\README-PACKAGE.txt -Raw).Replace('@VERSION@', $ver).Replace('@COMMIT@', $env:COMMIT) |
+            Set-Content -Path "$dist\README-PACKAGE.txt" -Encoding utf8 -NoNewline
+          $zip = Join-Path $env:GITHUB_WORKSPACE "dist\$name.zip"
+          Compress-Archive -Path $dist -DestinationPath $zip -Force
+          Get-ChildItem -Recurse $dist | Where-Object { -not $_.PSIsContainer } | ForEach-Object { '{0,12}  {1}' -f $_.Length, $_.FullName.Substring($dist.Length + 1) }
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          "name=$name" >> $env:GITHUB_OUTPUT
+          "zip=$zip" >> $env:GITHUB_OUTPUT
+          "sha256=$hash" >> $env:GITHUB_OUTPUT
+      - name: Fixtures for the smoke test (a committed AVIF and the HEIC of the pinned libheif archive)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $fx = Join-Path $env:RUNNER_TEMP 'fixtures'
+          New-Item -ItemType Directory -Force -Path $fx | Out-Null
+          Copy-Item 'crates\codecs\tests\fixtures\heif\gradient-444-48x32.avif' -Destination $fx
+          $heic = Get-ChildItem -Path 'target\native' -Recurse -Filter 'rainbow-451x461.heic' -File | Select-Object -First 1
+          if (-not $heic) { throw "rainbow-451x461.heic not found in the libheif archive" }
+          Copy-Item $heic.FullName -Destination $fx
+          Get-ChildItem $fx
+      - name: Smoke test of the PACKAGED layout (clean folder, no build tree, no PATH, no plugin variable)
+        shell: pwsh
+        env:
+          ZIP: ${{ steps.pkg.outputs.zip }}
+          NAME: ${{ steps.pkg.outputs.name }}
+          SHA256: ${{ steps.pkg.outputs.sha256 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $clean = Join-Path $env:RUNNER_TEMP 'unzipped'
+          if (Test-Path $clean) { Remove-Item -Recurse -Force $clean }
+          Expand-Archive -Path $env:ZIP -DestinationPath $clean
+          $app = Join-Path $clean $env:NAME
+          $fx = Join-Path $env:RUNNER_TEMP 'fixtures'
+          $out = Join-Path $env:RUNNER_TEMP 'smoke-out'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+
+          # Nothing may resolve from the build tree: its prefix is the compiled-in plugin directory
+          # of heif.dll and the place the DLLs were built.
+          $native = Join-Path $env:GITHUB_WORKSPACE 'target\native'
+          Rename-Item -Path (Join-Path $native 'prefix') -NewName 'prefix.moved-away'
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          foreach ($v in 'LIBHEIF_PLUGIN_PATH', 'AUTOCROP_NATIVE_PREFIX', 'LD_LIBRARY_PATH') { Remove-Item "Env:$v" -ErrorAction SilentlyContinue }
+          Set-Location $app
+          $cli = Join-Path $app 'auto-crop.exe'
+
+          function Run-Cli([string]$file, [string]$tag) {
+            $o = Join-Path $out "$tag.jpg"
+            $text = (& $cli dev-pipeline $file --json --out $o 2>&1 | Out-String)
+            [pscustomobject]@{ Code = $LASTEXITCODE; Text = $text.Trim(); Out = $o }
+          }
+
+          # 1. AVIF: dav1d through heif.dll, both found beside the executable.
+          $r = Run-Cli (Join-Path $fx 'gradient-444-48x32.avif') 'avif'
+          Write-Host "AVIF: exit $($r.Code): $($r.Text)"
+          if ($r.Code -ne 0 -or $r.Text -notmatch '"source":\[48,32\]') { throw "the AVIF did not decode from the packaged folder" }
+          if (-not (Test-Path $r.Out) -or (Get-Item $r.Out).Length -eq 0) { throw "no output file for the AVIF" }
+
+          # 2. HEIC: HEVC through the libde265 plugin of <exe dir>\libheif.
+          $r = Run-Cli (Join-Path $fx 'rainbow-451x461.heic') 'heic'
+          Write-Host "HEIC: exit $($r.Code): $($r.Text)"
+          if ($r.Code -ne 0 -or $r.Text -notmatch '"source":\[451,461\]') { throw "the HEIC did not decode from the packaged folder" }
+          if (-not (Test-Path $r.Out) -or (Get-Item $r.Out).Length -eq 0) { throw "no output file for the HEIC" }
+
+          # 3. Without the plugin folder the HEIC must fail for the right reason; the AVIF still decodes.
+          Rename-Item -Path (Join-Path $app 'libheif') -NewName 'libheif.off'
+          $r = Run-Cli (Join-Path $fx 'rainbow-451x461.heic') 'heic-noplugin'
+          Write-Host "HEIC without the plugin folder: exit $($r.Code): $($r.Text)"
+          if ($r.Code -eq 0 -or $r.Text -notmatch 'HevcDecoderMissing') { throw "the HEIC did not fail with HevcDecoderMissing without the plugin folder (a plugin was found somewhere else?)" }
+          $r = Run-Cli (Join-Path $fx 'gradient-444-48x32.avif') 'avif-noplugin'
+          if ($r.Code -ne 0 -or $r.Text -notmatch '"source":\[48,32\]') { throw "the AVIF must decode without the plugin folder" }
+          Rename-Item -Path (Join-Path $app 'libheif.off') -NewName 'libheif'
+
+          # 4. Without heif.dll the tool does not start (the DLL is a real, local dependency).
+          Rename-Item -Path (Join-Path $app 'heif.dll') -NewName 'heif.dll.off'
+          $r = Run-Cli (Join-Path $fx 'gradient-444-48x32.avif') 'noheif'
+          Write-Host "without heif.dll: exit $($r.Code)"
+          if ($r.Code -eq 0) { throw "the tool started without heif.dll: it is not loaded from the package folder" }
+          Rename-Item -Path (Join-Path $app 'heif.dll.off') -NewName 'heif.dll'
+
+          @(
+            '### Windows package smoke test (headless CLI from the unzipped folder)',
+            '',
+            "* package: ``$env:NAME.zip`` (SHA-256 ``$env:SHA256``)",
+            '* AVIF 48x32 decoded, HEIC 451x461 decoded, HEIC without the plugin folder fails with HevcDecoderMissing, AVIF without it still decodes, no heif.dll means no start',
+            '* build tree moved away, PATH reduced to System32, LIBHEIF_PLUGIN_PATH cleared',
+            '* the desktop window was not driven by a test'
+          ) | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+      - name: Restore the build tree
+        if: always()
+        shell: pwsh
+        run: |
+          $m = 'target\native\prefix.moved-away'
+          if (Test-Path $m) { Rename-Item -Path $m -NewName 'prefix' }
+      - name: The app starts from the unzipped folder (informational; the window is not tested)
+        continue-on-error: true
+        shell: pwsh
+        env:
+          NAME: ${{ steps.pkg.outputs.name }}
+        run: |
+          $app = Join-Path (Join-Path $env:RUNNER_TEMP 'unzipped') $env:NAME
+          $env:AUTO_CROP_HOME = Join-Path $env:RUNNER_TEMP 'gui-home'
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          Remove-Item Env:LIBHEIF_PLUGIN_PATH -ErrorAction SilentlyContinue
+          $p = Start-Process -FilePath (Join-Path $app 'AutoCrop.exe') -WorkingDirectory $app -PassThru
+          Start-Sleep -Seconds 10
+          if ($p.HasExited) { throw "AutoCrop.exe exited with code $($p.ExitCode) within 10 seconds" }
+          Write-Host "AutoCrop.exe is running after 10 seconds (pid $($p.Id)); stopping it"
+          Stop-Process -Id $p.Id -Force
+      - name: Upload the zip (14 days; nothing is published)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.pkg.outputs.name }}
+          path: ${{ steps.pkg.outputs.zip }}
+          retention-days: 14
+          if-no-files-found: error
