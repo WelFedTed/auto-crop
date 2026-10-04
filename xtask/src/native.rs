@@ -166,7 +166,7 @@ fn run_cmd(cmd: &mut Command, what: &str) -> Result<(), String> {
     }
 }
 
-fn download(url: &str, dest: &Path) -> Result<(), String> {
+pub(crate) fn download(url: &str, dest: &Path) -> Result<(), String> {
     run_cmd(
         Command::new("curl")
             .args(["-fsSL", "--retry", "3", "-o"])
@@ -176,10 +176,26 @@ fn download(url: &str, dest: &Path) -> Result<(), String> {
     )
 }
 
-fn extract(archive: &Path, into: &Path) -> Result<PathBuf, String> {
+/// The `tar` that unpacks `archive`. A `.zip` needs bsdtar, which Windows 11 ships in `System32`;
+/// the GNU `tar` of the bash shell, often first on `PATH`, cannot read zip files.
+fn tar_program(archive: &Path) -> PathBuf {
+    let zip = archive.extension().is_some_and(|e| e == "zip");
+    if cfg!(windows)
+        && zip
+        && let Some(root) = std::env::var_os("SystemRoot")
+    {
+        let bsd = Path::new(&root).join("System32").join("tar.exe");
+        if bsd.is_file() {
+            return bsd;
+        }
+    }
+    PathBuf::from("tar")
+}
+
+pub(crate) fn extract(archive: &Path, into: &Path) -> Result<PathBuf, String> {
     fs::create_dir_all(into).map_err(|e| e.to_string())?;
     run_cmd(
-        Command::new("tar")
+        Command::new(tar_program(archive))
             .arg("-xf")
             .arg(archive)
             .arg("-C")

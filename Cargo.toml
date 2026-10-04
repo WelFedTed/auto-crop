@@ -10,6 +10,7 @@ members = [
     "crates/imgproc",
     "crates/imgproc-bench",
     "crates/engine",
+    "crates/infer",
     "crates/eval",
     "crates/cli",
     "crates/shell",

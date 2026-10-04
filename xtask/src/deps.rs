@@ -39,6 +39,10 @@ fn is_codec_or_io(dep: &str) -> bool {
     CODEC_OR_IO.contains(&dep) || dep.starts_with("zune-") || dep.starts_with("libheif")
 }
 
+fn is_inference_runtime(dep: &str) -> bool {
+    matches!(dep, "ort" | "ort-sys") || dep == "rten" || dep.starts_with("rten-")
+}
+
 fn is_tauri(dep: &str) -> bool {
     dep == "tauri" || dep.starts_with("tauri-") || dep == "wry"
 }
@@ -55,6 +59,22 @@ pub fn check(pkgs: &[Pkg]) -> Vec<String> {
                         p.name
                     ));
                 }
+            }
+        }
+        // M1.55, ADR-0007: the inference runtimes live in auto-crop-infer behind the
+        // InferenceBackend trait; imageproc (Canny stand-in) only in the engine.
+        for d in &p.all {
+            if p.name != "auto-crop-infer" && is_inference_runtime(d) {
+                out.push(format!(
+                    "{} depends on `{d}`; only auto-crop-infer may depend on the inference runtimes",
+                    p.name
+                ));
+            }
+            if d == "imageproc" && p.name != "auto-crop-engine" {
+                out.push(format!(
+                    "{} depends on `imageproc`; only auto-crop-engine (the standin-canny feature) may",
+                    p.name
+                ));
             }
         }
         match p.name.as_str() {
@@ -179,6 +199,19 @@ mod tests {
             check(&[pkg("auto-crop-imgproc", &["auto-crop-codecs"])]).len(),
             1
         );
+    }
+
+    #[test]
+    fn inference_runtimes_only_in_the_infer_crate() {
+        assert!(check(&[pkg("auto-crop-infer", &["ort", "rten", "rten-tensor"])]).is_empty());
+        for bad in ["ort", "ort-sys", "rten", "rten-tensor"] {
+            let v = check(&[pkg("auto-crop-engine", &[bad])]);
+            assert_eq!(v.len(), 1, "{bad}: {v:?}");
+            assert!(v[0].contains("only auto-crop-infer"));
+        }
+        assert!(check(&[pkg("auto-crop-engine", &["imageproc"])]).is_empty());
+        assert_eq!(check(&[pkg("auto-crop-imgproc", &["imageproc"])]).len(), 1);
+        assert_eq!(check(&[pkg("auto-crop-infer", &["imageproc"])]).len(), 1);
     }
 
     #[test]

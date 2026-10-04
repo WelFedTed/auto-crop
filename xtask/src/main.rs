@@ -24,6 +24,7 @@ mod profiles;
 mod provenance;
 mod register;
 mod roadmap;
+mod standin;
 mod synth;
 
 use std::process::ExitCode;
@@ -55,6 +56,13 @@ Commands:
   build-native [--only a,b]
         Fetch the pinned native libraries (SHA-256 verified, wrong hash refused) and build
         libde265, libjpeg-turbo and libheif with CMake into target/native/prefix.
+  fetch-ort [--path-only]
+        Download the pinned ONNX Runtime archive for this host (SHA-256 verified, wrong hash
+        refused; no compiler needed), check the library inside it against the pin of
+        crates/infer, install it into target/native/prefix/lib and print AUTOCROP_ORT_DYLIB.
+  make-standin-net [--out DIR]
+        Generate the random-weight 256x256 MobileNetV3-class stand-in net (M1.55) into
+        target/standin with a sidecar SHA-256; needs Python 3 with numpy and onnx. Never committed.
   native-watch [--fail-on-stale] [--fake name=version]
         Compare each pinned native library with the newest upstream release and print STALE lines.
   licenses --check
@@ -147,6 +155,8 @@ fn main() -> ExitCode {
         "provenance" => provenance::run(&rest),
         "licenses" => licenses::run(&rest),
         "build-native" => native::run(&rest),
+        "fetch-ort" => standin::run_fetch_ort(&rest),
+        "make-standin-net" => standin::run_make_standin_net(&rest),
         "native-watch" => native_watch::run(&rest),
         "check-dco" => dco::run(&rest),
         "deny-selftest" => deny_selftest::run(&rest),

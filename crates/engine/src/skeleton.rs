@@ -29,6 +29,9 @@
 //! returns a [`Failure`] naming the stage and the stages already done, never partial bytes.
 
 pub mod bench_images;
+pub mod standin;
+
+pub use standin::{Analyse, StandinNet};
 
 use crate::error::{ErrKind, codec_err};
 use auto_crop_codecs::{DecodeLimits, Format, MAX_PIXELS, decode_with, encode, probe_with, sniff};
@@ -143,6 +146,8 @@ pub struct Options {
     /// JPEG quality of the output.
     pub quality: u8,
     pub enhance: Enhance,
+    /// What the `analyse` stage runs (M1.55): the classical detector or one of the STAND-INs.
+    pub analyse: Analyse,
     pub limits: DecodeLimits,
     /// Run every parallel kernel in this pool (`None`: rayon's global pool). One single-thread
     /// pool per batch worker gives the "one image per worker" mode of PLAN 7.3.
@@ -154,6 +159,7 @@ impl Default for Options {
         Self {
             quality: BENCH_JPEG_QUALITY,
             enhance: Enhance::default(),
+            analyse: Analyse::default(),
             limits: DecodeLimits::default(),
             pool: None,
         }
@@ -188,6 +194,8 @@ pub struct Report {
     pub output_bytes: usize,
     /// False when the detector found nothing and the full frame was rectified instead.
     pub quad_found: bool,
+    /// What the `analyse` stage ran, as a label that starts with `STAND-IN` (M1.55).
+    pub analyse: String,
 }
 
 impl Report {
@@ -337,11 +345,20 @@ fn run_inner(
         Ok((Pyramid::build_shared(Arc::clone(&source)), px))
     })?;
 
-    // 4. analyse (STAND-IN): the classical detector on the detection proxy.
+    // 4. analyse (STAND-IN): the classical detector, the random-weight net or Canny + contours on
+    // the detection proxy, as `opts.analyse` says.
     let quad = cx.stage(Stage::Analyse, |_| {
         let proxy = pyramid.level(Level::Detect);
         let px = u64::from(proxy.width) * u64::from(proxy.height);
-        Ok((detect(proxy).quad, px))
+        let quad = match &opts.analyse {
+            Analyse::Classical => detect(proxy).quad,
+            Analyse::StandinNet(net) => net.analyse(proxy)?,
+            #[cfg(feature = "standin-canny")]
+            Analyse::StandinCanny => standin::canny_quad(proxy),
+            #[cfg(not(feature = "standin-canny"))]
+            Analyse::StandinCanny => return Err(ErrKind::UnsupportedFeature),
+        };
+        Ok((quad, px))
     })?;
     drop(pyramid);
     let quad_found = quad.is_some();
@@ -388,6 +405,7 @@ fn run_inner(
         output: output_size,
         output_bytes: bytes.len(),
         quad_found,
+        analyse: opts.analyse.label(),
     };
     tracing::info!(
         total_ms,
@@ -410,9 +428,9 @@ pub fn format_timings(r: &Report) -> String {
     );
     for t in &r.stages {
         let note = match t.stage {
-            Stage::Analyse => "  STAND-IN (classical detector)",
-            Stage::Enhance => "  PROTOTYPE (grey + threshold)",
-            _ => "",
+            Stage::Analyse => format!("  {}", r.analyse),
+            Stage::Enhance => "  PROTOTYPE (grey + threshold)".to_owned(),
+            _ => String::new(),
         };
         let b = t.stage.budget_ms();
         let _ = writeln!(

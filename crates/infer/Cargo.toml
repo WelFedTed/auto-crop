@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+[package]
+name = "auto-crop-infer"
+description = "Neural-net inference behind one trait: ONNX Runtime (load-dynamic) and rten (ADR-0007)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+# Both backends are off by default: the default build has no native or ONNX Runtime dependency
+# (ADR-0007, B12). `ort` loads OUR pinned ONNX Runtime by absolute path at run time (never linked,
+# never found on a search path); `rten` is pure Rust and needs no runtime library.
+ort = ["dep:ort"]
+rten = ["dep:rten", "dep:rten-tensor"]
+
+[dependencies]
+sha2 = "0.10"
+thiserror.workspace = true
+# default-features off: no `download-binaries` (the downloaded runtime fails to link on Ubuntu 22.04
+# and is not covered by our hash policy), no `copy-dylibs`, no `tls-native` (no TLS stack in the
+# dependency graph, docs/policy/ci-guards.md section 2).
+ort = { version = "=2.0.0-rc.13", optional = true, default-features = false, features = ["std", "load-dynamic"] }
+rten = { version = "=0.26.0", optional = true, default-features = false, features = ["onnx_format"] }
+rten-tensor = { version = "=0.26.0", optional = true }
+
+[lints.rust]
+unsafe_code = "forbid"

@@ -16,6 +16,7 @@ mod batch;
 mod host;
 mod memory;
 mod stages;
+mod standin;
 
 use auto_crop_engine::skeleton::bench_images::{dims_for_megapixels, jpeg, jpeg_filling_frame};
 use std::path::{Path, PathBuf};
@@ -27,8 +28,16 @@ const HELP: &str = "\
         Generate deterministic synthetic JPEGs (never committed) into <dir>/batch-<mp>mp/.
   perf stages [--mp 12,48,100] [--runs 20] [--warmup 3] [--threads all|N] [--enhance otsu|sauvola|off]
               [--fill] [--file <jpeg>] [--json <out>]
+              [--analyse classical|standin-net|standin-canny] [--net-backend ort|rten]
+              [--net-threads 4] [--net <onnx>]
         Per-stage p50/p95 of the pipeline skeleton against the PROVISIONAL Table A budgets, with
-        the stage-sum check. Release builds only.
+        the stage-sum check. Release builds only. The stand-in analyse modes need
+        --features standin-ort,standin-rten,standin-canny (and `cargo xtask fetch-ort` for ort).
+  perf standin [--mp 12] [--runs 30] [--warmup 5] [--threads 1,4] [--backends ort,rten]
+               [--net <onnx>] [--json <out>]
+        The analysis stand-ins (M1.55) side by side on the 1024 px proxy: classical detector,
+        Canny + contours, and the random-weight 256x256 net per backend and thread count,
+        every row labelled STAND-IN and NOISY when the machine is shared. Release builds only.
   perf memory [--mp 12,48,100] [--json <out>]
         Peak heap per image against pixels * 9 + 64 MiB (3 x RGB8 + 64 MB), per stage.
   perf batch [--mp 12] [--count 200] [--workers 1,2,3,4,5,6,7,8] [--json <out>]
@@ -51,6 +60,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         }
         "gen" => batch::generate(&flags).map(drop),
         "stages" => stages::run(&flags),
+        "standin" => standin::run(&flags),
         "memory" => memory::run(&flags),
         "batch" => batch::run(&flags),
         other => Err(format!("unknown perf command `{other}`\n{HELP}")),

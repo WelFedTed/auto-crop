@@ -8,8 +8,10 @@
 use super::host::{Host, Monitor, idle_check};
 use super::{Flags, ensure_image, percentile, sorted, write_json};
 use auto_crop_core::CancelToken;
+use auto_crop_engine::skeleton::standin;
 use auto_crop_engine::skeleton::{
-    Enhance, Input, Options, Report, Stage, chained_budget_ms, run as run_pipeline, thread_pool,
+    Analyse, Enhance, Input, Options, Report, Stage, chained_budget_ms, run as run_pipeline,
+    thread_pool,
 };
 use serde_json::{Value, json};
 use std::path::Path;
@@ -50,6 +52,8 @@ pub struct Measured {
     pub sum_p50: f64,
     /// Another process was using the CPU while this ran: every verdict carries a NOISY tag.
     pub noisy: bool,
+    /// What the `analyse` stage ran (starts with `STAND-IN`).
+    pub analyse: String,
 }
 
 /// Runs `warmup + runs` times and reduces the reports.
@@ -116,6 +120,7 @@ pub fn reduce(megapixels: f64, file_bytes: u64, reports: &[Report]) -> Measured 
         glue_max: percentile(&glue, 1.0),
         sum_p50: percentile(&sums, 0.5),
         noisy: false,
+        analyse: first.analyse.clone(),
     }
 }
 
@@ -174,9 +179,9 @@ fn markdown(m: &Measured, label: &str) -> String {
             )
         };
         let note = match r.stage {
-            Stage::Analyse => " (STAND-IN)",
-            Stage::Enhance => " (PROTOTYPE)",
-            _ => "",
+            Stage::Analyse => format!(" ({})", m.analyse),
+            Stage::Enhance => " (PROTOTYPE)".to_owned(),
+            _ => String::new(),
         };
         let _ = writeln!(
             s,
@@ -267,8 +272,32 @@ pub fn run(f: &Flags) -> Result<(), String> {
         "off" => Enhance::Off,
         o => return Err(format!("unknown --enhance `{o}`")),
     };
+    let analyse = match f.get("--analyse").unwrap_or("classical") {
+        "classical" => Analyse::Classical,
+        "standin-canny" => Analyse::StandinCanny,
+        "standin-net" => {
+            let backend = match f.get("--net-backend") {
+                Some(b) => b,
+                None => standin::default_backend().ok_or(
+                    "this build has no inference backend: --features standin-ort,standin-rten",
+                )?,
+            };
+            let path = match f.get("--net") {
+                Some(p) => p.into(),
+                None => crate::standin::make_standin_net(Path::new("target/standin"))?,
+            };
+            Analyse::StandinNet(standin::load_net_at(
+                &path,
+                backend,
+                f.num("--net-threads", 4)?,
+                crate::standin::dev_runtime().as_deref(),
+            )?)
+        }
+        o => return Err(format!("unknown --analyse `{o}` ({})", Analyse::NAMES)),
+    };
     let opts = Options {
         enhance,
+        analyse,
         pool: match threads {
             Some(n) => Some(thread_pool(n).map_err(|e| e.to_string())?),
             None => None,
@@ -282,7 +311,10 @@ pub fn run(f: &Flags) -> Result<(), String> {
 
     let monitor = Monitor::start();
     let mut results = Vec::new();
-    let label = format!("{tlabel}, enhance {enhance:?}");
+    let label = format!(
+        "{tlabel}, enhance {enhance:?}, analyse {}",
+        opts.analyse.label()
+    );
     for mp in mps {
         let path = match f.get("--file") {
             Some(p) => p.into(),
@@ -333,6 +365,7 @@ mod tests {
             output: (3000, 2000),
             output_bytes: 1,
             quad_found: true,
+            analyse: "STAND-IN (test)".to_owned(),
         }
     }
 

@@ -5,7 +5,8 @@
 //! ROADMAP M1.54.
 
 use auto_crop_engine::ErrKind;
-use auto_crop_engine::skeleton::{self, Enhance, Input, Options};
+use auto_crop_engine::skeleton::standin;
+use auto_crop_engine::skeleton::{self, Analyse, Enhance, Input, Options};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -21,7 +22,8 @@ usage: auto-crop dev-pipeline <file> [options]
 
 Runs one image through the benchmark skeleton (read_probe, decode, proxy, analyse, rectify,
 enhance, encode) and reports per-stage timings. Developer tool: the analyse stage is a STAND-IN
-(classical detector) and enhance a PROTOTYPE (grey + threshold); output is not a product result.
+(classical detector, a random-weight net or Canny + contours) and enhance a PROTOTYPE (grey +
+threshold); output is not a product result.
 
 options:
   --timings            print the per-stage table with the PROVISIONAL Table A budgets
@@ -31,6 +33,16 @@ options:
   --threads <n>        run the parallel kernels on exactly n threads (default: all cores)
   --enhance <mode>     off | otsu | sauvola (default otsu)
   --quality <1-100>    JPEG quality (default 90)
+  --analyse <mode>     classical | standin-net | standin-canny (default classical). The two
+                       stand-ins (M1.55) need a build with the cargo features `standin-ort` or
+                       `standin-rten` (net) and `standin-canny`; the net is random-weight, so its
+                       corners are noise and the full frame is rectified: only its timing counts
+  --net-backend <b>    ort | rten (default: ort when built in, else rten). ort loads the pinned
+                       ONNX Runtime from the absolute path in AUTOCROP_ORT_DYLIB or next to the
+                       executable (`cargo xtask fetch-ort` prints it); it is never searched for
+  --net-threads <n>    intra-op threads of the net (default 4)
+  --net <file.onnx>    the stand-in net (default target/standin/quadnet.onnx, made by
+                       `cargo xtask make-standin-net`, checked against its .sha256 sidecar)
 ";
 
 #[derive(Debug, PartialEq)]
@@ -43,6 +55,17 @@ struct Args {
     threads: Option<usize>,
     enhance: Enhance,
     quality: u8,
+    analyse: AnalyseArg,
+    net_backend: Option<String>,
+    net_threads: usize,
+    net: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AnalyseArg {
+    Classical,
+    Net,
+    Canny,
 }
 
 fn parse(args: &[String]) -> Result<Args, String> {
@@ -56,6 +79,10 @@ fn parse(args: &[String]) -> Result<Args, String> {
         threads: None,
         enhance: Enhance::default(),
         quality: skeleton::BENCH_JPEG_QUALITY,
+        analyse: AnalyseArg::Classical,
+        net_backend: None,
+        net_threads: 4,
+        net: PathBuf::from("target/standin/quadnet.onnx"),
     };
     let mut file = None;
     let value = |it: &mut std::slice::Iter<'_, String>, flag: &str| {
@@ -86,6 +113,33 @@ fn parse(args: &[String]) -> Result<Args, String> {
                     other => return Err(format!("unknown --enhance mode `{other}`")),
                 }
             }
+            "--analyse" => {
+                a.analyse = match value(&mut it, "--analyse")?.as_str() {
+                    "classical" => AnalyseArg::Classical,
+                    "standin-net" => AnalyseArg::Net,
+                    "standin-canny" => AnalyseArg::Canny,
+                    other => {
+                        return Err(format!(
+                            "unknown --analyse mode `{other}` ({})",
+                            Analyse::NAMES
+                        ));
+                    }
+                }
+            }
+            "--net-backend" => {
+                a.net_backend = match value(&mut it, "--net-backend")?.as_str() {
+                    b @ ("ort" | "rten") => Some(b.to_owned()),
+                    other => return Err(format!("unknown --net-backend `{other}` (ort | rten)")),
+                }
+            }
+            "--net-threads" => {
+                a.net_threads = value(&mut it, "--net-threads")?
+                    .parse()
+                    .ok()
+                    .filter(|n| *n >= 1)
+                    .ok_or_else(|| "--net-threads needs a whole number of at least 1".to_owned())?;
+            }
+            "--net" => a.net = PathBuf::from(value(&mut it, "--net")?),
             "--quality" => {
                 a.quality = value(&mut it, "--quality")?
                     .parse()
@@ -112,9 +166,23 @@ fn dev_pipeline(args: &[String]) -> Result<(), String> {
         Some(n) => Some(skeleton::thread_pool(n).map_err(|e| e.to_string())?),
         None => None,
     };
+    let analyse = match a.analyse {
+        AnalyseArg::Classical => Analyse::Classical,
+        AnalyseArg::Canny => Analyse::StandinCanny,
+        AnalyseArg::Net => {
+            let backend = match &a.net_backend {
+                Some(b) => b.as_str(),
+                None => standin::default_backend().ok_or_else(|| {
+                    "this build has no inference backend: rebuild with --features standin-ort or standin-rten".to_owned()
+                })?,
+            };
+            Analyse::StandinNet(standin::load_net(&a.net, backend, a.net_threads)?)
+        }
+    };
     let opts = Options {
         quality: a.quality,
         enhance: a.enhance,
+        analyse,
         pool,
         ..Options::default()
     };
@@ -210,8 +278,17 @@ mod tests {
             "o.jpg",
             "--quality",
             "75",
+            "--analyse",
+            "standin-net",
+            "--net-backend",
+            "rten",
+            "--net-threads",
+            "2",
         ]))
         .unwrap();
+        assert_eq!(a.analyse, AnalyseArg::Net);
+        assert_eq!(a.net_backend.as_deref(), Some("rten"));
+        assert_eq!(a.net_threads, 2);
         assert_eq!(a.file, PathBuf::from("p.jpg"));
         assert!(a.timings && !a.json);
         assert_eq!(a.threads, Some(8));
@@ -231,6 +308,9 @@ mod tests {
             &["a.jpg", "--quality", "101"],
             &["a.jpg", "--enhance", "magic"],
             &["a.jpg", "--out"],
+            &["a.jpg", "--analyse", "magic"],
+            &["a.jpg", "--net-backend", "tract"],
+            &["a.jpg", "--net-threads", "0"],
             &["a.jpg", "--nope"],
         ] {
             assert!(parse(&v(bad)).is_err(), "{bad:?}");

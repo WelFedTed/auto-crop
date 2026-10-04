@@ -15,11 +15,21 @@ publish.workspace = true
 # libraries of `cargo xtask build-native`). Off by default; sources in these formats are never
 # replaced in place (no writer yet), only copied as PNG or JPEG.
 heif = ["auto-crop-codecs/heif"]
+# The analysis STAND-INs of M1.55 (docs/perf/budgets.md). All off by default: the default build has no
+# ONNX Runtime, no rten and no imageproc. `standin-ort` loads our pinned ONNX Runtime by absolute
+# path at run time (`cargo xtask fetch-ort`); `standin-rten` is pure Rust; `standin-canny` adds
+# Canny and contours from `imageproc`.
+standin-ort = ["auto-crop-infer/ort"]
+standin-rten = ["auto-crop-infer/rten"]
+standin-canny = ["dep:imageproc"]
 
 [dependencies]
 auto-crop-core = { path = "../core" }
 auto-crop-codecs = { path = "../codecs" }
 auto-crop-imgproc = { path = "../imgproc" }
+auto-crop-infer = { path = "../infer" }
+# MIT. Canny and contours for the `standin-canny` stand-in only; no default features (no text, no FFT).
+imageproc = { version = "=0.27.0", optional = true, default-features = false, features = ["rayon"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

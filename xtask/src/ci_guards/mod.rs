@@ -12,6 +12,8 @@
 //!   dataset directories) and the cache directories stay in `.gitignore` (M1.36, B21).
 //! * [`synth_guard`]: the synthetic generator in `tools/synth` imports, runs and reads nothing of
 //!   the application (M1.32).
+//! * [`inference_guard`]: `ort` only with `default-features = false` plus `load-dynamic`, pinned
+//!   exactly, no downloading or GPU features, and only in `crates/infer` (M1.55, ADR-0007).
 //! * [`workflow_guard`]: workflow hygiene (SHA pins, least privilege, no dangerous triggers,
 //!   required jobs always report, no release machinery yet).
 //!
@@ -21,6 +23,7 @@
 //! `docs/policy/ci-guards.md`.
 
 mod corpus_guard;
+mod inference_guard;
 pub(crate) mod network_guard;
 mod rust_lex;
 mod synth_guard;
@@ -34,19 +37,21 @@ fn selftest() -> Result<(), String> {
     problems.extend(workflow_guard::selftest());
     problems.extend(corpus_guard::selftest());
     problems.extend(synth_guard::selftest());
+    problems.extend(inference_guard::selftest());
     let base = std::env::temp_dir().join(format!("auto-crop-ci-guards-{}", std::process::id()));
     let net = network_guard::selftest(&base);
     let _ = std::fs::remove_dir_all(&base);
     problems.extend(net?);
     if problems.is_empty() {
         println!(
-            "ci-guards selftest: {} unsafe, {} manifest, {} workflow, {} network, {} corpus and {} synth plants/controls behaved",
+            "ci-guards selftest: {} unsafe, {} manifest, {} workflow, {} network, {} corpus, {} synth and {} inference plants/controls behaved",
             unsafe_guard::CASES.len() + unsafe_guard::MANIFEST_CASES.len(),
             network_guard::MANIFEST_CASES.len(),
             workflow_guard::cases().len(),
             network_guard::CASES.len(),
             corpus_guard::cases().len() + corpus_guard::gitignore_cases().len(),
-            synth_guard::cases().len()
+            synth_guard::cases().len(),
+            inference_guard::CASES.len()
         );
         Ok(())
     } else {
@@ -72,9 +77,10 @@ pub fn run(args: &[String]) -> Result<(), String> {
     violations.extend(workflow_guard::check_tree(root)?);
     violations.extend(corpus_guard::check_tree(root)?);
     violations.extend(synth_guard::check_tree(root)?);
+    violations.extend(inference_guard::check_manifests(root)?);
     if violations.is_empty() {
         println!(
-            "ci-guards: unsafe, network, workflow, corpus and synth-independence policies hold ({} allow-listed unsafe file(s))",
+            "ci-guards: unsafe, network, workflow, corpus, synth-independence and inference-runtime policies hold ({} allow-listed unsafe file(s))",
             unsafe_guard::ALLOWED_FILES.len()
         );
         Ok(())

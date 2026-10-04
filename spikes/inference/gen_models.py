@@ -11,6 +11,8 @@ operator coverage, latency, size and backend agreement depend on:
   orient.onnx   PP-LCNet-like depthwise-separable net with a 4-class (0/90/180/270) head, 1x3x224x224
                 (stands in for the PP-LCNet doc-orientation model; paddle2onnx is not used, see ADR)
 
+`--only-quadnet` writes just quadnet.onnx (used by `cargo xtask make-standin-net`).
+
 Also writes calibration/test inputs (npy) and, with --quantize, static QDQ int8 variants.
 """
 import sys
@@ -153,6 +155,10 @@ if __name__ == "__main__":
 
     os.makedirs(out, exist_ok=True)
     quadnet(f"{out}/quadnet.onnx")
+    if "--only-quadnet" in sys.argv:
+        # `cargo xtask make-standin-net` (ROADMAP M1.55): just the 256x256 corner-net stand-in.
+        print("ok")
+        sys.exit(0)
     orient(f"{out}/orient.onnx")
     rng = np.random.default_rng(99)
     rng.random((1, 3, 256, 256), dtype=np.float32).tofile(f"{out}/quadnet_input.f32")
