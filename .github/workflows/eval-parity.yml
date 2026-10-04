@@ -1,0 +1,196 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+# Cross-OS parity of the accuracy harness (ROADMAP M1.78).
+#
+# Numeric thresholds are enforced on Linux only (accuracy-smoke.yml, ubuntu-22.04). This workflow
+# shows that the other operating systems compute the same thing: Linux generates the Python smoke
+# suite once, every OS (windows-2025, macos-latest arm64, ubuntu-22.04) scores the SAME images with
+# the same detector, and `tools/ci/eval_parity.py` fails when a result differs from Linux by more
+# than 0.2 points of mean IoU. How the results differ (byte-identical or not, images with a
+# different IoU, failure flips) goes to the job summary: determinism across operating systems is a
+# finding in itself.
+#
+# Informational, never gating: every OS also generates the suite itself, and the byte-identity of
+# its images against the Linux ones is reported (the generator promises identical bytes within one
+# pinned environment on one OS only), together with the detector aggregate on that suite.
+#
+# Safety: read-only token, no secrets, no pull_request_target. The job always reports; the path
+# filter is a step inside it (docs/policy/ci-guards.md section 3). Synthetic data only.
+
+name: Eval parity
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eval-parity-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  suite:
+    name: smoke suite (generated once, on Linux)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    outputs:
+      relevant: ${{ steps.changes.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Did anything the harness depends on change?
+        id: changes
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          changed=unknown
+          if [ "$EVENT" = "pull_request" ] || [ "$EVENT" = "push" ]; then
+            changed=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" 2>/dev/null || echo unknown)
+          fi
+          if [ "$changed" = "unknown" ] || echo "$changed" | grep -Eq '^(tools/(synth|ci)/|crates/|xtask/|Cargo\.toml$|Cargo\.lock$|rust-toolchain\.toml$|\.github/workflows/eval-parity\.yml$)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing the harness depends on changed: parity skipped." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: steps.changes.outputs.relevant == 'true'
+        with:
+          python-version: "3.12"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: steps.changes.outputs.relevant == 'true'
+      - name: Generate the Python smoke suite from its seed
+        if: steps.changes.outputs.relevant == 'true'
+        run: |
+          cargo xtask synth-setup
+          cargo xtask synth --suite smoke --out smoke-suite
+          python3 tools/ci/suite_fingerprint.py hash smoke-suite smoke-suite-fingerprint.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: steps.changes.outputs.relevant == 'true'
+        with:
+          name: parity-suite
+          path: |
+            smoke-suite
+            smoke-suite-fingerprint.json
+          retention-days: 7
+
+  eval:
+    name: eval (${{ matrix.os }})
+    needs: suite
+    if: needs.suite.outputs.relevant == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-latest, windows-2025]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: parity-suite
+          path: parity-suite
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Build the harness
+        shell: bash
+        run: cargo build --release -p auto-crop-eval
+      - name: Score the same images with the detector (the parity input)
+        shell: bash
+        env:
+          COMMIT: ${{ github.sha }}
+        run: |
+          mkdir -p out
+          ./target/release/auto-crop-eval run --manifest parity-suite/smoke-suite/manifest.jsonl \
+            --predictor detector --suite smoke-py --threads 2 --commit "$COMMIT" --out out/shared.json | tee out/shared.txt
+          {
+            echo "### ${RUNNER_OS} ${RUNNER_ARCH}: detector on the shared Python smoke suite"
+            echo '```'
+            sed -n '1,9p' out/shared.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Scoring a perfect and a trivial predictor must agree exactly everywhere
+        shell: bash
+        env:
+          COMMIT: ${{ github.sha }}
+        run: |
+          for p in oracle full-frame; do
+            ./target/release/auto-crop-eval run --manifest parity-suite/smoke-suite/manifest.jsonl \
+              --predictor "$p" --suite smoke-py --threads 2 --commit "$COMMIT" --out "out/$p.json" | sed -n '1,2p'
+          done
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Generate the suite on this OS too (informational, does the generator reproduce the Linux bytes)
+        id: own
+        continue-on-error: true
+        shell: bash
+        env:
+          COMMIT: ${{ github.sha }}
+        run: |
+          cargo xtask synth-setup
+          cargo xtask synth --suite smoke --out own-suite
+          python tools/ci/suite_fingerprint.py hash own-suite out/own-fingerprint.json
+          {
+            echo "### ${RUNNER_OS} ${RUNNER_ARCH}: Python generator reproducibility against Linux"
+            python tools/ci/suite_fingerprint.py compare parity-suite/smoke-suite-fingerprint.json out/own-fingerprint.json
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          ./target/release/auto-crop-eval run --manifest own-suite/manifest.jsonl \
+            --predictor detector --suite smoke-py-own --threads 2 --commit "$COMMIT" --out out/own.json | tee out/own.txt
+          {
+            echo "Detector on the suite this OS generated itself:"
+            echo '```'
+            sed -n '1,9p' out/own.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: parity-results-${{ runner.os }}
+          path: out
+          retention-days: 7
+
+  parity:
+    name: parity (mean IoU within 0.2 pt of Linux)
+    needs: [suite, eval]
+    if: needs.suite.outputs.relevant == 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: parity-results-*
+          path: results
+      - name: Parity script unit tests
+        run: python3 -m unittest discover -s tools/ci -v
+      - name: Compare every OS against Linux
+        run: |
+          status=0
+          python3 tools/ci/eval_parity.py results/parity-results-Linux/shared.json results/parity-results-macOS/shared.json results/parity-results-Windows/shared.json | tee parity.md || status=$?
+          {
+            echo "### Detector parity across operating systems (same images, same build)"
+            cat parity.md
+            echo
+            echo "Linux is the reference: numeric thresholds are enforced there (accuracy-smoke.yml). The perfect and trivial predictors are compared too:"
+            for p in oracle full-frame; do
+              echo '```'
+              python3 tools/ci/eval_parity.py "results/parity-results-Linux/$p.json" "results/parity-results-macOS/$p.json" "results/parity-results-Windows/$p.json" || status=$?
+              echo '```'
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
