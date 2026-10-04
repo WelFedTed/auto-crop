@@ -137,7 +137,17 @@ pub fn migrate_ref(doc: &Value) -> Result<EditState, ErrKind> {
     let doc = migrate_value(doc.clone())?;
     // The tags below only exist for v1; a document that parses at the right version but not as
     // an `EditState` is corrupt, and is reported, never defaulted.
-    serde_json::from_value::<EditState>(doc).map_err(|_| ErrKind::Corrupt)
+    let state = serde_json::from_value::<EditState>(doc).map_err(|_| ErrKind::Corrupt)?;
+    // A state must survive being written and read back. A float beyond `f32` (for example
+    // `fineDeg: 1.2e93`) parses as infinity, which JSON writes as `null`, so the saved state would
+    // not reload (found by the nightly `editstate_json` fuzzer). Such a document is corrupt.
+    let again = serde_json::to_string(&state)
+        .ok()
+        .and_then(|t| serde_json::from_str::<EditState>(&t).ok());
+    if again.as_ref() != Some(&state) {
+        return Err(ErrKind::Corrupt);
+    }
+    Ok(state)
 }
 
 /// Upgrades a stored edit to the current [`EditState`]. A newer schema gives
@@ -192,6 +202,23 @@ mod tests {
             .collect();
         out.sort_by(|a, b| a.0.cmp(&b.0));
         out
+    }
+
+    #[test]
+    fn a_float_beyond_f32_is_corrupt_not_a_state_that_cannot_reload() {
+        // Regression for the nightly editstate_json crash: fineDeg 1.2e93 became +inf, written as null.
+        let doc = serde_json::json!({
+            "version": 1,
+            "orientation": {"quarterTurns": 0, "mirror": false},
+            "items": [{"id": 1, "include": true,
+                "geometry": {"type": "quad",
+                    "corners": [{"x":0.1,"y":0.1},{"x":0.9,"y":0.1},{"x":0.9,"y":0.9},{"x":0.1,"y":0.9}],
+                    "quarterTurns": 0, "mirror": false, "fineDeg": 1.2e93},
+                "enhanceOverride": null, "origin": {"kind": "manual"}, "confidence": null}],
+            "margin": {"kind": "paperEdge", "margin": 0.0},
+            "enhance": {"mode": "original"}
+        });
+        assert_eq!(migrate_ref(&doc), Err(ErrKind::Corrupt));
     }
 
     #[test]
