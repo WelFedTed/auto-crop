@@ -53,7 +53,7 @@ jobs:
         shell: bash
         run: |
           rustc --version && cargo --version && node --version && npm --version && cmake --version | head -1
-          python -m meson --version; ninja --version; nasm --version
+          meson --version; ninja --version; nasm --version || true
       - name: Build the pinned libheif, dav1d and libde265 (and libjpeg-turbo)
         run: cargo xtask build-native
       - name: Check the built libraries (no GPL or AV1 encoders, allowed dependencies, libheif links dav1d)
