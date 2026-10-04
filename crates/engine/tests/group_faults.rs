@@ -855,8 +855,19 @@ fn recovery_leaves_the_journal_of_a_commit_running_in_another_process_alone() {
     );
 
     // Once that process is gone the journal is nobody's: recovery finishes the group.
+    let pid = child.id();
     child.kill().unwrap();
     child.wait().unwrap();
+    // On Windows an exited process stays queryable while a handle to it is open (`Child` holds
+    // one until it is dropped), so a slow runner could still see the owner as alive. Release the
+    // handle and wait until the process is gone before asking recovery to take over.
+    drop(child);
+    for _ in 0..200 {
+        if auto_crop_engine::group::process_started(pid).is_none() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
     let report = recover(&fx.store, &NoFaults);
     assert_eq!(report.rolled_forward.len(), 1, "{report:?}");
     assert_eq!(fx.check("after the owner died"), Which::New);
