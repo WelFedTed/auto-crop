@@ -82,6 +82,57 @@ def warp_lanczos3(src: np.ndarray, m: np.ndarray, out_w: int, out_h: int, maxval
     return res.astype(src.dtype)
 
 
+def lanczos_a(x: np.ndarray, a: int) -> np.ndarray:
+    """Lanczos-a kernel (a = 3: ours, a = 4: OpenCV's INTER_LANCZOS4), exact weights."""
+    x = np.asarray(x, dtype=np.float64)
+    out = np.zeros_like(x)
+    nz = np.abs(x) < a
+    px = math.pi * x[nz]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        v = a * np.sin(px) * np.sin(px / a) / (px * px)
+    v[x[nz] == 0] = 1.0
+    out[nz] = v
+    out[(x == np.round(x)) & (x != 0)] = 0.0
+    return out
+
+
+def warp_lanczos_a(
+    src: np.ndarray, m: np.ndarray, out_w: int, out_h: int, a: int, quant: int = 0
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Float64 Lanczos-a reference warp of an 8-bit image (same convention as `warp_lanczos3`), no
+    border handling beyond clamping. `quant` > 0 rounds the source position to 1/quant pixel the
+    way OpenCV does (INTER_BITS = 5 gives 1/32). Returns (image, x, y) with the source positions."""
+    h, w, c = src.shape
+    vv, uu = np.meshgrid(np.arange(out_h, dtype=np.float64), np.arange(out_w, dtype=np.float64), indexing="ij")
+    d = m[2, 0] * uu + m[2, 1] * vv + m[2, 2]
+    x = (m[0, 0] * uu + m[0, 1] * vv + m[0, 2]) / d
+    y = (m[1, 0] * uu + m[1, 1] * vv + m[1, 2]) / d
+    if quant:
+        x = np.round(x * quant) / quant
+        y = np.round(y * quant) / quant
+    x0 = np.floor(x).astype(np.int64)
+    y0 = np.floor(y).astype(np.int64)
+    fx, fy = x - x0, y - y0
+    n = 2 * a
+    wx = np.stack([lanczos_a(fx - (k - (a - 1)), a) for k in range(n)], axis=-1)
+    wy = np.stack([lanczos_a(fy - (k - (a - 1)), a) for k in range(n)], axis=-1)
+    wx /= wx.sum(axis=-1, keepdims=True)
+    wy /= wy.sum(axis=-1, keepdims=True)
+    acc = np.zeros((out_h, out_w, c), dtype=np.float64)
+    srcf = src.astype(np.float64)
+    for ky in range(n):
+        yi = np.clip(y0 + ky - (a - 1), 0, h - 1)
+        for kx in range(n):
+            xi = np.clip(x0 + kx - (a - 1), 0, w - 1)
+            acc += (wy[..., ky] * wx[..., kx])[..., None] * srcf[yi, xi]
+    return np.clip(np.floor(acc + 0.5), 0, 255).astype(np.uint8), x, y
+
+
+def psnr_db(a: np.ndarray, b: np.ndarray, mask: np.ndarray) -> float:
+    d = (a.astype(np.float64) - b.astype(np.float64))[mask]
+    return 99.0 if not np.any(d) else 10.0 * math.log10(255.0 * 255.0 / float(np.mean(d * d)))
+
+
 def blur(img: np.ndarray, sigma: float) -> np.ndarray:
     """Separable Gaussian blur with edge replication (stand-in for lens blur on a real photo)."""
     r = int(math.ceil(3 * sigma))
@@ -201,7 +252,23 @@ def cv2_fixtures() -> dict:
         exp = cv2.warpPerspective(
             src, m, (ow, oh), flags=cv2.INTER_LANCZOS4 | cv2.WARP_INVERSE_MAP, borderMode=cv2.BORDER_CONSTANT, borderValue=0
         )
-        cases.append(case(f"cv2_lanczos4_blur{sigma:g}_{w}x{h}_to_{ow}x{oh}", src, m, ow, oh, 255, exp))
+        entry = case(f"cv2_lanczos4_blur{sigma:g}_{w}x{h}_to_{ow}x{oh}", src, m, ow, oh, 255, exp)
+        # Why our output cannot match cv2 to 45 dB on every content (M1.25, docs/perf/kernels.md):
+        # cv2 is a Lanczos4 (8 x 8) resampler, ours is Lanczos3 (6 x 6), so the two differ by design.
+        # Same mask as the Rust test: only pixels whose 8 x 8 footprint is inside the source.
+        l3, x, y = warp_lanczos_a(src, m, ow, oh, 3)
+        l4, _, _ = warp_lanczos_a(src, m, ow, oh, 4)
+        l4q, _, _ = warp_lanczos_a(src, m, ow, oh, 4, quant=32)
+        mask = ((x >= 5) & (y >= 5) & (x <= w - 6) & (y <= h - 6))[..., None].repeat(3, axis=-1)
+        # (1) Geometry and convention: cv2 against an exact Lanczos4 with 1/32 px coordinates.
+        geometry = psnr_db(exp, l4q, mask)
+        assert geometry >= 70.0, f"cv2 does not match its own Lanczos4 model: {geometry:.2f} dB"
+        # (2) The kernel difference no Lanczos3 implementation can remove: exact Lanczos3 against
+        # exact Lanczos4 on the same content.
+        entry["cv2_vs_lanczos4_model_db"] = round(geometry, 2)
+        entry["lanczos3_vs_lanczos4_db"] = round(psnr_db(l3, l4, mask), 2)
+        entry["numpy_lanczos3_vs_cv2_db"] = round(psnr_db(l3, exp, mask), 2)
+        cases.append(entry)
     return {"oracle": f"cv2 {cv2.__version__} warpPerspective INTER_LANCZOS4 | WARP_INVERSE_MAP", "cases": cases}
 
 

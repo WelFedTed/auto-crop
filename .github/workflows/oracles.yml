@@ -1,0 +1,131 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+# Warp oracles on three operating systems (ROADMAP M1.25, M1.78).
+#
+# Every OS runs the oracle tests (NumPy Lanczos3 within 1 LSB, cv2 PSNR with its documented bar,
+# `image-compare` MSSIM >= 0.99 against the references, bit-exact identity, shifts and turns) and
+# dumps the kernel's output for every fixture case. A last job compares the three dumps pairwise:
+# byte-identical or, if not, MSSIM >= 0.98 across operating systems (the bar of M1.25), and writes
+# the measured numbers to the job summary. The fixtures come from tools/imgproc-oracles (offline;
+# nothing here needs Python or OpenCV).
+#
+# Safety: read-only token, no secrets, no pull_request_target. The job always reports; the path
+# filter is a step inside it (docs/policy/ci-guards.md section 3).
+
+name: Warp oracles
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: oracles-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  oracles:
+    name: oracles (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, macos-latest, ubuntu-22.04]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Did anything the warp oracles depend on change?
+        id: changes
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          changed=unknown
+          if [ "$EVENT" = "pull_request" ] || [ "$EVENT" = "push" ]; then
+            changed=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" 2>/dev/null || echo unknown)
+          fi
+          if [ "$changed" = "unknown" ] || echo "$changed" | grep -Eq '^(crates/(imgproc|imgproc-bench|core)/|tools/imgproc-oracles/|Cargo\.toml$|Cargo\.lock$|rust-toolchain\.toml$|\.github/workflows/oracles\.yml$)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing the warp oracles depend on changed: skipped." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: steps.changes.outputs.relevant == 'true'
+      - name: Oracle tests (numbers are printed, so they are in the log)
+        if: steps.changes.outputs.relevant == 'true'
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            cargo test -p auto-crop-imgproc --test oracles --test homography_props -- --nocapture
+            cargo test -p auto-crop-imgproc-bench --test ssim_oracles -- --nocapture
+          } 2>&1 | tee oracle-tests.log
+          {
+            echo "### Oracle numbers on ${RUNNER_OS} ${RUNNER_ARCH}"
+            echo '```'
+            grep -E 'PSNR vs cv2|MSSIM|worst diff|worst relative' oracle-tests.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Dump the warp outputs of every fixture case
+        if: steps.changes.outputs.relevant == 'true'
+        shell: bash
+        run: cargo run --release -p auto-crop-imgproc-bench --example warp_oracle_report -- dump "oracle-out-${RUNNER_OS}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: steps.changes.outputs.relevant == 'true'
+        with:
+          name: warp-oracle-${{ runner.os }}
+          path: oracle-out-${{ runner.os }}
+          retention-days: 7
+
+  cross-os:
+    name: cross-OS SSIM
+    needs: oracles
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        id: download
+        continue-on-error: true
+        with:
+          pattern: warp-oracle-*
+          path: oracle-dumps
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: steps.download.outcome == 'success'
+      - name: Compare the dumps (identical, or MSSIM >= 0.98 across OSes; >= 0.99 against the reference)
+        if: steps.download.outcome == 'success'
+        shell: bash
+        run: |
+          dirs=(oracle-dumps/*/)
+          echo "dumps: ${dirs[*]}"
+          if [ "${#dirs[@]}" -lt 3 ]; then
+            echo "expected three operating systems, found ${#dirs[@]}" >&2
+            exit 1
+          fi
+          status=0
+          cargo run --release -q -p auto-crop-imgproc-bench --example warp_oracle_report -- compare "${dirs[@]}" | tee compare.md || status=$?
+          {
+            echo "### Warp oracle outputs across operating systems"
+            cat compare.md
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+      - name: No artefacts means the path filter skipped the matrix
+        if: steps.download.outcome != 'success'
+        run: |
+          echo "No oracle dumps (the path filter skipped the OS jobs), so there is nothing to compare." >> "$GITHUB_STEP_SUMMARY"

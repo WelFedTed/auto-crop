@@ -45,6 +45,10 @@ struct Case {
     out_w: u32,
     out_h: u32,
     expected: Vec<u8>,
+    /// cv2 fixtures only (0.0 elsewhere): see `warp_psnr_against_cv2_warp_perspective_meets_the_bar`.
+    kernel_floor_db: f64,
+    numpy_lanczos3_vs_cv2_db: f64,
+    cv2_vs_lanczos4_model_db: f64,
 }
 
 fn cases(file: &str) -> Vec<Case> {
@@ -64,6 +68,9 @@ fn cases(file: &str) -> Vec<Case> {
             out_w: c["out_w"].as_u64().unwrap() as u32,
             out_h: c["out_h"].as_u64().unwrap() as u32,
             expected: hex_bytes(c["expected"].as_str().unwrap()),
+            kernel_floor_db: c["lanczos3_vs_lanczos4_db"].as_f64().unwrap_or(0.0),
+            numpy_lanczos3_vs_cv2_db: c["numpy_lanczos3_vs_cv2_db"].as_f64().unwrap_or(0.0),
+            cv2_vs_lanczos4_model_db: c["cv2_vs_lanczos4_model_db"].as_f64().unwrap_or(0.0),
         })
         .collect()
 }
@@ -184,15 +191,27 @@ fn warp_psnr_against_cv2_warp_perspective_meets_the_bar() {
             "{}: PSNR vs cv2 Lanczos4 {psnr:.2} dB over {n} samples",
             c.name
         );
-        // The roadmap bar (45 dB, PROVISIONAL) is for photo-like content. The `blur0` case has hard
-        // one-pixel edges everywhere, where OpenCV's 8-tap kernel and 1/32 px coordinates differ
-        // most from a 6-tap kernel; it is a regression guard at the measured level, not the bar.
-        let bar = if c.name.contains("blur0_") {
-            40.0
-        } else {
-            45.0
-        };
-        assert!(psnr >= bar, "{}: PSNR {psnr:.2} dB < {bar}", c.name);
+        // What the 45 dB bar (PROVISIONAL) applies to, and why (docs/perf/kernels.md, M1.25).
+        // OpenCV has no Lanczos3: INTER_LANCZOS4 is an 8 x 8 kernel with 1/32 px coordinates, ours
+        // is a 6 x 6 kernel, so two correct resamplers differ by design, most on one-pixel edges.
+        // The generator measures that unavoidable difference (an exact Lanczos3 against an exact
+        // Lanczos4 on the same content, `lanczos3_vs_lanczos4_db`) and checks that cv2 itself
+        // matches its Lanczos4 model to >= 70 dB (so the geometry, pixel-centre convention and
+        // border handling are the ones modelled). Three assertions follow:
+        //  1. 45 dB on content whose kernel floor is at least 46 dB (photo-like, band-limited);
+        //  2. on harder content the bar is the floor minus 1 dB (we must not lose more than 1 dB
+        //     to the kernel difference that no Lanczos3 can avoid);
+        //  3. in every case we are as close to cv2 as the exact Lanczos3 reference is (0.25 dB).
+        let floor = c.kernel_floor_db;
+        let bar = if floor >= 46.0 { 45.0 } else { floor - 1.0 };
+        assert!(psnr >= bar, "{}: PSNR {psnr:.2} dB < {bar:.2}", c.name);
+        assert!(
+            psnr >= c.numpy_lanczos3_vs_cv2_db - 0.25,
+            "{}: {psnr:.2} dB is further from cv2 than the NumPy Lanczos3 reference ({:.2} dB)",
+            c.name,
+            c.numpy_lanczos3_vs_cv2_db
+        );
+        assert!(c.cv2_vs_lanczos4_model_db >= 70.0, "{}: fixture", c.name);
     }
 }
 
