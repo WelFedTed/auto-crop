@@ -213,6 +213,9 @@ jobs:
             '* build tree moved away, PATH reduced to System32, LIBHEIF_PLUGIN_PATH cleared',
             '* the desktop window was not driven by a test'
           ) | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+          # The last native command above failed on purpose (exit code of a missing DLL): do not let it
+          # become the exit code of the step.
+          exit 0
       - name: Restore the build tree
         if: always()
         shell: pwsh
