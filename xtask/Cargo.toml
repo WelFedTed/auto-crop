@@ -28,6 +28,11 @@ auto-crop-eval = { path = "../crates/eval" }
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 auto-crop-core = { path = "../crates/core" }
 auto-crop-engine = { path = "../crates/engine" }
+# The labeller (`cargo xtask label`) previews images and, only on request, runs the detector.
+auto-crop-imgproc = { path = "../crates/imgproc" }
+# Per-run random token of the labeller's local server. `getrandom` is the OS entropy source (no
+# network, no I/O beyond the OS call); it is already in the lock through the std ecosystem.
+getrandom = "0.3"
 sysinfo = { version = "0.37", default-features = false, features = ["system"] }
 
 [dev-dependencies]

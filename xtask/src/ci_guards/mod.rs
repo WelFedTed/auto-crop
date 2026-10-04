@@ -21,7 +21,7 @@
 //! `docs/policy/ci-guards.md`.
 
 mod corpus_guard;
-mod network_guard;
+pub(crate) mod network_guard;
 mod rust_lex;
 mod synth_guard;
 mod unsafe_guard;

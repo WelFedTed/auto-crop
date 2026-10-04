@@ -12,8 +12,10 @@ mod deny_selftest;
 mod deps;
 mod doctor;
 mod eval;
+mod golden;
 mod hostile;
 mod identity;
+mod label;
 mod licenses;
 mod native;
 mod native_watch;
@@ -113,6 +115,17 @@ Commands:
   check-splits [MANIFEST...]
         Fail when a scene_id, scene_seed or similar group appears in two splits (default:
         every target/synth/*/manifest.jsonl).
+  check-labels <labels dir> [--images DIR] [--strict] [--no-hash]
+        Validate golden-set label files (docs/testing/golden-label.schema.json): finite, simple,
+        clockwise, convex quads; slice tags; no duplicate ids; labels without an image and images
+        without a label (the latter an error only with --strict).
+  label <image dir> [--labels DIR] [--open] [--port N] [--annotator NAME] [--no-suggestions]
+        The blank-quad labeller: a local page on 127.0.0.1 with a per-run token (offline, no
+        dependencies). Autosaves one JSON label per image. Detector suggestions are off unless the
+        labeller turns them on, and such labels are marked `assisted`. See docs/testing/golden-workflow.md.
+  golden <status|lock|check|eval|report|backup|restore-check|restore> ...
+        The local golden-set workflow (splits lock, local evaluation, aggregate-only report, backup).
+        `cargo xtask golden help` lists the options.
   eval <auto-crop-eval args>
         Run the accuracy harness (run, compare, noise-floor, publish, validate-manifest,
         self-check). Example: cargo xtask eval self-check
@@ -148,6 +161,9 @@ fn main() -> ExitCode {
         "synth-setup" => synth::run_setup(&rest),
         "synth-check" => synth::run_check(&rest),
         "check-splits" => synth::run_check_splits(&rest),
+        "check-labels" => golden::check::run_check_labels(&rest),
+        "label" => label::run(&rest),
+        "golden" => golden::run(&rest),
         "eval" => eval::run_eval(&rest),
         "" | "help" | "--help" | "-h" => {
             print!("{HELP}");

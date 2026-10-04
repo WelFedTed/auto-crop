@@ -1,0 +1,609 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 Auto Crop contributors -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<title>Auto Crop labeller</title>
+<style nonce="{{NONCE}}">
+:root{--bg:#161a1f;--panel:#1f252c;--line:#38424d;--fg:#e8edf2;--dim:#9aa7b4;--accent:#3da0ff;--top:#ffd84d;--ok:#4cc38a;--warn:#f0a23b;--bad:#ff6b6b;--assist:#ff9f43}
+@media (prefers-color-scheme:light){:root{--bg:#eef1f4;--panel:#fff;--line:#c5ced8;--fg:#18222c;--dim:#56636f;--accent:#0b6fd6;--top:#b07c00;--ok:#0b8a54;--warn:#a85d00;--bad:#c62828;--assist:#c25b00}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font:14px/1.35 system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column;overscroll-behavior:none}
+button,input,label{font:inherit;color:inherit}
+button{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:0 12px;min-height:44px;min-width:44px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button:focus-visible,input:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+button[disabled]{opacity:.45;cursor:default}
+#bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 10px;background:var(--panel);border-bottom:1px solid var(--line)}
+#bar .grow{flex:1;min-width:120px}
+#name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#count{color:var(--dim);font-variant-numeric:tabular-nums}
+#main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 320px}
+#stage{position:relative;overflow:hidden;touch-action:none;background:#0c0f12;cursor:crosshair;user-select:none;-webkit-user-select:none;min-height:0}
+#stage.panning{cursor:grabbing}
+#world{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform}
+#world img{position:absolute;left:0;top:0;display:block;-webkit-user-drag:none;user-select:none}
+#ov{position:absolute;left:0;top:0;width:100%;height:100%;overflow:visible}
+#msg{position:absolute;left:12px;bottom:12px;right:12px;pointer-events:none;color:#fff;text-shadow:0 1px 3px #000;font-size:15px}
+#hint{position:absolute;left:12px;top:10px;right:12px;pointer-events:none;color:#fff;text-shadow:0 1px 3px #000;font-weight:600}
+#panel{overflow:auto;padding:10px;background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;gap:10px}
+fieldset{border:1px solid var(--line);border-radius:8px;margin:0;padding:8px 10px}
+legend{padding:0 6px;color:var(--dim)}
+.row{display:flex;flex-wrap:wrap;gap:6px}
+.mt{margin-top:6px}
+.topc{color:var(--top)}
+.dim{color:var(--dim)}
+.chk{display:flex;align-items:center;gap:8px;min-height:36px}
+.chk input{width:20px;height:20px}
+#items button.it{min-height:36px}
+#items button.it.on{border-color:var(--accent);background:rgba(61,160,255,.18)}
+#status{min-height:2.7em;color:var(--dim)}
+#status.ok{color:var(--ok)}#status.warn{color:var(--warn)}#status.bad{color:var(--bad)}
+#badge{display:none;background:var(--assist);color:#000;border-radius:6px;padding:2px 8px;font-weight:700}
+#assist{border-color:var(--assist)}
+#assist legend{color:var(--assist)}
+input[type=text]{width:100%;min-height:36px;border:1px solid var(--line);border-radius:6px;background:var(--bg);padding:0 8px}
+#help{display:none;position:absolute;inset:8% 6%;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 18px;overflow:auto;z-index:5;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+#help kbd{background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:0 5px}
+.q{fill:rgba(61,160,255,.14);stroke:var(--accent);stroke-width:2;vector-effect:non-scaling-stroke}
+.q.cur{fill:rgba(61,160,255,.22)}
+.top{stroke:var(--top);stroke-width:4;vector-effect:non-scaling-stroke;fill:none}
+.sg{fill:rgba(255,159,67,.10);stroke:var(--assist);stroke-width:2;stroke-dasharray:8 6;vector-effect:non-scaling-stroke}
+.dot{fill:var(--accent);stroke:#fff;stroke-width:2;vector-effect:non-scaling-stroke}
+.dot.sel{fill:var(--top)}
+.hit{fill:transparent;cursor:move}
+.num{fill:#fff;font-weight:700;paint-order:stroke;stroke:#000;stroke-width:3;pointer-events:none}
+.tl{fill:var(--top);font-weight:800;paint-order:stroke;stroke:#000;stroke-width:3;pointer-events:none}
+@media (max-width:820px){
+ #main{grid-template-columns:1fr;grid-template-rows:minmax(48vh,1fr) auto}
+ #panel{border-left:0;border-top:1px solid var(--line);max-height:46vh}
+}
+</style>
+</head>
+<body>
+<header id="bar">
+ <button id="prev" aria-label="Previous image (comma or Page Up)">&lsaquo; Prev</button>
+ <button id="next" aria-label="Next image (period or Page Down)">Next &rsaquo;</button>
+ <span id="count">0 / 0</span>
+ <span id="name" class="grow"></span>
+ <span id="badge" title="A detector suggestion was shown for this image">ASSISTED</span>
+ <button id="zout" aria-label="Zoom out">&minus;</button>
+ <button id="zin" aria-label="Zoom in">+</button>
+ <button id="fit" aria-label="Fit to window (F)">Fit</button>
+ <button id="helpbtn" aria-label="Help (?)">?</button>
+</header>
+<main id="main">
+ <section id="stage" tabindex="0" aria-label="Image with the quad. Click the corners in order. Arrow keys nudge the selected corner.">
+  <div id="world"><img id="img" alt="" draggable="false"><img id="tile" alt="" draggable="false"><svg id="ov" xmlns="http://www.w3.org/2000/svg"></svg></div>
+  <div id="hint"></div>
+  <div id="msg"></div>
+  <div id="help" role="dialog" aria-label="Help">
+   <h3>Labelling</h3>
+   <p>Mark each document or photo by clicking its four corners: <b>top-left of the upright item first</b>, then clockwise (top-right, bottom-right, bottom-left). The <b class="topc">yellow edge</b> is the top. Drag a handle, or select it and use the arrow keys (Shift = 10 px, Alt = fine). Corners may lie outside the picture for partial frames.</p>
+   <p>Then tick the slice tags (at least one) and flags. A label is saved automatically as soon as it is valid. Only your own judgement goes in: no suggestion is shown unless you ask for it below, and then the label is marked <i>assisted</i> and excluded from the golden evaluation.</p>
+   <p><kbd>,</kbd> / <kbd>.</kbd> previous / next &middot; <kbd>Enter</kbd> save and next &middot; <kbd>G</kbd> next unlabelled &middot; <kbd>S</kbd> skip &middot; <kbd>N</kbd> add item &middot; <kbd>Del</kbd> delete item &middot; <kbd>1</kbd>-<kbd>4</kbd> select corner &middot; <kbd>Backspace</kbd> undo last corner &middot; <kbd>R</kbd> rotate which edge is the top &middot; <kbd>F</kbd> fit &middot; <kbd>+</kbd> <kbd>-</kbd> <kbd>0</kbd> zoom &middot; wheel / pinch zoom, drag to pan &middot; <kbd>?</kbd> this help.</p>
+   <p><button id="helpclose">Close</button></p>
+  </div>
+ </section>
+ <aside id="panel">
+  <div id="hint2"></div>
+  <fieldset><legend>Items</legend>
+   <div id="items" class="row"></div>
+   <div class="row mt">
+    <button id="additem">+ Item (N)</button>
+    <button id="delitem">Delete item</button>
+    <button id="undo">Undo corner</button>
+    <button id="rot">Top edge &#x27F3; (R)</button>
+    <button id="flip">Flip direction</button>
+   </div>
+   <div id="flags" class="mt"></div>
+  </fieldset>
+  <fieldset><legend>Slice tags (at least one)</legend><div id="slices"></div>
+   <div class="row"><button id="noDoc">No document here</button></div>
+  </fieldset>
+  <fieldset><legend>Scene &amp; notes</legend>
+   <label>Scene id (same for near-duplicates)<input id="scene" type="text" maxlength="120" autocomplete="off"></label>
+   <label>Notes<input id="notes" type="text" maxlength="500" autocomplete="off"></label>
+  </fieldset>
+  <div class="row"><button id="save" class="primary">Save &amp; next (Enter)</button><button id="skip">Skip (S)</button></div>
+  <div id="status" role="status"></div>
+  <fieldset id="assist"><legend>Optional, for comparison only</legend>
+   <label class="chk"><input id="sugg" type="checkbox"> Show detector suggestion for comparison</label>
+   <div class="dim">Off by default. If you look at it, this label is marked <b>assisted</b> and is excluded from the golden evaluation (the plan needs labels that do not depend on the model).</div>
+  </fieldset>
+ </aside>
+</main>
+<script nonce="{{NONCE}}">
+'use strict';
+(function () {
+  const TOKEN = new URLSearchParams(location.search).get('t') || '';
+  const $ = (id) => document.getElementById(id);
+  const NS = 'http://www.w3.org/2000/svg';
+  const SLICES = ['receipt-long', 'thermal-fade', 'partial-frame', 'touching-items', 'phone-document', 'flatbed-single', 'flatbed-multi', 'general-photo', 'heic-device', 'negative'];
+  const FLAGS = ['partial_frame', 'curved', 'touching', 'hand_held', 'folded'];
+  const HANDLE = 24; // radius in screen px: 48 px touch target
+  const S = {
+    list: null, idx: -1, meta: null, W: 0, H: 0, items: [], cur: -1, sel: -1,
+    slices: new Set(), notes: '', scene: '', view: { s: 1, tx: 0, ty: 0 }, fitS: 1,
+    dirty: false, timer: null, drafts: new Map(), leftover: new Map(), lastTouch: 0, active: 0,
+    assisted: false, suggest: null, showSuggest: false, loadId: 0, saving: false, tileTimer: null, suggestionsOn: true
+  };
+  const stage = $('stage'), world = $('world'), img = $('img'), tile = $('tile'), ov = $('ov');
+
+  function url(path, extra) {
+    return path + (path.includes('?') ? '&' : '?') + 't=' + encodeURIComponent(TOKEN) + (extra || '');
+  }
+  async function getJson(path) {
+    const r = await fetch(url(path), { cache: 'no-store' });
+    if (!r.ok) throw new Error(path + ' -> ' + r.status);
+    return r.json();
+  }
+  async function postJson(path, body) {
+    const r = await fetch(url(path), { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    let data = null;
+    try { data = await r.json(); } catch (e) { /* no body */ }
+    return { ok: r.ok, status: r.status, data };
+  }
+  function setStatus(text, cls) { const s = $('status'); s.textContent = text; s.className = cls || ''; }
+  function toast(text) { $('msg').textContent = text; clearTimeout(toast.t); toast.t = setTimeout(() => { $('msg').textContent = ''; }, 3500); }
+
+  // ---- active-time tracking (for the labelling-time log) -------------------------------------
+  function touched() {
+    const now = Date.now();
+    if (S.lastTouch && now - S.lastTouch < 20000 && !document.hidden) S.active += now - S.lastTouch;
+    S.lastTouch = now;
+  }
+
+  // ---- geometry -------------------------------------------------------------------------------
+  function cross(a, b, c) { return (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]); }
+  function quadProblem(p) {
+    if (p.length < 4) return p.length + ' of 4 corners';
+    const t = [0, 1, 2, 3].map((i) => cross(p[i], p[(i + 1) % 4], p[(i + 2) % 4]));
+    if (t.every((v) => v > 1e-9)) return null;
+    if (t.every((v) => v < -1e-9)) return 'counter-clockwise: press Flip direction';
+    return 'corners cross or the quad is not convex';
+  }
+  function outsideFrame(p) { return p.some((q) => q[0] < 0 || q[1] < 0 || q[0] > S.W || q[1] > S.H); }
+  function problems() {
+    const out = [];
+    if (S.slices.size === 0) out.push('tick at least one slice tag');
+    const neg = S.slices.has('negative');
+    if (neg && S.items.length) out.push('"negative" cannot have items: delete them or untick negative');
+    if (!neg && S.items.length === 0) out.push('draw the quad (or press "No document here")');
+    S.items.forEach((it, k) => { const m = quadProblem(it.pts); if (m) out.push('item ' + (k + 1) + ': ' + m); });
+    return out;
+  }
+  function currentItem() { return S.items[S.cur] || null; }
+  function placing() { const it = currentItem(); return !S.slices.has('negative') && (!it || it.pts.length < 4); }
+
+  // ---- view -----------------------------------------------------------------------------------
+  function stageSize() { const r = stage.getBoundingClientRect(); return { w: r.width, h: r.height, l: r.left, t: r.top }; }
+  function applyView() {
+    const v = S.view;
+    world.style.transform = 'translate(' + v.tx + 'px,' + v.ty + 'px) scale(' + v.s + ')';
+    draw();
+    clearTimeout(S.tileTimer);
+    S.tileTimer = setTimeout(updateTile, 280);
+  }
+  function fit() {
+    if (!S.W) return;
+    const z = stageSize();
+    const s = Math.min(z.w / S.W, z.h / S.H) * 0.97;
+    S.fitS = s;
+    S.view = { s, tx: (z.w - S.W * s) / 2, ty: (z.h - S.H * s) / 2 };
+    applyView();
+  }
+  function zoomAt(cx, cy, f) {
+    const z = stageSize(), v = S.view;
+    const px = cx - z.l, py = cy - z.t;
+    const s2 = Math.max(S.fitS * 0.5, Math.min(40, v.s * f));
+    const k = s2 / v.s;
+    S.view = { s: s2, tx: px - (px - v.tx) * k, ty: py - (py - v.ty) * k };
+    applyView();
+  }
+  function toImage(cx, cy) {
+    const z = stageSize(), v = S.view;
+    return [(cx - z.l - v.tx) / v.s, (cy - z.t - v.ty) / v.s];
+  }
+  function updateTile() {
+    const m = S.meta;
+    if (!m || !m.preview_w) return;
+    const r = m.preview_w / S.W; // preview pixels per image pixel
+    if (r > 0.999 || S.view.s < r * 1.15) { tile.removeAttribute('src'); tile.style.display = 'none'; return; }
+    const z = stageSize(), v = S.view;
+    const x0 = Math.max(0, -v.tx / v.s), y0 = Math.max(0, -v.ty / v.s);
+    const x1 = Math.min(S.W, (z.w - v.tx) / v.s), y1 = Math.min(S.H, (z.h - v.ty) / v.s);
+    if (x1 - x0 < 2 || y1 - y0 < 2) return;
+    const id = S.loadId;
+    const q = '&x=' + (x0 / S.W) + '&y=' + (y0 / S.H) + '&w=' + ((x1 - x0) / S.W) + '&h=' + ((y1 - y0) / S.H) + '&out=1800';
+    const probe = new Image();
+    probe.onload = () => {
+      if (id !== S.loadId) return;
+      tile.src = probe.src;
+      tile.style.left = x0 + 'px'; tile.style.top = y0 + 'px';
+      tile.style.width = (x1 - x0) + 'px'; tile.style.height = (y1 - y0) + 'px';
+      tile.style.display = 'block';
+    };
+    probe.src = url('/api/tile/' + S.idx, q);
+  }
+
+  // ---- overlay --------------------------------------------------------------------------------
+  function el(tag, attrs, parent) {
+    const e = document.createElementNS(NS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    (parent || ov).appendChild(e);
+    return e;
+  }
+  function draw() {
+    while (ov.firstChild) ov.removeChild(ov.firstChild);
+    ov.setAttribute('viewBox', '0 0 ' + (S.W || 1) + ' ' + (S.H || 1));
+    if (!S.W) return;
+    const s = S.view.s;
+    if (S.showSuggest && S.suggest) {
+      el('polygon', { class: 'sg', points: S.suggest.map((p) => p.join(',')).join(' ') });
+    }
+    S.items.forEach((it, k) => {
+      const pts = it.pts, cur = k === S.cur;
+      if (pts.length >= 3) el('polygon', { class: 'q' + (cur ? ' cur' : ''), points: pts.map((p) => p.join(',')).join(' ') });
+      else if (pts.length === 2) el('line', { class: 'q', x1: pts[0][0], y1: pts[0][1], x2: pts[1][0], y2: pts[1][1] });
+      if (pts.length >= 2) {
+        el('line', { class: 'top', x1: pts[0][0], y1: pts[0][1], x2: pts[1][0], y2: pts[1][1] });
+        const t = el('text', { class: 'tl', x: (pts[0][0] + pts[1][0]) / 2, y: (pts[0][1] + pts[1][1]) / 2, 'font-size': 13 / s, 'text-anchor': 'middle' });
+        t.textContent = 'TOP';
+      }
+      pts.forEach((p, c) => {
+        const selected = cur && c === S.sel;
+        el('circle', { class: 'dot' + (selected ? ' sel' : ''), cx: p[0], cy: p[1], r: 6 / s });
+        const n = el('text', { class: 'num', x: p[0] + 9 / s, y: p[1] - 9 / s, 'font-size': 14 / s });
+        n.textContent = String(c + 1);
+        el('circle', { class: 'hit', cx: p[0], cy: p[1], r: HANDLE / s, 'data-i': k, 'data-k': c });
+      });
+    });
+  }
+
+  // ---- panel ----------------------------------------------------------------------------------
+  function buildStatic() {
+    const sl = $('slices');
+    SLICES.forEach((name) => {
+      const l = document.createElement('label'); l.className = 'chk';
+      const c = document.createElement('input'); c.type = 'checkbox'; c.dataset.slice = name;
+      c.addEventListener('change', () => {
+        touched();
+        if (c.checked) S.slices.add(name); else S.slices.delete(name);
+        if (name === 'negative' && c.checked && S.items.length && !confirm('Remove the drawn items and mark this image as having no document?')) { c.checked = false; S.slices.delete('negative'); return; }
+        if (name === 'negative' && c.checked) { S.items = []; S.cur = -1; S.sel = -1; }
+        changed();
+      });
+      l.appendChild(c); l.appendChild(document.createTextNode(name)); sl.appendChild(l);
+    });
+    const fl = $('flags');
+    FLAGS.forEach((name) => {
+      const l = document.createElement('label'); l.className = 'chk';
+      const c = document.createElement('input'); c.type = 'checkbox'; c.dataset.flag = name;
+      c.addEventListener('change', () => { touched(); const it = currentItem(); if (it) { it.flags[name] = c.checked; changed(); } });
+      l.appendChild(c); l.appendChild(document.createTextNode(name.replace('_', ' ') + ' (selected item)')); fl.appendChild(l);
+    });
+  }
+  function renderPanel() {
+    document.querySelectorAll('[data-slice]').forEach((c) => { c.checked = S.slices.has(c.dataset.slice); });
+    const it = currentItem();
+    document.querySelectorAll('[data-flag]').forEach((c) => { c.checked = !!(it && it.flags[c.dataset.flag]); c.disabled = !it; });
+    const box = $('items'); box.textContent = '';
+    S.items.forEach((x, k) => {
+      const b = document.createElement('button'); b.className = 'it' + (k === S.cur ? ' on' : '');
+      b.textContent = 'Item ' + (k + 1) + (x.pts.length < 4 ? ' (' + x.pts.length + '/4)' : '');
+      b.addEventListener('click', () => { S.cur = k; S.sel = x.pts.length ? 0 : -1; renderPanel(); draw(); });
+      box.appendChild(b);
+    });
+    if (!S.items.length) { const s = document.createElement('span'); s.style.color = 'var(--dim)'; s.textContent = 'none yet'; box.appendChild(s); }
+    $('scene').value = S.scene; $('notes').value = S.notes;
+    $('badge').style.display = S.assisted ? 'inline-block' : 'none';
+    $('sugg').checked = S.showSuggest;
+    $('assist').style.display = S.suggestionsOn ? '' : 'none';
+    $('delitem').disabled = !it; $('undo').disabled = !it || !it.pts.length; $('rot').disabled = !it || it.pts.length < 4; $('flip').disabled = !it || it.pts.length < 4;
+    let hint = '';
+    if (S.slices.has('negative')) hint = 'Marked: no document in this image.';
+    else if (placing()) { const n = it ? it.pts.length : 0; hint = 'Click corner ' + (n + 1) + ' of 4' + (n === 0 ? ': the TOP-LEFT of the upright item, then clockwise' : '') + '.'; }
+    else hint = 'Drag a handle, or select one and use the arrow keys. N adds another item.';
+    $('hint').textContent = hint; $('hint2').textContent = '';
+    const pr = problems();
+    if (!S.dirty && pr.length === 0 && S.items.length + (S.slices.has('negative') ? 1 : 0) > 0) setStatus('Saved.', 'ok');
+    else if (pr.length) setStatus('Not saved yet: ' + pr.join('; '), S.items.length || S.slices.size ? 'warn' : '');
+  }
+  function renderBar() {
+    const L = S.list; if (!L) return;
+    let lab = 0, sk = 0;
+    L.images.forEach((x) => { if (x.state === 'labelled') lab++; else if (x.state === 'skipped') sk++; });
+    $('count').textContent = (S.idx + 1) + ' / ' + L.images.length + ' · ' + lab + ' labelled · ' + sk + ' skipped · ' + (L.images.length - lab - sk) + ' to do';
+    $('name').textContent = S.idx >= 0 ? L.images[S.idx].name + (L.images[S.idx].state !== 'todo' ? '  [' + L.images[S.idx].state + ']' : '') : '';
+    $('prev').disabled = S.idx <= 0; $('next').disabled = S.idx >= L.images.length - 1;
+  }
+  function changed() {
+    S.dirty = true;
+    const it = currentItem();
+    if (it && it.pts.length === 4 && outsideFrame(it.pts)) it.flags.partial_frame = true;
+    renderPanel(); draw();
+    clearTimeout(S.timer);
+    S.timer = setTimeout(() => { save(false); }, 700);
+  }
+
+  // ---- editing --------------------------------------------------------------------------------
+  function newItem() {
+    if (S.slices.has('negative')) { toast('Untick "negative" first'); return; }
+    const last = currentItem();
+    if (last && last.pts.length < 4) return;
+    S.items.push({ pts: [], flags: {} }); S.cur = S.items.length - 1; S.sel = -1;
+    renderPanel(); draw();
+  }
+  function addPoint(p) {
+    if (S.slices.has('negative')) return;
+    let it = currentItem();
+    if (!it || it.pts.length >= 4) { S.items.push({ pts: [], flags: {} }); S.cur = S.items.length - 1; it = currentItem(); }
+    it.pts.push(p); S.sel = it.pts.length - 1;
+    changed();
+  }
+  function undoPoint() { const it = currentItem(); if (it && it.pts.length) { it.pts.pop(); S.sel = it.pts.length - 1; if (!it.pts.length && S.items.length > 1) { S.items.splice(S.cur, 1); S.cur = Math.max(0, S.cur - 1); } changed(); } }
+  function deleteItem() { if (S.cur < 0) return; S.items.splice(S.cur, 1); S.cur = Math.min(S.cur, S.items.length - 1); S.sel = -1; changed(); }
+  function rotateTop() { const it = currentItem(); if (it && it.pts.length === 4) { it.pts.push(it.pts.shift()); changed(); } }
+  function flipDir() { const it = currentItem(); if (it && it.pts.length === 4) { const p = it.pts; it.pts = [p[0], p[3], p[2], p[1]]; changed(); } }
+  function nudge(dx, dy, fine, big) {
+    const it = currentItem(); if (!it || S.sel < 0 || !it.pts[S.sel]) return;
+    const step = (big ? 10 : fine ? 0.2 : 1) / S.view.s;
+    it.pts[S.sel] = [it.pts[S.sel][0] + dx * step, it.pts[S.sel][1] + dy * step];
+    changed();
+  }
+
+  // ---- pointers -------------------------------------------------------------------------------
+  const ptrs = new Map();
+  let drag = null, pinch = null;
+  stage.addEventListener('pointerdown', (e) => {
+    if (e.button > 0 && e.pointerType === 'mouse') return;
+    touched(); stage.focus({ preventScroll: true });
+    try { stage.setPointerCapture(e.pointerId); } catch (x) { /* not capturable */ }
+    ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (ptrs.size === 2) {
+      const [a, b] = [...ptrs.values()];
+      pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, s: S.view.s, tx: S.view.tx, ty: S.view.ty, cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 };
+      drag = null; return;
+    }
+    const h = e.target && e.target.closest ? e.target.closest('[data-k]') : null;
+    if (h) {
+      const i = +h.dataset.i, k = +h.dataset.k;
+      S.cur = i; S.sel = k;
+      const p = toImage(e.clientX, e.clientY), q = S.items[i].pts[k];
+      drag = { type: 'handle', i, k, ox: q[0] - p[0], oy: q[1] - p[1], moved: false };
+      renderPanel(); draw(); return;
+    }
+    drag = { type: 'pan', sx: e.clientX, sy: e.clientY, tx: S.view.tx, ty: S.view.ty, moved: false };
+  });
+  stage.addEventListener('pointermove', (e) => {
+    if (!ptrs.has(e.pointerId)) return;
+    ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch && ptrs.size >= 2) {
+      const [a, b] = [...ptrs.values()];
+      const d = Math.hypot(a.x - b.x, a.y - b.y) || 1, cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
+      const z = stageSize();
+      const s2 = Math.max(S.fitS * 0.5, Math.min(40, pinch.s * d / pinch.d));
+      const px0 = pinch.cx - z.l, py0 = pinch.cy - z.t, k = s2 / pinch.s;
+      S.view = { s: s2, tx: (cx - z.l) - (px0 - pinch.tx) * k, ty: (cy - z.t) - (py0 - pinch.ty) * k };
+      applyView(); return;
+    }
+    if (!drag) return;
+    if (drag.type === 'handle') {
+      const p = toImage(e.clientX, e.clientY);
+      const it = S.items[drag.i];
+      it.pts[drag.k] = [Math.max(-S.W, Math.min(2 * S.W, p[0] + drag.ox)), Math.max(-S.H, Math.min(2 * S.H, p[1] + drag.oy))];
+      drag.moved = true; draw(); return;
+    }
+    const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+    if (Math.hypot(dx, dy) > 6) { drag.moved = true; stage.classList.add('panning'); }
+    if (drag.moved) { S.view = { s: S.view.s, tx: drag.tx + dx, ty: drag.ty + dy }; applyView(); }
+  });
+  function endPointer(e) {
+    if (!ptrs.has(e.pointerId)) return;
+    ptrs.delete(e.pointerId);
+    stage.classList.remove('panning');
+    if (pinch) { if (ptrs.size < 2) pinch = null; drag = null; return; }
+    const d = drag; drag = null;
+    if (!d) return;
+    if (d.type === 'handle') { if (d.moved) changed(); return; }
+    if (!d.moved && e.type === 'pointerup' && S.W && placing()) {
+      const p = toImage(e.clientX, e.clientY);
+      addPoint([Math.max(-S.W, Math.min(2 * S.W, p[0])), Math.max(-S.H, Math.min(2 * S.H, p[1]))]);
+    }
+  }
+  stage.addEventListener('pointerup', endPointer);
+  stage.addEventListener('pointercancel', endPointer);
+  stage.addEventListener('wheel', (e) => { e.preventDefault(); touched(); zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015))); }, { passive: false });
+  stage.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  // ---- loading and saving ---------------------------------------------------------------------
+  function snapshot() {
+    return { items: S.items.map((x) => ({ pts: x.pts.map((p) => p.slice()), flags: Object.assign({}, x.flags) })), slices: [...S.slices], notes: S.notes, scene: S.scene, cur: S.cur };
+  }
+  function restore(d) {
+    S.items = d.items; S.slices = new Set(d.slices); S.notes = d.notes; S.scene = d.scene; S.cur = d.cur; S.sel = S.cur >= 0 && S.items[S.cur] && S.items[S.cur].pts.length ? 0 : -1;
+  }
+  function fromLabel(l) {
+    S.items = (l.items || []).map((it) => ({ pts: it.quad.map((p) => [p[0] * S.W, p[1] * S.H]), flags: { partial_frame: it.partial_frame, curved: it.curved, touching: it.touching, hand_held: it.hand_held, folded: it.folded } }));
+    S.slices = new Set(l.slices || []); S.notes = l.notes || ''; S.scene = l.scene_id || ''; S.cur = S.items.length ? 0 : -1; S.sel = S.items.length ? 0 : -1;
+  }
+  async function save(advance) {
+    clearTimeout(S.timer);
+    if (S.idx < 0 || S.saving) return false;
+    S.notes = $('notes').value; S.scene = $('scene').value;
+    const pr = problems();
+    if (pr.length) { renderPanel(); if (advance) toast('Not saved: ' + pr[0]); return false; }
+    if (!S.dirty && !advance) return true;
+    if (!S.dirty && advance) { return true; }
+    touched();
+    S.saving = true;
+    const name = S.list.images[S.idx].name;
+    const body = {
+      slices: [...S.slices], scene_id: S.scene, notes: S.notes, seconds: S.active / 1000,
+      items: S.items.map((it) => {
+        const o = { quad: it.pts.map((p) => [p[0] / S.W, p[1] / S.H]) };
+        FLAGS.forEach((f) => { o[f] = !!it.flags[f]; });
+        return o;
+      })
+    };
+    const secs = S.active;
+    S.active = 0;
+    const r = await postJson('/api/save/' + S.idx, body);
+    S.saving = false;
+    if (r.ok) {
+      S.dirty = false; S.drafts.delete(name);
+      S.list.images[S.idx].state = 'labelled'; S.list.images[S.idx].items = S.items.length;
+      if (r.data && r.data.label) S.assisted = !!r.data.label.assisted;
+      const w = r.data && r.data.warnings && r.data.warnings.length ? ' Warnings: ' + r.data.warnings.join('; ') : '';
+      setStatus('Saved ' + new Date().toLocaleTimeString() + '.' + w, w ? 'warn' : 'ok');
+      renderBar(); return true;
+    }
+    S.active += secs;
+    setStatus('Not saved: ' + (r.data && r.data.errors ? r.data.errors.join('; ') : 'server error ' + r.status), 'bad');
+    return false;
+  }
+  async function leave() {
+    if (S.idx < 0) return;
+    clearTimeout(S.timer);
+    const name = S.list.images[S.idx].name;
+    if (S.dirty) {
+      const ok = await save(false);
+      if (!ok) { S.drafts.set(name, snapshot()); toast('Left unsaved (kept in memory this session): ' + problems()[0]); }
+    }
+    S.leftover.set(name, S.active);
+  }
+  async function go(i) {
+    if (!S.list || i < 0 || i >= S.list.images.length) return;
+    await leave();
+    const id = ++S.loadId;
+    S.idx = i; S.meta = null; S.W = 0; S.H = 0; S.items = []; S.cur = -1; S.sel = -1; S.slices = new Set(); S.notes = ''; S.scene = '';
+    S.dirty = false; S.showSuggest = false; S.suggest = null; S.assisted = false;
+    tile.removeAttribute('src'); tile.style.display = 'none'; img.removeAttribute('src');
+    const entry = S.list.images[i];
+    S.active = S.leftover.get(entry.name) || 0; S.lastTouch = Date.now();
+    renderBar(); draw(); renderPanel(); setStatus('Loading ' + entry.name + ' ...', '');
+    let meta;
+    try { meta = await getJson('/api/meta/' + i); } catch (e) { if (id === S.loadId) setStatus('Cannot load this image: ' + e.message + ' (the server could not decode it)', 'bad'); return; }
+    if (id !== S.loadId) return;
+    S.meta = meta; S.W = meta.width; S.H = meta.height; S.assisted = !!meta.assisted;
+    world.style.width = S.W + 'px'; world.style.height = S.H + 'px';
+    img.style.width = S.W + 'px'; img.style.height = S.H + 'px';
+    img.src = url('/api/preview/' + i);
+    if (S.drafts.has(entry.name)) { restore(S.drafts.get(entry.name)); S.dirty = true; }
+    else if (meta.label) fromLabel(meta.label);
+    $('scene').placeholder = entry.name;
+    S.suggestionsOn = !!meta.suggestions;
+    fit(); renderBar(); renderPanel(); draw();
+    if (!S.items.length && !S.slices.size) setStatus('Blank: draw the quad and tick a slice tag.', '');
+    history.replaceState(null, '', '#' + i);
+    stage.focus({ preventScroll: true });
+  }
+  function nextTodo(from) {
+    const L = S.list.images;
+    for (let k = 1; k <= L.length; k++) { const j = (from + k) % L.length; if (L[j].state === 'todo') return j; }
+    return -1;
+  }
+  async function saveAndNext() {
+    const ok = await save(true);
+    if (!ok && problems().length) return;
+    const j = S.idx + 1;
+    if (j < S.list.images.length) go(j); else toast('That was the last image.');
+  }
+  async function skipNow() {
+    clearTimeout(S.timer);
+    const entry = S.list.images[S.idx];
+    touched();
+    const r = await postJson('/api/skip/' + S.idx, { skipped: true, seconds: S.active / 1000 });
+    S.active = 0;
+    if (r.ok) { if (entry.state === 'todo') entry.state = 'skipped'; S.dirty = false; S.drafts.delete(entry.name); }
+    const j = S.idx + 1;
+    if (j < S.list.images.length) go(j); else { renderBar(); toast('Skipped. That was the last image.'); }
+  }
+
+  // ---- wiring ---------------------------------------------------------------------------------
+  $('prev').addEventListener('click', () => go(S.idx - 1));
+  $('next').addEventListener('click', () => go(S.idx + 1));
+  $('save').addEventListener('click', saveAndNext);
+  $('skip').addEventListener('click', skipNow);
+  $('additem').addEventListener('click', newItem);
+  $('delitem').addEventListener('click', deleteItem);
+  $('undo').addEventListener('click', undoPoint);
+  $('rot').addEventListener('click', rotateTop);
+  $('flip').addEventListener('click', flipDir);
+  $('fit').addEventListener('click', fit);
+  $('zin').addEventListener('click', () => { const z = stageSize(); zoomAt(z.l + z.w / 2, z.t + z.h / 2, 1.5); });
+  $('zout').addEventListener('click', () => { const z = stageSize(); zoomAt(z.l + z.w / 2, z.t + z.h / 2, 1 / 1.5); });
+  $('noDoc').addEventListener('click', () => { const c = document.querySelector('[data-slice="negative"]'); c.checked = !c.checked; c.dispatchEvent(new Event('change')); });
+  $('helpbtn').addEventListener('click', () => { $('help').style.display = $('help').style.display === 'block' ? 'none' : 'block'; });
+  $('helpclose').addEventListener('click', () => { $('help').style.display = 'none'; });
+  $('scene').addEventListener('input', () => { touched(); S.scene = $('scene').value; changed(); });
+  $('notes').addEventListener('input', () => { touched(); S.notes = $('notes').value; changed(); });
+  $('sugg').addEventListener('change', async () => {
+    touched();
+    if (!$('sugg').checked) { S.showSuggest = false; draw(); return; }
+    if (S.idx < 0) { $('sugg').checked = false; return; }
+    const r = await fetch(url('/api/suggest/' + S.idx), { cache: 'no-store' });
+    if (!r.ok) { $('sugg').checked = false; toast('No suggestion available'); return; }
+    const d = await r.json();
+    S.assisted = true; S.showSuggest = true;
+    S.suggest = d.quad ? d.quad.map((p) => [p[0] * S.W, p[1] * S.H]) : null;
+    if (!d.quad) toast('The detector found nothing');
+    renderPanel(); draw();
+  });
+  window.addEventListener('resize', () => { if (S.W) fit(); });
+  document.addEventListener('visibilitychange', () => { S.lastTouch = Date.now(); });
+  window.addEventListener('keydown', (e) => {
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA') && t.type === 'text') { if (e.key === 'Escape' || e.key === 'Enter') t.blur(); return; }
+    if (t && t.tagName === 'INPUT' && t.type === 'checkbox' && (e.key === ' ')) return;
+    if (e.ctrlKey || e.metaKey) { if (e.key === 'z') { e.preventDefault(); undoPoint(); } return; }
+    touched();
+    const k = e.key;
+    if (k.startsWith('Arrow')) { e.preventDefault(); nudge(k === 'ArrowRight' ? 1 : k === 'ArrowLeft' ? -1 : 0, k === 'ArrowDown' ? 1 : k === 'ArrowUp' ? -1 : 0, e.altKey, e.shiftKey); return; }
+    if (k >= '1' && k <= '4') { const it = currentItem(); if (it && it.pts[+k - 1]) { S.sel = +k - 1; draw(); } return; }
+    switch (k) {
+      case ',': case 'PageUp': e.preventDefault(); go(S.idx - 1); break;
+      case '.': case 'PageDown': e.preventDefault(); go(S.idx + 1); break;
+      case 'Enter': e.preventDefault(); saveAndNext(); break;
+      case 'g': case 'G': { const j = nextTodo(S.idx); if (j >= 0) go(j); else toast('Nothing left to do'); break; }
+      case 's': case 'S': skipNow(); break;
+      case 'n': case 'N': newItem(); break;
+      case 'Delete': deleteItem(); break;
+      case 'Backspace': e.preventDefault(); undoPoint(); break;
+      case 'r': case 'R': rotateTop(); break;
+      case 'f': case 'F': fit(); break;
+      case '+': case '=': { const z = stageSize(); zoomAt(z.l + z.w / 2, z.t + z.h / 2, 1.3); break; }
+      case '-': case '_': { const z = stageSize(); zoomAt(z.l + z.w / 2, z.t + z.h / 2, 1 / 1.3); break; }
+      case '0': { const z = stageSize(); zoomAt(z.l + z.w / 2, z.t + z.h / 2, 1 / S.view.s); break; }
+      case '?': $('help').style.display = $('help').style.display === 'block' ? 'none' : 'block'; break;
+      case 'Escape': $('help').style.display = 'none'; break;
+      default: break;
+    }
+  });
+  window.addEventListener('beforeunload', () => {
+    if (S.dirty && S.idx >= 0 && !problems().length) {
+      // best effort: a last save through sendBeacon is not available for JSON with a token header, so warn instead
+      return undefined;
+    }
+    return undefined;
+  });
+
+  buildStatic();
+  getJson('/api/list').then((L) => {
+    S.list = L;
+    const want = parseInt((location.hash || '').slice(1), 10);
+    let first = Number.isInteger(want) && want >= 0 && want < L.images.length ? want : L.images.findIndex((x) => x.state === 'todo');
+    if (first < 0) first = 0;
+    if (!L.images.length) { setStatus('No decodable images were found in the folder you gave.', 'bad'); return; }
+    go(first);
+  }).catch((e) => setStatus('Cannot reach the labeller server: ' + e.message + '. Open the exact URL it printed.', 'bad'));
+})();
+</script>
+</body>
+</html>
