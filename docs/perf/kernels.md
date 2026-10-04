@@ -54,12 +54,35 @@ Fixtures are generated offline by `tools/imgproc-oracles/gen_oracles.py` (NumPy 
 |---|---|---|
 | Identity, integer shifts, 90/180/270 turns, Gray8 / RGB8 / RGBA8 / Gray16 / RGB16 | bit-exact | exact |
 | 27 sub-pixel shift / perspective / scale / 3-degree rotation cases vs a NumPy float64 Lanczos3 (exact weights), Gray8, RGB8, RGB16 | worst difference 1 LSB (8-bit) and 1 LSB (16-bit) | <= 1 LSB |
-| PSNR vs `cv2.warpPerspective` INTER_LANCZOS4 (OpenCV has no Lanczos3), photo-like content (blur sigma 1 and 1.5) | 51.3 dB and 52.9 dB | >= 45 dB (PROVISIONAL) |
-| Same, **hard one-pixel edges everywhere** (`blur0`) | **41.8 dB** | below 45 |
-| MSSIM (`image-compare`) vs NumPy reference, 9 RGB8 cases | >= 0.99999 | >= 0.99 |
-| MSSIM vs OpenCV, 3 cases | 0.9965 (blur0), 0.9988, 0.9994 | >= 0.99 |
+| PSNR vs `cv2.warpPerspective` INTER_LANCZOS4, photo-like content (blur sigma 1 and 1.5) | 51.30 dB and 52.89 dB | >= 45 dB (PROVISIONAL), applies to this content (below) |
+| Same, **hard one-pixel edges everywhere** (`blur0`) | **41.80 dB** | not 45 dB: floor 42.33 dB minus 1 dB (below) |
+| MSSIM (`image-compare`) vs NumPy reference, 9 RGB8 cases | >= 0.99999 | >= 0.99 same OS |
+| MSSIM vs OpenCV, 3 cases | 0.99654 (blur0), 0.99879, 0.99936 | >= 0.99 same OS |
+| Kernel output of all 30 fixture cases (27 NumPy cases in Gray8, RGB8 and RGB16, plus the 3 cv2 cases), windows-2025 vs macos-latest (arm64) vs ubuntu-22.04 | **byte-identical on all three, 90 of 90 pair comparisons** (so MSSIM between OSes is 1.0 and the worst per-sample difference is 0) | MSSIM >= 0.98 across OSes |
 
-Plan/reality note: the 45 dB bar holds for photo-like content but not for synthetic hard edges, because OpenCV's 8-tap kernel and its 1/32-pixel coordinate quantisation differ most from a 6-tap kernel there (ADR-0002 measured 49.3 dB on denser, softer content). The test keeps the `blur0` case as a regression guard at 40 dB and asserts 45 dB on the others; the bar is not relaxed, but **the M2.15 acceptance should state the content the 45 dB applies to** (owner decision). SSIM across OSes (>= 0.98) is unmeasured until CI runs the oracle on three OSes.
+Run: [Warp oracles, run 37171451475](https://github.com/WelFedTed/auto-crop/actions/runs/37171451475) (`.github/workflows/oracles.yml`; every OS runs the oracle tests and dumps the kernel's output for every case, a last job compares the dumps with `crates/imgproc-bench/examples/warp_oracle_report.rs`). The warp is plain `f32`/`f64` arithmetic without fused multiply-add or libm calls on the hot path, which is why even the aarch64 build agrees to the bit; that is a measurement of this kernel and these fixtures, not a promise about every future SIMD path (the bar stays 0.98 so a vectorised kernel may differ in the last bit).
+
+#### The cv2 PSNR question: what the 45 dB bar applies to (decision, M1.25)
+
+The question: ours is 51-53 dB from `cv2.warpPerspective` on photo-like content but 41.8 dB on hard one-pixel edges, against a 45 dB bar. Is that a kernel bug or a legitimate difference? Measured with `tools/imgproc-oracles/gen_oracles.py` (same mask as the Rust test: pixels whose 8 x 8 footprint is inside the source), in dB:
+
+| Content | cv2 vs exact Lanczos4 with 1/32 px coordinates | cv2 vs exact Lanczos3 (the reference ours matches to 1 LSB) | exact Lanczos3 vs exact Lanczos4 | **ours vs cv2** |
+|---|---:|---:|---:|---:|
+| `blur0` (hard one-pixel edges) | 72.59 | 41.80 | **42.33** | 41.80 |
+| `blur1` | 74.00 | 51.30 | 52.06 | 51.30 |
+| `blur1.5` | 74.85 | 52.89 | 53.37 | 52.89 |
+
+Findings:
+
+1. **cv2 is a Lanczos4 and agrees with its own model to 72-75 dB.** `INTER_LANCZOS4` is an 8 x 8 kernel with source positions rounded to 1/32 px (`INTER_BITS = 5`) and fixed-point weights. A float64 NumPy Lanczos4 with 1/32 px rounding reproduces cv2 to 72.6-74.9 dB, so the geometry, the pixel-centre convention, the homography direction and the border handling of the fixtures are right and nothing is hiding in them.
+2. **Our kernel is Lanczos3 (6 x 6) by design** ([ADR-0002](../adr/0002-lanczos-warp.md)), and OpenCV has no Lanczos3. An *exact* Lanczos3 and an *exact* Lanczos4 on the same content differ by 42.33 dB on hard edges and 52-53 dB on soft content. That is the **kernel-difference floor**: no Lanczos3 implementation, however accurate, can score higher against cv2 than about this on that content. Ours scores exactly what the exact Lanczos3 reference scores against cv2 (41.80, 51.30, 52.89 dB), 0.5-0.8 dB under the floor (cv2's 1/32 px rounding and fixed-point weights account for the rest). The 41.8 dB is therefore a legitimate kernel difference, not a defect.
+3. **The 45 dB bar was never a property of the kernel; it is a property of the content.** On content whose floor is above 45 dB (band-limited, photo-like: anything blurred by about a pixel of lens blur, which every real photograph is) the bar holds with 6-8 dB to spare. On synthetic content with one-pixel step edges the floor itself is below 45 dB.
+
+Decision (recorded; the bar is not relaxed, its scope is stated):
+
+- **The oracle for the kernel is the NumPy exact Lanczos3** (<= 1 LSB, already passing, M1.25 text). cv2 is the independent oracle for **geometry and convention**, and the item text's 45 dB applies to **photo-like content, defined as content whose Lanczos3-vs-Lanczos4 floor is at least 46 dB** (the fixtures `blur1` and `blur1.5`). The M2.15 acceptance must quote the content it means.
+- On harder content the test uses **bar = floor - 1 dB** (`blur0`: 41.33 dB, measured 41.80), and in every case asserts that ours is **within 0.25 dB of the exact Lanczos3 reference's own PSNR against cv2**. The fixtures carry `lanczos3_vs_lanczos4_db`, `numpy_lanczos3_vs_cv2_db` and `cv2_vs_lanczos4_model_db` (asserted >= 70 dB at generation time), so the test needs no Python. The old 40 dB regression guard on `blur0` is replaced by these derived bars.
+- Not done, and not needed: a Lanczos4 mode in the kernel. It would match cv2 better and cost 1.8x the taps; ADR-0002 chose six taps for speed.
 
 ### Minification guard (M1.26) - `tests/minify.rs`
 
@@ -123,6 +146,6 @@ Quality against an exact f64 area average (PSNR / light 8 x 8 luma SSIM; `cargo 
 1. `check-deps` forbids `image` (any dependency kind) in `auto-crop-imgproc`, so the library comparisons, `image-compare` SSIM and all criterion benches live in the new workspace crate `crates/imgproc-bench` (not shipped, `publish = false`).
 2. `auto-crop-core` now has `CancelToken` and `ErrKind::Degenerate`; `imgproc` takes a small `Cancel` trait that core's token implements, and `HomographyError` converts to `ErrKind::Degenerate`.
 3. M1.26: the 1.5 threshold leaves +7.3 dB alias energy at scale 3 (above).
-4. M1.25/M2.15: 45 dB vs OpenCV holds for photo-like content, 41.8 dB for hard-edged synthetic content (above).
+4. M1.25/M2.15: 45 dB vs OpenCV applies to photo-like content (kernel-difference floor >= 46 dB); hard-edged synthetic content is bounded by the Lanczos3-vs-Lanczos4 floor instead (above, decision recorded).
 5. M1.27: the Doxa/DIBCO F-measure clause is unmeasured.
 6. M1.57/M2.15: the 90 ms warp gate is unmeasured on idle hardware (above); the 1-thread resize misses the 25 ms proxy line.

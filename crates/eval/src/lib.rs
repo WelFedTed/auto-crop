@@ -28,6 +28,7 @@ pub mod multi;
 pub mod noise;
 pub mod predictor;
 pub mod publish;
+pub mod publish_multi;
 pub mod report;
 pub mod run;
 pub mod selfcheck;

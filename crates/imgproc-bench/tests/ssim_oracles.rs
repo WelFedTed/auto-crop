@@ -5,8 +5,10 @@
 //! which is AGPL) of the kernel's output against the NumPy Lanczos3 reference and the OpenCV
 //! `warpPerspective` fixtures that `crates/imgproc/tests/oracles.rs` checks by PSNR. It lives in
 //! this crate because `image-compare` pulls the `image` crate, which `check-deps` keeps out of
-//! `auto-crop-imgproc`. The bar is >= 0.99 on one OS (>= 0.98 across OSes, to be measured when CI
-//! has all three); every fixture clears 0.99 here, including the sharp-edged `blur0` case (0.9965).
+//! `auto-crop-imgproc`. The bar is >= 0.99 on one OS; every fixture clears it here, including the
+//! sharp-edged `blur0` case (0.9965). The >= 0.98 bar across operating systems is measured by
+//! `examples/warp_oracle_report.rs` in the `Warp oracles` workflow (all outputs were byte-identical
+//! on windows-2025, macos-latest and ubuntu-22.04; see docs/perf/kernels.md).
 
 use auto_crop_imgproc::cancel::NeverCancel;
 use auto_crop_imgproc::pixels::ImageRef;

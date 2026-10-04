@@ -8,6 +8,9 @@ use auto_crop_eval::detector::{DetectorPredictor, ItemsDetectorPredictor};
 use auto_crop_eval::multi::{self, MultiOracle, MultiPredictor, MultiRunConfig};
 use auto_crop_eval::predictor::{FullFrame, Jittered, JsonLines, Oracle, Predictor};
 use auto_crop_eval::publish::{PublishableMetrics, check_no_leak};
+use auto_crop_eval::publish_multi::{
+    PublishableMultiMetrics, check_no_leak as check_no_leak_multi,
+};
 use auto_crop_eval::report::summary_text;
 use auto_crop_eval::run::{RunConfig, from_json, run, to_json};
 use auto_crop_eval::stats::MIN_GATE_N;
@@ -35,8 +38,9 @@ Commands:
         (or a slice with n >= gate floor does), unless --waiver (the accuracy-waiver label).
   noise-floor --a FILE --b FILE [--out FILE]
         Disagreement between two annotators' label files (JSON lines: id, width, height, quad).
-  publish --results FILE --out FILE
+  publish --results FILE --out FILE [--multi]
         Write the publishable aggregate view (no per-image rows; slices n >= 30 only) and leak-check it.
+        --multi reads a `run --multi` result and writes the multi-item aggregate view.
   validate-manifest FILE
         Check a manifest: valid quads, unique ids, relative paths, scene-disjoint splits.
   check-splits FILE...
@@ -300,7 +304,20 @@ fn cmd_noise_floor(a: &Args) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
+fn cmd_publish_multi(a: &Args) -> Result<ExitCode, String> {
+    let results: multi::MultiResults = serde_json::from_str(&read(&a.required("--results")?)?)
+        .map_err(|e| format!("not a multi-item results file: {e}"))?;
+    let json = PublishableMultiMetrics::from_results(&results).to_json();
+    check_no_leak_multi(&json, &results)?;
+    write(Path::new(&a.required("--out")?), &json)?;
+    println!("wrote publishable multi-item aggregates (no per-scan rows, slices n >= 30 only)");
+    Ok(ExitCode::SUCCESS)
+}
+
 fn cmd_publish(a: &Args) -> Result<ExitCode, String> {
+    if a.flag("--multi") {
+        return cmd_publish_multi(a);
+    }
     let results = from_json(&read(&a.required("--results")?)?)?;
     let json = PublishableMetrics::from_results(&results).to_json();
     check_no_leak(&json, &results)?;
