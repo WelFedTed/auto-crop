@@ -55,6 +55,17 @@ Pinned in `tools/synth/requirements.txt` (plus the `numpy` and `opencv-python-he
 | `segno` | Python package | BSD-3-Clause | QR code module matrices drawn on generated pages | https://pypi.org/project/segno/ | verified 2026-10-03 (wheel metadata, 1.6.6, "BSD License" classifier) |
 | `python-barcode` | Python package | MIT | Code 128 and EAN-13 bar patterns drawn on generated pages | https://pypi.org/project/python-barcode/ | verified 2026-10-03 (wheel metadata, 0.16.1) |
 
+### Python packages for the learned-detector study (`tools/train`, never shipped)
+
+Pinned in `tools/train/requirements.txt`, hash-locked for Windows x64 and CPython 3.14 in `requirements.lock` (torch from the official PyTorch index, CUDA 13.0 build). Training, export and analysis scripts only; no weights, datasets or checkpoints are committed ([model-weights policy](policy/model-weights.md)). The `numpy`, `opencv-python-headless` and `pillow` rows above also cover this tool.
+
+| Name | Kind | SPDX | Use | Source | Checked |
+|---|---|---|---|---|---|
+| `torch` | Python package | Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND MIT | trains the from-scratch corner network and exports it to ONNX; used on the developer's GPU only | https://pypi.org/project/torch/ | verified 2026-10-04 (wheel metadata, 2.14.1+cu130, `License-Expression`) |
+| `onnx` | Python package | Apache-2.0 | writes and checks the exported ONNX graph | https://pypi.org/project/onnx/ | verified 2026-10-04 (wheel metadata, 1.23.1) |
+| `onnxruntime` | Python package | MIT | CPU reference run for export parity and Python-side timing | https://pypi.org/project/onnxruntime/ | verified 2026-10-04 (wheel metadata, 1.30.0) |
+| `onnxscript` | Python package | MIT | required by the torch ONNX exporter | https://pypi.org/project/onnxscript/ | verified 2026-10-04 (wheel metadata, 0.7.2) |
+
 ### Developer and CI tools (run, never linked, never shipped)
 
 GPL-licensed tools below are executed as separate programs for measurement and comparison. Their code is not linked into, copied into or distributed with Auto Crop, and their output is numbers, not derived code (B2).
