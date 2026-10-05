@@ -1,0 +1,3162 @@
+{
+  "schema": "auto-crop-metrics/1",
+  "commit": "59feca1db2acb5b049fc76a46a8718d003f75f35",
+  "suite": "full-py",
+  "split": "all",
+  "predictor": "full-frame",
+  "host": {
+    "os": "linux",
+    "arch": "x86_64",
+    "tier": null
+  },
+  "n": 5200,
+  "summary": {
+    "n": 5200,
+    "n_ok": 5199,
+    "n_no_quad": 0,
+    "n_missing": 0,
+    "n_invalid": 1,
+    "n_crashed": 0,
+    "mean_iou": 0.2777782872115117,
+    "mean_iou_ci95": [
+      0.2739755759775758,
+      0.2816482009693634
+    ],
+    "failures": 5200,
+    "failure_rate": 1.0,
+    "success_95": 0.0,
+    "success_98": 0.0,
+    "corner_err_pct": {
+      "p50": 26.342013366938048,
+      "p95": 75.81645339772611,
+      "p99": 87.9242481180887
+    },
+    "skew_deg": {
+      "p50": 13.82040087397302,
+      "p95": 41.6352447935666,
+      "p99": 45.002969255254186
+    },
+    "corner_err_pct_scored": {
+      "p50": 26.341157426988968,
+      "p95": 75.81164489901008,
+      "p99": 87.87584760635848
+    },
+    "skew_deg_scored": {
+      "p50": 13.819355227684603,
+      "p95": 41.61707732201906,
+      "p99": 44.99733766151378
+    },
+    "orientation": {
+      "upright": 0,
+      "rot90": 0,
+      "rot180": 0,
+      "rot270": 0,
+      "mirrored": 0
+    },
+    "accepted": {
+      "n": 5200,
+      "silent_failures": 5200,
+      "risk": 1.0,
+      "risk_ub95": 1.0,
+      "silent_over_all": 1.0,
+      "flag_rate": 0.0,
+      "flagged_fine_share": null
+    }
+  },
+  "slices": {
+    "aspect=document": {
+      "n": 2082,
+      "status": "gated",
+      "summary": {
+        "n": 2082,
+        "n_ok": 2081,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 1,
+        "n_crashed": 0,
+        "mean_iou": 0.35327515779610197,
+        "mean_iou_ci95": [
+          0.3471723873620387,
+          0.3589790922120065
+        ],
+        "failures": 2082,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.611554163683124,
+          "p95": 75.06877092961363,
+          "p99": 87.95100312521615
+        },
+        "skew_deg": {
+          "p50": 14.025749421471318,
+          "p95": 41.329375386748325,
+          "p99": 44.64243124313548
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.60380992807386,
+          "p95": 74.98880940006657,
+          "p99": 87.71106070997958
+        },
+        "skew_deg_scored": {
+          "p50": 14.024681542701101,
+          "p95": 41.30239465591235,
+          "p99": 44.60227001797506
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 2082,
+          "silent_failures": 2082,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "aspect=long": {
+      "n": 1090,
+      "status": "gated",
+      "summary": {
+        "n": 1090,
+        "n_ok": 1090,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.183861720669841,
+        "mean_iou_ci95": [
+          0.17960054345932794,
+          0.18846029739028533
+        ],
+        "failures": 1090,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 25.885439199497718,
+          "p95": 75.49938982747592,
+          "p99": 86.30522320855572
+        },
+        "skew_deg": {
+          "p50": 13.218850218827676,
+          "p95": 41.71036691977962,
+          "p99": 44.84521037858095
+        },
+        "corner_err_pct_scored": {
+          "p50": 25.885439199497718,
+          "p95": 75.49938982747592,
+          "p99": 86.30522320855572
+        },
+        "skew_deg_scored": {
+          "p50": 13.218850218827676,
+          "p95": 41.71036691977962,
+          "p99": 44.84521037858095
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 1090,
+          "silent_failures": 1090,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "aspect=receipt": {
+      "n": 1560,
+      "status": "gated",
+      "summary": {
+        "n": 1560,
+        "n_ok": 1560,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.29356757574790143,
+        "mean_iou_ci95": [
+          0.28757719719467756,
+          0.2997300226153866
+        ],
+        "failures": 1560,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 25.78580233901053,
+          "p95": 77.44192280394034,
+          "p99": 89.80964865761784
+        },
+        "skew_deg": {
+          "p50": 14.264513489389978,
+          "p95": 41.7451946039012,
+          "p99": 45.6583057056418
+        },
+        "corner_err_pct_scored": {
+          "p50": 25.78580233901053,
+          "p95": 77.44192280394034,
+          "p99": 89.80964865761784
+        },
+        "skew_deg_scored": {
+          "p50": 14.264513489389978,
+          "p95": 41.7451946039012,
+          "p99": 45.6583057056418
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 1560,
+          "silent_failures": 1560,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "aspect=strip": {
+      "n": 468,
+      "status": "gated",
+      "summary": {
+        "n": 468,
+        "n_ok": 468,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.10802034459727483,
+        "mean_iou_ci95": [
+          0.1040172372318115,
+          0.11191421851559694
+        ],
+        "failures": 468,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 27.966674663828176,
+          "p95": 75.71347480562325,
+          "p99": 86.30603854127908
+        },
+        "skew_deg": {
+          "p50": 13.265893307085985,
+          "p95": 42.90608811118877,
+          "p99": 49.33229895183012
+        },
+        "corner_err_pct_scored": {
+          "p50": 27.966674663828176,
+          "p95": 75.71347480562325,
+          "p99": 86.30603854127908
+        },
+        "skew_deg_scored": {
+          "p50": 13.265893307085985,
+          "p95": 42.90608811118877,
+          "p99": 49.33229895183012
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 468,
+          "silent_failures": 468,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "background=dark-mat": {
+      "n": 727,
+      "status": "gated",
+      "summary": {
+        "n": 727,
+        "n_ok": 727,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.27942238229444805,
+        "mean_iou_ci95": [
+          0.2686553799323744,
+          0.2894522821510537
+        ],
+        "failures": 727,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.474151737099383,
+          "p95": 76.35880725776114,
+          "p99": 89.48426680745462
+        },
+        "skew_deg": {
+          "p50": 13.974396959240353,
+          "p95": 41.54831209997711,
+          "p99": 44.85681230771077
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.474151737099383,
+          "p95": 76.35880725776114,
+          "p99": 89.48426680745462
+        },
+        "skew_deg_scored": {
+          "p50": 13.974396959240353,
+          "p95": 41.54831209997711,
+          "p99": 44.85681230771077
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 727,
+          "silent_failures": 727,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "background=fabric": {
+      "n": 729,
+      "status": "gated",
+      "summary": {
+        "n": 729,
+        "n_ok": 728,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 1,
+        "n_crashed": 0,
+        "mean_iou": 0.27674503962654934,
+        "mean_iou_ci95": [
+          0.26647231789449133,
+          0.2869420226646289
+        ],
+        "failures": 729,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 25.966229797880338,
+          "p95": 75.72187409466804,
+          "p99": 92.74895305009238
+        },
+        "skew_deg": {
+          "p50": 12.551760726902211,
+          "p95": 41.31222533719171,
+          "p99": 44.99153279673517
+        },
+        "corner_err_pct_scored": {
+          "p50": 25.949366115754327,
+          "p95": 75.53861225107946,
+          "p99": 92.15632648686677
+        },
+        "skew_deg_scored": {
+          "p50": 12.499495127875772,
+          "p95": 41.28642479970244,
+          "p99": 44.88559817398226
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 729,
+          "silent_failures": 729,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "background=plain": {
+      "n": 729,
+      "status": "gated",
+      "summary": {
+        "n": 729,
+        "n_ok": 729,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.2798189803128542,
+        "mean_iou_ci95": [
+          0.2690868068389724,
+          0.2904456875434725
+        ],
+        "failures": 729,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.914409087130952,
+          "p95": 75.62417084473147,
+          "p99": 89.20905244724538
+        },
+        "skew_deg": {
+          "p50": 13.912233453083045,
+          "p95": 41.325323517648464,
+          "p99": 45.13058489158074
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.914409087130952,
+          "p95": 75.62417084473147,
+          "p99": 89.20905244724538
+        },
+        "skew_deg_scored": {
+          "p50": 13.912233453083045,
+          "p95": 41.325323517648464,
+          "p99": 45.13058489158074
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 729,
+          "silent_failures": 729,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "background=stone": {
+      "n": 729,
+      "status": "gated",
+      "summary": {
+        "n": 729,
+        "n_ok": 729,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.261440215094697,
+        "mean_iou_ci95": [
+          0.2510928993426856,
+          0.2714755951638238
+        ],
+        "failures": 729,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.229839497689056,
+          "p95": 73.49115642537676,
+          "p99": 81.98005348274347
+        },
+        "skew_deg": {
+          "p50": 13.807290933166257,
+          "p95": 42.422453213422614,
+          "p99": 46.5000540060137
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.229839497689056,
+          "p95": 73.49115642537676,
+          "p99": 81.98005348274347
+        },
+        "skew_deg_scored": {
+          "p50": 13.807290933166257,
+          "p95": 42.422453213422614,
+          "p99": 46.5000540060137
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 729,
+          "silent_failures": 729,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "background=tile": {
+      "n": 624,
+      "status": "gated",
+      "summary": {
+        "n": 624,
+        "n_ok": 624,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.27937347583011213,
+        "mean_iou_ci95": [
+          0.2685894130750272,
+          0.29057406248653467
+        ],
+        "failures": 624,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.76927458269467,
+          "p95": 76.11839055008521,
+          "p99": 90.01822623459802
+        },
+        "skew_deg": {
+          "p50": 13.989740862547084,
+          "p95": 42.651328826516774,
+          "p99": 45.33033437459876
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.76927458269467,
+          "p95": 76.11839055008521,
+          "p99": 90.01822623459802
+        },
+        "skew_deg_scored": {
+          "p50": 13.989740862547084,
+          "p95": 42.651328826516774,
+          "p99": 45.33033437459876
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 624,
+          "silent_failures": 624,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "background=white-desk": {
+      "n": 831,
+      "status": "gated",
+      "summary": {
+        "n": 831,
+        "n_ok": 831,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.2851218567077691,
+        "mean_iou_ci95": [
+          0.2754371455997669,
+          0.2955715058895588
+        ],
+        "failures": 831,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.059869634455577,
+          "p95": 75.88716153662858,
+          "p99": 87.0472306335375
+        },
+        "skew_deg": {
+          "p50": 13.482214402223542,
+          "p95": 41.51245867266579,
+          "p99": 44.9707230785235
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.059869634455577,
+          "p95": 75.88716153662858,
+          "p99": 87.0472306335375
+        },
+        "skew_deg_scored": {
+          "p50": 13.482214402223542,
+          "p95": 41.51245867266579,
+          "p99": 44.9707230785235
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 831,
+          "silent_failures": 831,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "background=wood": {
+      "n": 831,
+      "status": "gated",
+      "summary": {
+        "n": 831,
+        "n_ok": 831,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.28124743969890614,
+        "mean_iou_ci95": [
+          0.272018031875939,
+          0.2906718237122119
+        ],
+        "failures": 831,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.299966775968517,
+          "p95": 76.86600560455267,
+          "p99": 85.84509862420917
+        },
+        "skew_deg": {
+          "p50": 14.70996371486342,
+          "p95": 41.269679119473444,
+          "p99": 44.58201550309593
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.299966775968517,
+          "p95": 76.86600560455267,
+          "p99": 85.84509862420917
+        },
+        "skew_deg_scored": {
+          "p50": 14.70996371486342,
+          "p95": 41.269679119473444,
+          "p99": 44.58201550309593
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 831,
+          "silent_failures": 831,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "blur=blurry": {
+      "n": 780,
+      "status": "gated",
+      "summary": {
+        "n": 780,
+        "n_ok": 780,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.27613886256022196,
+        "mean_iou_ci95": [
+          0.26635881771100806,
+          0.2865848809255528
+        ],
+        "failures": 780,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.26507497809677,
+          "p95": 75.33908138553166,
+          "p99": 86.5994933636796
+        },
+        "skew_deg": {
+          "p50": 13.414991393255583,
+          "p95": 42.6553373401523,
+          "p99": 45.361605702521764
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.26507497809677,
+          "p95": 75.33908138553166,
+          "p99": 86.5994933636796
+        },
+        "skew_deg_scored": {
+          "p50": 13.414991393255583,
+          "p95": 42.6553373401523,
+          "p99": 45.361605702521764
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 780,
+          "silent_failures": 780,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "blur=sharp": {
+      "n": 2860,
+      "status": "gated",
+      "summary": {
+        "n": 2860,
+        "n_ok": 2859,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 1,
+        "n_crashed": 0,
+        "mean_iou": 0.27984949197007847,
+        "mean_iou_ci95": [
+          0.2745699302253145,
+          0.28507089113624046
+        ],
+        "failures": 2860,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.275875036039352,
+          "p95": 75.78682014130011,
+          "p99": 87.03026022541087
+        },
+        "skew_deg": {
+          "p50": 13.734061931249471,
+          "p95": 41.761804272555715,
+          "p99": 44.9921554116738
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.2723178757271,
+          "p95": 75.76480280462447,
+          "p99": 86.71476177553654
+        },
+        "skew_deg_scored": {
+          "p50": 13.728657387619421,
+          "p95": 41.74599765605147,
+          "p99": 44.97281937570014
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 2860,
+          "silent_failures": 2860,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "blur=soft": {
+      "n": 1560,
+      "status": "gated",
+      "summary": {
+        "n": 1560,
+        "n_ok": 1560,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.27480079081311715,
+        "mean_iou_ci95": [
+          0.267989193271729,
+          0.28184489776190363
+        ],
+        "failures": 1560,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.46666369083661,
+          "p95": 76.13634179123864,
+          "p99": 90.95108847078106
+        },
+        "skew_deg": {
+          "p50": 14.132889563087081,
+          "p95": 41.31029451703883,
+          "p99": 44.49166682735417
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.46666369083661,
+          "p95": 76.13634179123864,
+          "p99": 90.95108847078106
+        },
+        "skew_deg_scored": {
+          "p50": 14.132889563087081,
+          "p95": 41.31029451703883,
+          "p99": 44.49166682735417
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 1560,
+          "silent_failures": 1560,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "clutter=heavy": {
+      "n": 1820,
+      "status": "gated",
+      "summary": {
+        "n": 1820,
+        "n_ok": 1819,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 1,
+        "n_crashed": 0,
+        "mean_iou": 0.2781423448615124,
+        "mean_iou_ci95": [
+          0.2714032949813592,
+          0.2847854697707013
+        ],
+        "failures": 1820,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.284645561804602,
+          "p95": 75.35741466655833,
+          "p99": 86.91862815119515
+        },
+        "skew_deg": {
+          "p50": 14.034712742539455,
+          "p95": 41.56334565914381,
+          "p99": 45.394575661605415
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.2723178757271,
+          "p95": 75.33042959053812,
+          "p99": 86.46102713643819
+        },
+        "skew_deg_scored": {
+          "p50": 14.026817300241532,
+          "p95": 41.48684675977221,
+          "p99": 45.28891731241967
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 1820,
+          "silent_failures": 1820,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "clutter=light": {
+      "n": 1820,
+      "status": "gated",
+      "summary": {
+        "n": 1820,
+        "n_ok": 1820,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.2760312702606828,
+        "mean_iou_ci95": [
+          0.26914818896873294,
+          0.2828248692759821
+        ],
+        "failures": 1820,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.548716578240676,
+          "p95": 74.76250126260392,
+          "p99": 87.09278704269323
+        },
+        "skew_deg": {
+          "p50": 14.016171899194488,
+          "p95": 41.94817550055307,
+          "p99": 44.99235172152061
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.548716578240676,
+          "p95": 74.76250126260392,
+          "p99": 87.09278704269323
+        },
+        "skew_deg_scored": {
+          "p50": 14.016171899194488,
+          "p95": 41.94817550055307,
+          "p99": 44.99235172152061
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 1820,
+          "silent_failures": 1820,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "clutter=none": {
+      "n": 1560,
+      "status": "gated",
+      "summary": {
+        "n": 1560,
+        "n_ok": 1560,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.2793917397291436,
+        "mean_iou_ci95": [
+          0.27271444120906224,
+          0.2867436438484906
+        ],
+        "failures": 1560,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.195489253567935,
+          "p95": 78.40807483927722,
+          "p99": 91.45008767358432
+        },
+        "skew_deg": {
+          "p50": 13.378991868090159,
+          "p95": 41.36559769091251,
+          "p99": 44.750288148073324
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.195489253567935,
+          "p95": 78.40807483927722,
+          "p99": 91.45008767358432
+        },
+        "skew_deg_scored": {
+          "p50": 13.378991868090159,
+          "p95": 41.36559769091251,
+          "p99": 44.750288148073324
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 1560,
+          "silent_failures": 1560,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "colorspace=display-p3": {
+      "n": 1144,
+      "status": "gated",
+      "summary": {
+        "n": 1144,
+        "n_ok": 1144,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.2790530206942051,
+        "mean_iou_ci95": [
+          0.2709710091556459,
+          0.2869701798119064
+        ],
+        "failures": 1144,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.327553666304826,
+          "p95": 76.34180780145684,
+          "p99": 89.01365443033548
+        },
+        "skew_deg": {
+          "p50": 13.621815287033115,
+          "p95": 40.94201355178418,
+          "p99": 44.97596472641173
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.327553666304826,
+          "p95": 76.34180780145684,
+          "p99": 89.01365443033548
+        },
+        "skew_deg_scored": {
+          "p50": 13.621815287033115,
+          "p95": 40.94201355178418,
+          "p99": 44.97596472641173
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 1144,
+          "silent_failures": 1144,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "colorspace=srgb": {
+      "n": 4056,
+      "status": "gated",
+      "summary": {
+        "n": 4056,
+        "n_ok": 4055,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 1,
+        "n_crashed": 0,
+        "mean_iou": 0.2774187469984443,
+        "mean_iou_ci95": [
+          0.27311019944884024,
+          0.28194640220548955
+        ],
+        "failures": 4056,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.36525263951821,
+          "p95": 75.76825904404294,
+          "p99": 87.57550297060331
+        },
+        "skew_deg": {
+          "p50": 13.943173650572732,
+          "p95": 41.84171510473135,
+          "p99": 45.065079267491775
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.364279609245532,
+          "p95": 75.74498649290854,
+          "p99": 87.47637720371824
+        },
+        "skew_deg_scored": {
+          "p50": 13.940139749380592,
+          "p95": 41.78471509735822,
+          "p99": 45.02219813840723
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 4056,
+          "silent_failures": 4056,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "curl=curled": {
+      "n": 520,
+      "status": "gated",
+      "summary": {
+        "n": 520,
+        "n_ok": 519,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 1,
+        "n_crashed": 0,
+        "mean_iou": 0.27347785021375165,
+        "mean_iou_ci95": [
+          0.261130768102933,
+          0.2861076430957553
+        ],
+        "failures": 520,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.870048622880503,
+          "p95": 72.8353800656914,
+          "p99": 85.44864847700089
+        },
+        "skew_deg": {
+          "p50": 13.85970103821345,
+          "p95": 41.36957098171002,
+          "p99": 45.024404102977726
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.830757443166885,
+          "p95": 72.57747302214189,
+          "p99": 84.35112036062701
+        },
+        "skew_deg_scored": {
+          "p50": 13.84587785209942,
+          "p95": 41.31525077819708,
+          "p99": 44.85631228104449
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 520,
+          "silent_failures": 520,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "curl=flat": {
+      "n": 4680,
+      "status": "gated",
+      "summary": {
+        "n": 4680,
+        "n_ok": 4680,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.2782561135445959,
+        "mean_iou_ci95": [
+          0.27424779084114026,
+          0.28258037402049824
+        ],
+        "failures": 4680,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.28034834090121,
+          "p95": 76.0423408182531,
+          "p99": 88.3918527440671
+        },
+        "skew_deg": {
+          "p50": 13.81332308042543,
+          "p95": 41.69358680788537,
+          "p99": 44.99833445001471
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.28034834090121,
+          "p95": 76.0423408182531,
+          "p99": 88.3918527440671
+        },
+        "skew_deg_scored": {
+          "p50": 13.81332308042543,
+          "p95": 41.69358680788537,
+          "p99": 44.99833445001471
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 4680,
+          "silent_failures": 4680,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "exif=1": {
+      "n": 1768,
+      "status": "gated",
+      "summary": {
+        "n": 1768,
+        "n_ok": 1768,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.2729867683630271,
+        "mean_iou_ci95": [
+          0.2662706518224226,
+          0.27984900162292314
+        ],
+        "failures": 1768,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.260964735388406,
+          "p95": 75.6833684443154,
+          "p99": 86.39983932310768
+        },
+        "skew_deg": {
+          "p50": 13.681256889639883,
+          "p95": 41.72201540345207,
+          "p99": 44.70927342884537
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.260964735388406,
+          "p95": 75.6833684443154,
+          "p99": 86.39983932310768
+        },
+        "skew_deg_scored": {
+          "p50": 13.681256889639883,
+          "p95": 41.72201540345207,
+          "p99": 44.70927342884537
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 1768,
+          "silent_failures": 1768,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "exif=2": {
+      "n": 491,
+      "status": "gated",
+      "summary": {
+        "n": 491,
+        "n_ok": 491,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.2969764214791028,
+        "mean_iou_ci95": [
+          0.28368036916692124,
+          0.31048759910387685
+        ],
+        "failures": 491,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.216522901900507,
+          "p95": 74.64052789494977,
+          "p99": 100.43164443534299
+        },
+        "skew_deg": {
+          "p50": 13.689093035553212,
+          "p95": 42.209413564879725,
+          "p99": 46.37598544844867
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.216522901900507,
+          "p95": 74.64052789494977,
+          "p99": 100.43164443534299
+        },
+        "skew_deg_scored": {
+          "p50": 13.689093035553212,
+          "p95": 42.209413564879725,
+          "p99": 46.37598544844867
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 491,
+          "silent_failures": 491,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "exif=3": {
+      "n": 491,
+      "status": "gated",
+      "summary": {
+        "n": 491,
+        "n_ok": 490,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 1,
+        "n_crashed": 0,
+        "mean_iou": 0.27288063019233005,
+        "mean_iou_ci95": [
+          0.2600573835915177,
+          0.2858565268306152
+        ],
+        "failures": 491,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 25.643446582509842,
+          "p95": 73.97147886806441,
+          "p99": 87.30790715201914
+        },
+        "skew_deg": {
+          "p50": 14.042608184837377,
+          "p95": 40.56090567418868,
+          "p99": 45.54743701579893
+        },
+        "corner_err_pct_scored": {
+          "p50": 25.641309141448914,
+          "p95": 73.17420108012406,
+          "p99": 84.69676041029867
+        },
+        "skew_deg_scored": {
+          "p50": 14.040189539173497,
+          "p95": 40.24904084717279,
+          "p99": 45.35760386994785
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 491,
+          "silent_failures": 491,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "exif=4": {
+      "n": 490,
+      "status": "gated",
+      "summary": {
+        "n": 490,
+        "n_ok": 490,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.2711255001475756,
+        "mean_iou_ci95": [
+          0.2593806356587075,
+          0.2833135250698107
+        ],
+        "failures": 490,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 25.94364635563688,
+          "p95": 75.68875224868275,
+          "p99": 88.7019596199137
+        },
+        "skew_deg": {
+          "p50": 13.790765781589958,
+          "p95": 40.97598190417774,
+          "p99": 44.39671349975972
+        },
+        "corner_err_pct_scored": {
+          "p50": 25.94364635563688,
+          "p95": 75.68875224868275,
+          "p99": 88.7019596199137
+        },
+        "skew_deg_scored": {
+          "p50": 13.790765781589958,
+          "p95": 40.97598190417774,
+          "p99": 44.39671349975972
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 490,
+          "silent_failures": 490,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "exif=5": {
+      "n": 490,
+      "status": "gated",
+      "summary": {
+        "n": 490,
+        "n_ok": 490,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.27577373410201744,
+        "mean_iou_ci95": [
+          0.2635990493244212,
+          0.2883259181563876
+        ],
+        "failures": 490,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.611554163683124,
+          "p95": 75.72051926969225,
+          "p99": 85.63222494378037
+        },
+        "skew_deg": {
+          "p50": 13.85372726598084,
+          "p95": 42.253891828058144,
+          "p99": 46.15380489562904
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.611554163683124,
+          "p95": 75.72051926969225,
+          "p99": 85.63222494378037
+        },
+        "skew_deg_scored": {
+          "p50": 13.85372726598084,
+          "p95": 42.253891828058144,
+          "p99": 46.15380489562904
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 490,
+          "silent_failures": 490,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "exif=6": {
+      "n": 490,
+      "status": "gated",
+      "summary": {
+        "n": 490,
+        "n_ok": 490,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.28113912734440566,
+        "mean_iou_ci95": [
+          0.2682044571438435,
+          0.29451248401898616
+        ],
+        "failures": 490,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.585178980364326,
+          "p95": 79.03208401348896,
+          "p99": 89.69496529374949
+        },
+        "skew_deg": {
+          "p50": 14.303876106297249,
+          "p95": 41.861920000499694,
+          "p99": 44.57980383979793
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.585178980364326,
+          "p95": 79.03208401348896,
+          "p99": 89.69496529374949
+        },
+        "skew_deg_scored": {
+          "p50": 14.303876106297249,
+          "p95": 41.861920000499694,
+          "p99": 44.57980383979793
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 490,
+          "silent_failures": 490,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "exif=7": {
+      "n": 490,
+      "status": "gated",
+      "summary": {
+        "n": 490,
+        "n_ok": 490,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.2698391791949446,
+        "mean_iou_ci95": [
+          0.2571711756352877,
+          0.2820252559972121
+        ],
+        "failures": 490,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.911632014267415,
+          "p95": 75.22358260707361,
+          "p99": 85.27269042977035
+        },
+        "skew_deg": {
+          "p50": 13.272704009741197,
+          "p95": 41.27233442452894,
+          "p99": 44.42801126750187
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.911632014267415,
+          "p95": 75.22358260707361,
+          "p99": 85.27269042977035
+        },
+        "skew_deg_scored": {
+          "p50": 13.272704009741197,
+          "p95": 41.27233442452894,
+          "p99": 44.42801126750187
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 490,
+          "silent_failures": 490,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "exif=8": {
+      "n": 490,
+      "status": "gated",
+      "summary": {
+        "n": 490,
+        "n_ok": 490,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.293972815666883,
+        "mean_iou_ci95": [
+          0.28058327288681556,
+          0.30890984775768365
+        ],
+        "failures": 490,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.92488313247322,
+          "p95": 75.22661697984955,
+          "p99": 85.51169327654404
+        },
+        "skew_deg": {
+          "p50": 13.990120903870782,
+          "p95": 41.689728820581905,
+          "p99": 45.788283251711306
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.92488313247322,
+          "p95": 75.22661697984955,
+          "p99": 85.51169327654404
+        },
+        "skew_deg_scored": {
+          "p50": 13.990120903870782,
+          "p95": 41.689728820581905,
+          "p99": 45.788283251711306
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 490,
+          "silent_failures": 490,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "format=jpeg": {
+      "n": 2860,
+      "status": "gated",
+      "summary": {
+        "n": 2860,
+        "n_ok": 2859,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 1,
+        "n_crashed": 0,
+        "mean_iou": 0.2742571005134426,
+        "mean_iou_ci95": [
+          0.2689563148826278,
+          0.27966751225163267
+        ],
+        "failures": 2860,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.52861479601115,
+          "p95": 75.24148703183393,
+          "p99": 87.03026022541087
+        },
+        "skew_deg": {
+          "p50": 13.836323055782007,
+          "p95": 41.635244793566585,
+          "p99": 44.839896989655024
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.525747131559516,
+          "p95": 75.21630113286874,
+          "p99": 86.61486461664782
+        },
+        "skew_deg_scored": {
+          "p50": 13.830581023263619,
+          "p95": 41.61250438744728,
+          "p99": 44.815627030090354
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 2860,
+          "silent_failures": 2860,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "format=png": {
+      "n": 520,
+      "status": "gated",
+      "summary": {
+        "n": 520,
+        "n_ok": 520,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.2966912677153777,
+        "mean_iou_ci95": [
+          0.28563465074361644,
+          0.3089281793910795
+        ],
+        "failures": 520,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 25.22090418172431,
+          "p95": 75.22963906897054,
+          "p99": 85.69638183072311
+        },
+        "skew_deg": {
+          "p50": 12.274408721773597,
+          "p95": 40.355115391725604,
+          "p99": 45.12128909112785
+        },
+        "corner_err_pct_scored": {
+          "p50": 25.22090418172431,
+          "p95": 75.22963906897054,
+          "p99": 85.69638183072311
+        },
+        "skew_deg_scored": {
+          "p50": 12.274408721773597,
+          "p95": 40.355115391725604,
+          "p99": 45.12128909112785
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 520,
+          "silent_failures": 520,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "format=tiff": {
+      "n": 520,
+      "status": "gated",
+      "summary": {
+        "n": 520,
+        "n_ok": 520,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.2820902368924096,
+        "mean_iou_ci95": [
+          0.26926099464867487,
+          0.2956262853125292
+        ],
+        "failures": 520,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.82620103629545,
+          "p95": 78.93890357743713,
+          "p99": 98.22487657344689
+        },
+        "skew_deg": {
+          "p50": 14.36358502899151,
+          "p95": 42.89974976333131,
+          "p99": 46.80308518927281
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.82620103629545,
+          "p95": 78.93890357743713,
+          "p99": 98.22487657344689
+        },
+        "skew_deg_scored": {
+          "p50": 14.36358502899151,
+          "p95": 42.89974976333131,
+          "p99": 46.80308518927281
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 520,
+          "silent_failures": 520,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "format=webp": {
+      "n": 1300,
+      "status": "gated",
+      "summary": {
+        "n": 1300,
+        "n_ok": 1300,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.2762349258733584,
+        "mean_iou_ci95": [
+          0.2685396272221419,
+          0.28356439079083595
+        ],
+        "failures": 1300,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.36032479565106,
+          "p95": 75.82827733503808,
+          "p99": 87.6694131228805
+        },
+        "skew_deg": {
+          "p50": 14.369298046648339,
+          "p95": 41.25729552144797,
+          "p99": 45.00281812123955
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.36032479565106,
+          "p95": 75.82827733503808,
+          "p99": 87.6694131228805
+        },
+        "skew_deg_scored": {
+          "p50": 14.369298046648339,
+          "p95": 41.25729552144797,
+          "p99": 45.00281812123955
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 1300,
+          "silent_failures": 1300,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "framing=full": {
+      "n": 4576,
+      "status": "gated",
+      "summary": {
+        "n": 4576,
+        "n_ok": 4575,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 1,
+        "n_crashed": 0,
+        "mean_iou": 0.2534683583461751,
+        "mean_iou_ci95": [
+          0.24980973747654636,
+          0.25701771679405816
+        ],
+        "failures": 4576,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.627670980297655,
+          "p95": 74.59252484614117,
+          "p99": 83.54967103798626
+        },
+        "skew_deg": {
+          "p50": 13.777020876915827,
+          "p95": 41.72946764598424,
+          "p99": 45.20284528533203
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.62729784533773,
+          "p95": 74.50034549655727,
+          "p99": 83.3734733561468
+        },
+        "skew_deg_scored": {
+          "p50": 13.777017207527308,
+          "p95": 41.719537796175466,
+          "p99": 45.10671788346003
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 4576,
+          "silent_failures": 4576,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "framing=partial": {
+      "n": 624,
+      "status": "gated",
+      "summary": {
+        "n": 624,
+        "n_ok": 624,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.45605109889064466,
+        "mean_iou_ci95": [
+          0.44344662852453476,
+          0.4685563323748483
+        ],
+        "failures": 624,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 24.119197163272254,
+          "p95": 94.33505574998067,
+          "p99": 102.67420935546312
+        },
+        "skew_deg": {
+          "p50": 14.011827293787007,
+          "p95": 41.31734458428535,
+          "p99": 44.40221590112247
+        },
+        "corner_err_pct_scored": {
+          "p50": 24.119197163272254,
+          "p95": 94.33505574998067,
+          "p99": 102.67420935546312
+        },
+        "skew_deg_scored": {
+          "p50": 14.011827293787007,
+          "p95": 41.31734458428535,
+          "p99": 44.40221590112247
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 624,
+          "silent_failures": 624,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "ink=faded": {
+      "n": 1404,
+      "status": "gated",
+      "summary": {
+        "n": 1404,
+        "n_ok": 1404,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.2258487309885346,
+        "mean_iou_ci95": [
+          0.21958312448078685,
+          0.23223832942943623
+        ],
+        "failures": 1404,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 25.963775847538535,
+          "p95": 76.74610171941274,
+          "p99": 86.3043267119872
+        },
+        "skew_deg": {
+          "p50": 12.925350895236868,
+          "p95": 41.687950845355786,
+          "p99": 45.0500345587161
+        },
+        "corner_err_pct_scored": {
+          "p50": 25.963775847538535,
+          "p95": 76.74610171941274,
+          "p99": 86.3043267119872
+        },
+        "skew_deg_scored": {
+          "p50": 12.925350895236868,
+          "p95": 41.687950845355786,
+          "p99": 45.0500345587161
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 1404,
+          "silent_failures": 1404,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "ink=normal": {
+      "n": 3796,
+      "status": "gated",
+      "summary": {
+        "n": 3796,
+        "n_ok": 3795,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 1,
+        "n_crashed": 0,
+        "mean_iou": 0.29698510937617456,
+        "mean_iou_ci95": [
+          0.29221864668649516,
+          0.301853917638959
+        ],
+        "failures": 3796,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.51361244489462,
+          "p95": 75.55011914857599,
+          "p99": 88.8337955583884
+        },
+        "skew_deg": {
+          "p50": 14.09927727282686,
+          "p95": 41.61138546677759,
+          "p99": 44.985593965349466
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.508074924098747,
+          "p95": 75.54956458388898,
+          "p99": 88.30880025857954
+        },
+        "skew_deg_scored": {
+          "p50": 14.094262862420619,
+          "p95": 41.60707718086824,
+          "p99": 44.965270533992324
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 3796,
+          "silent_failures": 3796,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "lighting=colour-cast": {
+      "n": 832,
+      "status": "gated",
+      "summary": {
+        "n": 832,
+        "n_ok": 832,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.27645466061925844,
+        "mean_iou_ci95": [
+          0.26676684075579543,
+          0.287279809833486
+        ],
+        "failures": 832,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.893311085798175,
+          "p95": 76.1516783443597,
+          "p99": 88.62350622191889
+        },
+        "skew_deg": {
+          "p50": 14.47564403234907,
+          "p95": 41.22960732519197,
+          "p99": 44.812688614854665
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.893311085798175,
+          "p95": 76.1516783443597,
+          "p99": 88.62350622191889
+        },
+        "skew_deg_scored": {
+          "p50": 14.47564403234907,
+          "p95": 41.22960732519197,
+          "p99": 44.812688614854665
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 832,
+          "silent_failures": 832,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "lighting=dim": {
+      "n": 832,
+      "status": "gated",
+      "summary": {
+        "n": 832,
+        "n_ok": 831,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 1,
+        "n_crashed": 0,
+        "mean_iou": 0.2823804624053889,
+        "mean_iou_ci95": [
+          0.272398657180576,
+          0.2934394739330254
+        ],
+        "failures": 832,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.25934336296043,
+          "p95": 78.28750299053014,
+          "p99": 86.69913334971541
+        },
+        "skew_deg": {
+          "p50": 13.57257160165157,
+          "p95": 42.38733262179546,
+          "p99": 46.30277568820194
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.24636885019376,
+          "p95": 78.07964539905905,
+          "p99": 85.896721818358
+        },
+        "skew_deg_scored": {
+          "p50": 13.516938186307886,
+          "p95": 42.15883095288116,
+          "p99": 45.88263807703362
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 832,
+          "silent_failures": 832,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "lighting=harsh-shadow": {
+      "n": 936,
+      "status": "gated",
+      "summary": {
+        "n": 936,
+        "n_ok": 936,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.27647549636158875,
+        "mean_iou_ci95": [
+          0.267303566888609,
+          0.2856529020274786
+        ],
+        "failures": 936,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.025543911624993,
+          "p95": 75.55619256407113,
+          "p99": 89.4938895117815
+        },
+        "skew_deg": {
+          "p50": 13.356512283140113,
+          "p95": 41.45005412192047,
+          "p99": 44.56252928174157
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.025543911624993,
+          "p95": 75.55619256407113,
+          "p99": 89.4938895117815
+        },
+        "skew_deg_scored": {
+          "p50": 13.356512283140113,
+          "p95": 41.45005412192047,
+          "p99": 44.56252928174157
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 936,
+          "silent_failures": 936,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "lighting=low-contrast": {
+      "n": 832,
+      "status": "gated",
+      "summary": {
+        "n": 832,
+        "n_ok": 832,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.276758956569951,
+        "mean_iou_ci95": [
+          0.26743606994042063,
+          0.2874971730560863
+        ],
+        "failures": 832,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.330078044947427,
+          "p95": 74.17866409526273,
+          "p99": 87.61696380945965
+        },
+        "skew_deg": {
+          "p50": 13.115318061512,
+          "p95": 40.92704843992085,
+          "p99": 44.58145410236352
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.330078044947427,
+          "p95": 74.17866409526273,
+          "p99": 87.61696380945965
+        },
+        "skew_deg_scored": {
+          "p50": 13.115318061512,
+          "p95": 40.92704843992085,
+          "p99": 44.58145410236352
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 832,
+          "silent_failures": 832,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "lighting=normal": {
+      "n": 1768,
+      "status": "gated",
+      "summary": {
+        "n": 1768,
+        "n_ok": 1768,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.2774048386214404,
+        "mean_iou_ci95": [
+          0.2710901782371519,
+          0.2841237806265093
+        ],
+        "failures": 1768,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.28911886666646,
+          "p95": 75.52368273343393,
+          "p99": 86.30671692583309
+        },
+        "skew_deg": {
+          "p50": 14.145908256028946,
+          "p95": 42.02029858557258,
+          "p99": 44.992885069102414
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.28911886666646,
+          "p95": 75.52368273343393,
+          "p99": 86.30671692583309
+        },
+        "skew_deg_scored": {
+          "p50": 14.145908256028946,
+          "p95": 42.02029858557258,
+          "p99": 44.992885069102414
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 1768,
+          "silent_failures": 1768,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "noise=high": {
+      "n": 1040,
+      "status": "gated",
+      "summary": {
+        "n": 1040,
+        "n_ok": 1040,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.27414872575081123,
+        "mean_iou_ci95": [
+          0.26565940418659356,
+          0.28326623805561685
+        ],
+        "failures": 1040,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.492755549689672,
+          "p95": 75.21279230954592,
+          "p99": 87.32677450386255
+        },
+        "skew_deg": {
+          "p50": 14.281517620053137,
+          "p95": 42.11458590098646,
+          "p99": 45.189272896040066
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.492755549689672,
+          "p95": 75.21279230954592,
+          "p99": 87.32677450386255
+        },
+        "skew_deg_scored": {
+          "p50": 14.281517620053137,
+          "p95": 42.11458590098646,
+          "p99": 45.189272896040066
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 1040,
+          "silent_failures": 1040,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "noise=low": {
+      "n": 2600,
+      "status": "gated",
+      "summary": {
+        "n": 2600,
+        "n_ok": 2600,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.27836824701995866,
+        "mean_iou_ci95": [
+          0.27286658217170623,
+          0.2838116339530183
+        ],
+        "failures": 2600,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.334247443523324,
+          "p95": 75.95449626537442,
+          "p99": 88.28111609675027
+        },
+        "skew_deg": {
+          "p50": 13.512063893838839,
+          "p95": 41.74519460390119,
+          "p99": 44.96434459713469
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.334247443523324,
+          "p95": 75.95449626537442,
+          "p99": 88.28111609675027
+        },
+        "skew_deg_scored": {
+          "p50": 13.512063893838839,
+          "p95": 41.74519460390119,
+          "p99": 44.96434459713469
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 2600,
+          "silent_failures": 2600,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "noise=medium": {
+      "n": 1560,
+      "status": "gated",
+      "summary": {
+        "n": 1560,
+        "n_ok": 1559,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 1,
+        "n_crashed": 0,
+        "mean_iou": 0.2792147285045659,
+        "mean_iou_ci95": [
+          0.27185038388812294,
+          0.28640284228604196
+        ],
+        "failures": 1560,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.254857635534268,
+          "p95": 76.02067815648894,
+          "p99": 87.55309969945733
+        },
+        "skew_deg": {
+          "p50": 13.977319638625467,
+          "p95": 41.302735699210324,
+          "p99": 44.9921554116738
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.248885470742728,
+          "p95": 75.76475091996087,
+          "p99": 87.09282979104385
+        },
+        "skew_deg_scored": {
+          "p50": 13.969791092850357,
+          "p95": 41.28942835907258,
+          "p99": 44.757508266577304
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 1560,
+          "silent_failures": 1560,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "paper=coloured": {
+      "n": 1041,
+      "status": "gated",
+      "summary": {
+        "n": 1041,
+        "n_ok": 1041,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.27625865365800073,
+        "mean_iou_ci95": [
+          0.2672420820735665,
+          0.28542995286019474
+        ],
+        "failures": 1041,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 25.893430722229258,
+          "p95": 74.5850829496769,
+          "p99": 85.72841479840652
+        },
+        "skew_deg": {
+          "p50": 13.41417411643202,
+          "p95": 41.269631549213386,
+          "p99": 45.36833194024885
+        },
+        "corner_err_pct_scored": {
+          "p50": 25.893430722229258,
+          "p95": 74.5850829496769,
+          "p99": 85.72841479840652
+        },
+        "skew_deg_scored": {
+          "p50": 13.41417411643202,
+          "p95": 41.269631549213386,
+          "p99": 45.36833194024885
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 1041,
+          "silent_failures": 1041,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "paper=cream": {
+      "n": 1041,
+      "status": "gated",
+      "summary": {
+        "n": 1041,
+        "n_ok": 1041,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.27430785471362507,
+        "mean_iou_ci95": [
+          0.26552350465768615,
+          0.2831947496683871
+        ],
+        "failures": 1041,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.745637530239247,
+          "p95": 77.06308820500251,
+          "p99": 89.16240445163562
+        },
+        "skew_deg": {
+          "p50": 14.077538163654463,
+          "p95": 41.3650558131348,
+          "p99": 44.66950913406996
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.745637530239247,
+          "p95": 77.06308820500251,
+          "p99": 89.16240445163562
+        },
+        "skew_deg_scored": {
+          "p50": 14.077538163654463,
+          "p95": 41.3650558131348,
+          "p99": 44.66950913406996
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 1041,
+          "silent_failures": 1041,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "paper=white": {
+      "n": 3118,
+      "status": "gated",
+      "summary": {
+        "n": 3118,
+        "n_ok": 3117,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 1,
+        "n_crashed": 0,
+        "mean_iou": 0.27944430990538766,
+        "mean_iou_ci95": [
+          0.274629490222609,
+          0.28477188258268676
+        ],
+        "failures": 3118,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.385565205929606,
+          "p95": 76.04367519708029,
+          "p99": 87.64038149285052
+        },
+        "skew_deg": {
+          "p50": 13.832109784936108,
+          "p95": 41.91376712151219,
+          "p99": 45.24408747678141
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.384143007483992,
+          "p95": 75.97888258882732,
+          "p99": 87.49206693780177
+        },
+        "skew_deg_scored": {
+          "p50": 13.830581023263619,
+          "p95": 41.8841191493903,
+          "p99": 45.06899911255163
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 3118,
+          "silent_failures": 3118,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "rotation=any": {
+      "n": 1040,
+      "status": "gated",
+      "summary": {
+        "n": 1040,
+        "n_ok": 1040,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.26060221369334824,
+        "mean_iou_ci95": [
+          0.25249679732352714,
+          0.2693306993145608
+        ],
+        "failures": 1040,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 65.82769739659958,
+          "p95": 87.87731704370539,
+          "p99": 100.96836848862812
+        },
+        "skew_deg": {
+          "p50": 21.35381165933606,
+          "p95": 42.44276806167129,
+          "p99": 45.84314279174689
+        },
+        "corner_err_pct_scored": {
+          "p50": 65.82769739659958,
+          "p95": 87.87731704370539,
+          "p99": 100.96836848862812
+        },
+        "skew_deg_scored": {
+          "p50": 21.35381165933606,
+          "p95": 42.44276806167129,
+          "p99": 45.84314279174689
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 1040,
+          "silent_failures": 1040,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "rotation=tilted": {
+      "n": 1560,
+      "status": "gated",
+      "summary": {
+        "n": 1560,
+        "n_ok": 1559,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 1,
+        "n_crashed": 0,
+        "mean_iou": 0.23351858111368207,
+        "mean_iou_ci95": [
+          0.22772293103494756,
+          0.23933115267824204
+        ],
+        "failures": 1560,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 30.925649662084624,
+          "p95": 38.2079663367548,
+          "p99": 39.546783811612485
+        },
+        "skew_deg": {
+          "p50": 29.60544769776846,
+          "p95": 44.04789482527455,
+          "p99": 47.21173228372749
+        },
+        "corner_err_pct_scored": {
+          "p50": 30.91837167386301,
+          "p95": 38.181193972867916,
+          "p99": 39.53886404592017
+        },
+        "skew_deg_scored": {
+          "p50": 29.597919469777935,
+          "p95": 44.04745120500921,
+          "p99": 47.028223089777185
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 1560,
+          "silent_failures": 1560,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "rotation=upright": {
+      "n": 2600,
+      "status": "gated",
+      "summary": {
+        "n": 2600,
+        "n_ok": 2600,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.31120454027747474,
+        "mean_iou_ci95": [
+          0.30514707104059263,
+          0.31714704911575
+        ],
+        "failures": 2600,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 21.266804456237708,
+          "p95": 28.209902578417022,
+          "p99": 30.100992760313797
+        },
+        "skew_deg": {
+          "p50": 7.812132051572488,
+          "p95": 17.67552244211967,
+          "p99": 22.88509855342957
+        },
+        "corner_err_pct_scored": {
+          "p50": 21.266804456237708,
+          "p95": 28.209902578417022,
+          "p99": 30.100992760313797
+        },
+        "skew_deg_scored": {
+          "p50": 7.812132051572488,
+          "p95": 17.67552244211967,
+          "p99": 22.88509855342957
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 2600,
+          "silent_failures": 2600,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "tilt=0-10": {
+      "n": 1768,
+      "status": "gated",
+      "summary": {
+        "n": 1768,
+        "n_ok": 1768,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.2879331642688167,
+        "mean_iou_ci95": [
+          0.28123172295092513,
+          0.29486091567013534
+        ],
+        "failures": 1768,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 25.896703999283936,
+          "p95": 75.67902236987373,
+          "p99": 89.26537407073727
+        },
+        "skew_deg": {
+          "p50": 13.342641809511854,
+          "p95": 41.41295727436216,
+          "p99": 43.96114014996353
+        },
+        "corner_err_pct_scored": {
+          "p50": 25.896703999283936,
+          "p95": 75.67902236987373,
+          "p99": 89.26537407073727
+        },
+        "skew_deg_scored": {
+          "p50": 13.342641809511854,
+          "p95": 41.41295727436216,
+          "p99": 43.96114014996353
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 1768,
+          "silent_failures": 1768,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "tilt=10-30": {
+      "n": 1716,
+      "status": "gated",
+      "summary": {
+        "n": 1716,
+        "n_ok": 1716,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 0,
+        "n_crashed": 0,
+        "mean_iou": 0.2783385185148394,
+        "mean_iou_ci95": [
+          0.27155461331418007,
+          0.285199967894678
+        ],
+        "failures": 1716,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.658593924555646,
+          "p95": 75.97284939452499,
+          "p99": 87.88578817621996
+        },
+        "skew_deg": {
+          "p50": 13.519660694750115,
+          "p95": 41.61608815785672,
+          "p99": 44.969156587620546
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.658593924555646,
+          "p95": 75.97284939452499,
+          "p99": 87.88578817621996
+        },
+        "skew_deg_scored": {
+          "p50": 13.519660694750115,
+          "p95": 41.61608815785672,
+          "p99": 44.969156587620546
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 1716,
+          "silent_failures": 1716,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    },
+    "tilt=30-45": {
+      "n": 1716,
+      "status": "gated",
+      "summary": {
+        "n": 1716,
+        "n_ok": 1715,
+        "n_no_quad": 0,
+        "n_missing": 0,
+        "n_invalid": 1,
+        "n_crashed": 0,
+        "mean_iou": 0.26675545530368694,
+        "mean_iou_ci95": [
+          0.2600380974284726,
+          0.27349227105062973
+        ],
+        "failures": 1716,
+        "failure_rate": 1.0,
+        "success_95": 0.0,
+        "success_98": 0.0,
+        "corner_err_pct": {
+          "p50": 26.43252817785262,
+          "p95": 75.93645677995215,
+          "p99": 87.24595260452315
+        },
+        "skew_deg": {
+          "p50": 14.9519068263952,
+          "p95": 42.01139186215822,
+          "p99": 47.11340081329633
+        },
+        "corner_err_pct_scored": {
+          "p50": 26.428905907332812,
+          "p95": 75.80634677020758,
+          "p99": 87.10060289485352
+        },
+        "skew_deg_scored": {
+          "p50": 14.95105367907939,
+          "p95": 41.95287907194714,
+          "p99": 47.01753363578683
+        },
+        "orientation": {
+          "upright": 0,
+          "rot90": 0,
+          "rot180": 0,
+          "rot270": 0,
+          "mirrored": 0
+        },
+        "accepted": {
+          "n": 1716,
+          "silent_failures": 1716,
+          "risk": 1.0,
+          "risk_ub95": 1.0,
+          "silent_over_all": 1.0,
+          "flag_rate": 0.0,
+          "flagged_fine_share": null
+        }
+      }
+    }
+  },
+  "worst_slice": {
+    "by_mean_iou": {
+      "key": "aspect=strip",
+      "n": 468,
+      "status": "gated",
+      "value": 0.10802034459727483
+    },
+    "by_failure_rate": {
+      "key": "aspect=document",
+      "n": 2082,
+      "status": "gated",
+      "value": 1.0
+    }
+  },
+  "calibration": null,
+  "suppressed_slice_count": 0
+}
