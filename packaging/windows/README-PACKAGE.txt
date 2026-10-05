@@ -2,8 +2,8 @@ Auto Crop @VERSION@ - Windows x64 build with HEIC, HEIF and AVIF input
 =====================================================================
 
 Built by CI from commit @COMMIT@ of https://github.com/WelFedTed/auto-crop
-(workflow "Package Windows"). This is a PRIVATE TEST BUILD for the owner's own use.
-It is not a release and has not been signed.
+(workflow "Package Windows"). This is an early PRE-RELEASE test build, published on the Releases page
+when it carries a version tag; it has not been signed and is for people who accept that.
 
 WHAT IS IN THE FOLDER
 ---------------------

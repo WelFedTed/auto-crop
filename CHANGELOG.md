@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The package README no longer calls itself a private build once it is published as a pre-release.
+
 ## 0.0.2 (2026-10-05), pre-release, Windows only
 
 A second early test build. Like 0.0.1 it is **not** the CLI-only v0.1.0 of [ROADMAP.md](ROADMAP.md)
