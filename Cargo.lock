@@ -274,7 +274,7 @@ dependencies = [
 
 [[package]]
 name = "auto-crop-infer"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "ort",
  "rten",
