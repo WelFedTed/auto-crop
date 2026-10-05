@@ -86,7 +86,17 @@ Host and conditions: LUNCHBOX (i7-8700K, 6C/12T, Windows 11), release profile (L
 - ort and rten agree on the net output to **3.9e-7** (bar 1e-3; ADR-0007 measured 5e-7); the output is identical at 1 and 4 threads on both. Tests: `cargo test -p auto-crop-infer --features ort,rten`.
 - Canny + contours is the slowest stand-in (2.4-3.3x of the p95 ceiling on this loaded host; not profiled); it is a crude page finder and is not a candidate for the shipped analysis, only a cost reference for edge-plus-contour work.
 - Full pipeline, 12 MP, all threads, 20 runs (NOISY, 28-35% other load): `--analyse standin-net` (ort, 4 threads) `analyse` p50 **4.5** ms, p95 5.9 ms; `--analyse standin-canny` p50 **61.9** ms, p95 70.6 ms (1.55x: flagged REDESIGN by the harness's rule, for a stand-in that is not shipped). With the net stand-in the corners are noise, the full frame is rectified (4000x3000 output) and the downstream rows are not comparable with a cropped run: only the `analyse` row is meaningful there. Stage-sum check passes (0.8-0.9% glue).
-- Not measured here: Linux and macOS numbers (the `Analysis stand-ins` workflow prints the same table on all three OSes into its step summary, NOISY shared runners), the int8 net, GPU providers, a loaded-machine-free Tier-M run (M1.61).
+- **CI runners, same harness** ([run 37302478255](https://github.com/WelFedTed/auto-crop/actions/runs/37302478255), shared runners, so NOISY and not a Tier-M figure; STAND-IN), 12 MP source, 20 runs, p50 / p95 ms of the net analysis stage (inference only in brackets):
+
+  | Runner | ort 1 thread | ort 4 threads | rten 1 thread | rten 4 threads | ort vs rten max abs diff |
+  |---|---|---|---|---|---|
+  | ubuntu-22.04 | 3.8 / 3.9 (2.5 / 2.5) | 4.0 / 4.5 (1.7 / 1.7) | 12.2 / 12.5 (10.3 / 10.4) | 6.4 / 6.5 (5.6 / 5.9) | 4.8e-7 |
+  | macos-latest (arm64) | 10.9 / 12.5 (9.5 / 9.6) | 13.0 / 25.6 (8.3 / 11.5) | 13.3 / 13.5 (11.9 / 12.1) | 6.9 / 7.7 (6.3 / 6.4) | 3.6e-7 |
+  | windows-2025 | 9.6 / 9.9 (7.2 / 7.2) | 12.6 / 29.0 (5.3 / 12.3) | (inference only 19.1 / 20.0) | 14.8 / 16.4 (13.0 / 14.7) | 3.9e-7 |
+  | macos-26-intel (best-effort, rten only) | n/a | n/a | 24.0 / 25.1 (21.4 / 22.1) | 14.3 / 16.0 (12.6 / 14.6) | n/a |
+
+  The classical detector on the same proxy: 21.7 / 22.3 ms (ubuntu, 1 thread), 40.3 / 40.9 (windows, 1 thread), 46.0 / 46.8 (Intel Mac, 1 thread); Canny + contours 34.4 / 35.6 (ubuntu), 57.9 / 59.1 (windows).
+- Not measured: int8 net, GPU providers, an idle Tier-M run (M1.61), Windows and Linux ARM64.
 
 ### CPU per image against the plan's batch breakdown (single thread, NOISY)
 
