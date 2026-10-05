@@ -26,7 +26,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 50 / 94 (53%) |
 | M2 | Classical pipeline, safe writes and CLI | v0.1.0 | Windows 10/11 x64 | L | 0 / 93 (0%) |
 | M3 | GUI alpha: single-image editor | v0.2.0 | Windows 10/11 x64 | XL | 0 / 94 (0%) |
-| M4 | ML detection, orientation and calibrated confidence | v0.3.0 | Windows 10/11 x64 | XL | 0 / 90 (0%) |
+| M4 | ML detection, orientation and calibrated confidence | v0.3.0 | Windows 10/11 x64 | XL | 1 / 91 (1%) |
 | M5 | Batch review workflow, backups panel and trust features | v0.4.0 | Windows 10/11 x64 | L | 0 / 94 (0%) |
 | M6 | HEIC/HEIF, sandboxed decoding and format read breadth | v0.5.0 | Windows 10/11 x64 | XL | 0 / 96 (0%) |
 | M7 | Enhancement and bilevel output | v0.6.0 | Windows 10/11 x64 | XL | 0 / 90 (0%) |
@@ -39,7 +39,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | X | Continuous and cross-cutting | - | - | - | 0 / 42 (0%) |
 | X | Post-1.0 backlog (1.x) | - | - | - | 0 / 43 (0%) |
 | X | Spikes and open decisions | - | - | - | 0 / 28 (0%) |
-| **Total** | | | | | **115 / 1407 (8%)** |
+| **Total** | | | | | **116 / 1408 (8%)** |
 <!-- progress:end -->
 
 ## Why this order
@@ -608,6 +608,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [ ] **M4.16 ONNX export and parity** - Export opset 17, fp32, static 256x256 (plus a dynamic-size variant if the 384-512 and elongated passes need it), optional `.ort`; corner net <= 15 MB. Accept: PyTorch and ORT-CPU heatmaps agree within 1e-4 on 50 images, in models-repo CI.
 - [ ] **M4.17 Orientation net training** - 4-way (0/90/180/270) net of ~7 MB on free labels (rotated upright pages) from cleared document, receipt and text-line data, 224-256 px, three-crop training for long receipts; needed if M4.06 fails. Accept: val top-1 reported, ONNX <= 8 MB, M4.16 parity.
 - [ ] **M4.18 Release manifest and model card** - Each release records seed, commit, config and data-manifest hashes, framework versions, metrics, licence and known failures in `MODEL_CARD.md` and weight SHA-256 in `release.json`. Accept: a clean re-run matches val metrics within 0.2 pt mean IoU.
+- [x] **M4.83 Learned detector feasibility study** - Time-boxed from-scratch corner net (`tools/train`, generator `--train` mode) trained about an hour on one GPU and compared with the classical detector on the public synthetic suites, per slice, plus ONNX size and CPU timing and an evaluation-only check on the owner's real labels. Accept: [ADR 0010](docs/adr/0010-learned-detector-feasibility.md) records the measured numbers, lists what is unmeasured, and gives a GO-IF recommendation (it does not tick M4.12, M4.14 or M4.16).
 
 ### Core
 - [ ] **M4.19 ORT inference backend** - Implement `InferenceBackend` on the M0.35 choice (ort `=2.0.0-rc.13`, ONNX Runtime 1.28, CPU provider); check the `Session::run` receiver; bump ort only when M4.59 passes. Accept: heatmaps within 1e-4; corners within 0.5 px across thread counts.

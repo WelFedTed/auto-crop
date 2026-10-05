@@ -13,3 +13,4 @@ Numbered `NNNN-slug.md` records using [0000-template.md](0000-template.md). Ever
 | [0007](0007-inference-backend.md) | Inference backend: ort load-dynamic, rten fallback | accepted |
 | [0008](0008-codec-kernel-choices.md) | Codec kernel choices: decoder, resizer, JPEG encoder, linear-light rule | accepted |
 | [0009](0009-heif-decode-backend.md) | HEIC, HEIF and AVIF decoding: libheif backend in codecs, dav1d, header walk | accepted |
+| [0010](0010-learned-detector-feasibility.md) | Learned page-corner detector: feasibility study (GO-IF) | accepted |
