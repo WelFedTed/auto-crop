@@ -54,6 +54,40 @@ cargo run --release -p auto-crop-cli -- dev-pipeline photo.jpg --timings    # on
 
 The upstream detector commits vectorised the blur and morphology and added a line-based page finder, which changes the stand-in row. Re-measured, 30 runs: lone job (all threads) `analyse` min 45.0, **p50 53.4**, p95 58.2 ms, **1.34x** the 40 ms budget (within 1.5x, no redesign flag; the p95 ceiling of 40 ms is still missed at 1.46x); single thread p50 64.4 ms (1.61x). The other stages did not move (decode 101, proxy 24, rectify 72, encode 214 ms all threads; total p50 **478 ms**, p95 503 ms against the 515 ms chained budget, 0.93x; single-thread total 1217 ms). The tables above and below (Table A, the CPU table, Table B, the batch run) were all taken with the earlier detector, so their `analyse` and total figures are about 60 ms too high; nothing else in them depends on it.
 
+### Analysis stand-ins (M1.55): STAND-IN, NOISY
+
+Equivalent analysis work timed on the same 1024 px detection proxy (786,432 px) of a synthetic 12 MP page-on-a-desk photo, **every row a STAND-IN until M2 (classical analysis) and M4 (the real corner net)**: no accuracy or M4 claim is made. Code: `engine::skeleton::standin`, `crates/infer`, harness `perf standin` ([ADR-0007](../adr/0007-inference-backend.md) update 2026-10-05).
+
+```
+cargo xtask fetch-ort                     # pinned ONNX Runtime 1.28.2, hash-checked, no compiler needed
+cargo xtask make-standin-net              # random-weight 256x256 MobileNetV3-class net, ~2.7 MB, never committed
+cargo run --release -p xtask --features standin-ort,standin-rten,standin-canny -- perf standin --runs 40 --warmup 8
+cargo run --release -p auto-crop-cli --features standin-ort,standin-rten,standin-canny -- dev-pipeline photo.jpg --timings --analyse standin-net
+```
+
+Host and conditions: LUNCHBOX (i7-8700K, 6C/12T, Windows 11), release profile (LTO off, no `target-cpu`), 40 runs after 8 warm-ups, commit `0f9e8d6`. **NOISY**: other agents were compiling and a browser was open; the harness measured other processes at **47.6% of all CPU before and 63.9% during** (an earlier run the same day at 83-100% load gave 1.5-3x worse numbers). Net rows: the net sits behind the `InferenceBackend` trait; `inference only` is `run` on a prepared tensor, `analysis stage` adds the squash to 256x256 (area average), ImageNet normalisation and corner decode (`StandinNet::analyse`, what `analyse` runs). Threads are the rayon pool size for the kernels and the intra-op thread count of the backend.
+
+| What (STAND-IN) | Backend | Threads | min ms | p50 ms | p95 ms | p95 / 40 ms |
+|---|---|---:|---:|---:|---:|---:|
+| classical detector | - | 1 | 47.2 | 65.8 | 90.5 | 2.26 |
+| classical detector | - | 4 | 41.7 | 46.8 | 55.1 | 1.38 |
+| Canny + contours (imageproc 0.27) | - | 1 | 75.0 | 91.1 | 130.4 | 3.26 |
+| Canny + contours (imageproc 0.27) | - | 4 | 58.9 | 68.7 | 95.3 | 2.38 |
+| **ONNX net, inference only** | ort 1.28.2 | 1 | 6.1 | **9.8** | **12.4** | 0.31 |
+| **ONNX net, inference only** | ort 1.28.2 | 4 | 2.4 | **3.3** | **4.3** | 0.11 |
+| ONNX net, analysis stage | ort | 1 | 10.8 | 14.4 | 16.2 | 0.40 |
+| ONNX net, analysis stage | ort | 4 | 3.8 | 5.1 | 6.1 | 0.15 |
+| same net, inference only | rten 0.26.0 | 1 | 25.4 | 37.8 | 44.9 | 1.12 |
+| same net, inference only | rten | 4 | 6.7 | 10.0 | 11.9 | 0.30 |
+| same net, analysis stage | rten | 1 | 26.8 | 34.7 | 44.4 | 1.11 |
+| same net, analysis stage | rten | 4 | 8.2 | 11.6 | 14.4 | 0.36 |
+
+- **The `analyse` budget row (40 ms p50 and p95) is met by the net stand-in with ort** (p95 6 ms analysis stage at 4 threads, 16 ms at 1 thread) and by rten at 4 threads (14 ms); rten at one thread is 1.1x over. That is a stand-in with random weights at 256x256: it says what a MobileNetV3-class pass costs, nothing about the real corner net (M4), the orientation net, fusion or refinement. Table A's analysis line stays PROVISIONAL.
+- ort and rten agree on the net output to **3.9e-7** (bar 1e-3; ADR-0007 measured 5e-7); the output is identical at 1 and 4 threads on both. Tests: `cargo test -p auto-crop-infer --features ort,rten`.
+- Canny + contours is the slowest stand-in (2.4-3.3x of the p95 ceiling on this loaded host; not profiled); it is a crude page finder and is not a candidate for the shipped analysis, only a cost reference for edge-plus-contour work.
+- Full pipeline, 12 MP, all threads, 20 runs (NOISY, 28-35% other load): `--analyse standin-net` (ort, 4 threads) `analyse` p50 **4.5** ms, p95 5.9 ms; `--analyse standin-canny` p50 **61.9** ms, p95 70.6 ms (1.55x: flagged REDESIGN by the harness's rule, for a stand-in that is not shipped). With the net stand-in the corners are noise, the full frame is rectified (4000x3000 output) and the downstream rows are not comparable with a cropped run: only the `analyse` row is meaningful there. Stage-sum check passes (0.8-0.9% glue).
+- Not measured here: Linux and macOS numbers (the `Analysis stand-ins` workflow prints the same table on all three OSes into its step summary, NOISY shared runners), the int8 net, GPU providers, a loaded-machine-free Tier-M run (M1.61).
+
 ### CPU per image against the plan's batch breakdown (single thread, NOISY)
 
 PLAN 7.1 assumes about 760 CPU-ms per 12 MP image (decode 120, proxies 40, analysis 60, refine 10, warp 200, enhance 200, encode 110, commit 20) and tolerates 875 ms for the CLI floor.

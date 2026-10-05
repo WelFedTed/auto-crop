@@ -77,3 +77,15 @@ Comments and triple-quoted strings are prose (a docstring may say what the tool 
 | Allow-listed file | Why |
 |---|---|
 | `tools/synth/tests/test_independence.py` | carries the forbidden patterns as data for its own checks |
+
+## 7. Inference runtimes (M1.55, ADR-0007)
+
+`inference_guard.rs` checks the manifests, because `ort` brings its network machinery (`ureq`, TLS) only as a *build* dependency of `ort-sys` behind `download-binaries` and `tls-*`, which section 2 does not follow, and those features also mean "link an unpinned runtime downloaded at build time" (hash policy D4):
+
+- `ort` is pinned exactly (`=`), has `default-features = false`, enables `load-dynamic` and no feature outside `std`, `load-dynamic`, `tracing`, `ndarray`, `api-*` (no download, no `copy-dylibs`, no TLS, no GPU provider: those need their own ADR);
+- `ort-sys` is never named directly, `tract-*` is never named (ADR-0007 rejected it);
+- only `crates/infer` may name `ort`, `rten` or `rten-tensor`; `cargo xtask check-deps` enforces the same on the resolved graph, and only `auto-crop-engine` may use `imageproc`.
+
+Thirteen planted cases (a control with the real spec, default features, a bare version string, `download-binaries`, `tls-native`, `cuda`, no `load-dynamic`, an unpinned version, a renamed package, `ort` and `rten` in another crate, `ort-sys`, `tract`) run in `cargo xtask ci-guards --selftest` and under `cargo test -p xtask`.
+
+**Outcome recorded 2026-10-05:** with `ort =2.0.0-rc.13` (`std`, `load-dynamic`), `rten =0.26.0` (`onnx_format`) and `imageproc =0.27.0` (MIT, `default-features = false`, `rayon`; its tree adds `nalgebra`, `rand` 0.10 and `num` crates, all inside the allow-list) in the workspace, the network guard (all workspace features, three desktop triples), `cargo deny check` (licences, bans, sources, advisories), `licenses --check` and `cargo about` all pass; no HTTP, TLS or socket crate is in the graph.
