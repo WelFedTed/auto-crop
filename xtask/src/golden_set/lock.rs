@@ -490,7 +490,7 @@ fn withdraw(p: &Paths, existing: Option<Lock>, id: &str) -> Result<(), String> {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::golden::log::tests::paths;
+    use crate::golden_set::log::tests::paths;
     use auto_crop_eval::golden::{GoldenItem, label_to_json, new_label};
 
     pub const GOOD: [[f64; 2]; 4] = [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]];

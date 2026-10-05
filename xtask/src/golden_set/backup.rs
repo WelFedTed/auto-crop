@@ -423,7 +423,7 @@ pub fn run_restore(args: &[String]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::golden::lock::tests::synthetic_set;
+    use crate::golden_set::lock::tests::synthetic_set;
 
     fn lock_args(p: &Paths) -> Vec<String> {
         [

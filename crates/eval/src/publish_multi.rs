@@ -124,7 +124,7 @@ mod tests {
             n_pred: 2,
             matched: 2,
             exact_count: true,
-            accepted: i % 3 != 0,
+            accepted: !i.is_multiple_of(3),
             silent_wrong: false,
             mean_matched_iou: Some(0.97),
             gt_best_iou: vec![0.97, 0.97],

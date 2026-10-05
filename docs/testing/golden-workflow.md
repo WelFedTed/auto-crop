@@ -1,6 +1,6 @@
 # Golden-set workflow (local, one repository)
 
-Policy: [golden-set.md](golden-set.md). Label format: [golden-label.schema.json](golden-label.schema.json). Harness: [eval-harness.md](eval-harness.md). Roadmap items: M1.39 to M1.44, M1.51, M1.52, M1.83 to M1.85 (adapted, see "What changed" at the end). Code: `crates/eval/src/golden.rs`, `xtask/src/golden/`, `xtask/src/label/`.
+Policy: [golden-set.md](golden-set.md). Label format: [golden-label.schema.json](golden-label.schema.json). Harness: [eval-harness.md](eval-harness.md). Roadmap items: M1.39 to M1.44, M1.51, M1.52, M1.83 to M1.85 (adapted, see "What changed" at the end). Code: `crates/eval/src/golden.rs`, `xtask/src/golden_set/`, `xtask/src/label/`.
 
 Owner decision 2026-10-04: **one repository only**. The golden set (images, labels, splits, per-image results) lives on your machine under the gitignored `_data/` and is evaluated locally. Only aggregate numbers are ever published. No tool here makes a network call, copies an image anywhere but a backup folder you name, or writes inside tracked directories.
 
@@ -91,7 +91,7 @@ ROADMAP.md was not edited (the owner keeps it); this is the list to apply when t
 | M1.52 | publish only from main nightlies and releases; scratch-fork PR re-run | `PublishableMetrics` (and the new multi-item twin) kept as the only publishable shape, leak tests kept; the workflow and fork test do not exist. |
 | M1.85 | encrypted backup on a second disk | plain copy + SHA-256 manifest + `restore-check` / `restore`; encryption by BitLocker / VeraCrypt volume (no crypto written here). |
 
-The network claim: the evaluator and `xtask` link no HTTP, TLS or socket-framework crate. `cargo xtask ci-guards` bans them in the shipped crates and in every manifest, and the test `golden::evalrun::tests::no_network_crate_is_linked_into_the_harness_or_xtask` resolves the dependency closure of `auto-crop-eval` and `xtask` with `cargo metadata` and runs the same banned-crate check. The labeller's server uses only `std::net::TcpListener` on 127.0.0.1.
+The network claim: the evaluator and `xtask` link no HTTP, TLS or socket-framework crate. `cargo xtask ci-guards` bans them in the shipped crates and in every manifest, and the test `golden_set::evalrun::tests::no_network_crate_is_linked_into_the_harness_or_xtask` resolves the dependency closure of `auto-crop-eval` and `xtask` with `cargo metadata` and runs the same banned-crate check. The labeller's server uses only `std::net::TcpListener` on 127.0.0.1.
 
 ## Safety notes on the labeller
 

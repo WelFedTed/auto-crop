@@ -27,8 +27,9 @@ use auto_crop_eval::golden::{self, GoldenLabel};
 use auto_crop_eval::manifest::Manifest;
 use auto_crop_eval::multi::{self, MultiRunConfig};
 use auto_crop_eval::predictor::{JsonLines, Predictor};
-use auto_crop_eval::publish::{
-    PublishableMetrics, PublishableMultiMetrics, check_no_leak, check_no_leak_multi,
+use auto_crop_eval::publish::{PublishableMetrics, check_no_leak};
+use auto_crop_eval::publish_multi::{
+    PublishableMultiMetrics, check_no_leak as check_no_leak_multi,
 };
 use auto_crop_eval::report::summary_text;
 use auto_crop_eval::run::{RunConfig, run, to_json};
@@ -259,7 +260,7 @@ pub fn run_eval(args: &[String]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::golden::lock::tests::{GOOD, add_label, synthetic_set};
+    use crate::golden_set::lock::tests::{GOOD, add_label, synthetic_set};
     use auto_crop_codecs::{Format, encode};
     use auto_crop_eval::golden::{GoldenItem, label_to_json, new_label};
     use auto_crop_imgproc::Raster;

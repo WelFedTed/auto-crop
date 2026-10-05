@@ -13,9 +13,8 @@ use super::lock;
 use auto_crop_eval::golden::NON_LABEL_FILES;
 use auto_crop_eval::multi::Routing;
 use auto_crop_eval::noise::NoiseFloor;
-use auto_crop_eval::publish::{
-    METRICS_SCHEMA, MULTI_METRICS_SCHEMA, PublishableMetrics, PublishableMultiMetrics,
-};
+use auto_crop_eval::publish::{METRICS_SCHEMA, PublishableMetrics};
+use auto_crop_eval::publish_multi::{MULTI_METRICS_SCHEMA, PublishableMultiMetrics};
 use auto_crop_eval::report::{Dist, SliceStatus};
 use std::fmt::Write as _;
 
@@ -115,29 +114,29 @@ fn render_single(o: &mut String, file: &str, m: &PublishableMetrics) {
     );
 }
 
-fn routing_line(r: &Option<Routing>) -> String {
-    match r {
-        Some(r) => format!(
-            "{}/{} = {}{}",
-            r.held,
-            r.n,
-            pct(r.rate),
-            r.wilson95.map_or_else(String::new, |w| format!(
-                " (Wilson 95% interval {:.1}% to {:.1}%)",
-                w[0] * 100.0,
-                w[1] * 100.0
-            ))
-        ),
-        None => "withheld (fewer than 30 touching or overlapping scans)".to_owned(),
+fn routing_line(r: &Routing) -> String {
+    if r.n < auto_crop_eval::stats::MIN_PUBLIC_N {
+        return "withheld (fewer than 30 touching or overlapping scans)".to_owned();
     }
+    format!(
+        "{}/{} = {}{}",
+        r.held,
+        r.n,
+        pct(r.rate),
+        r.wilson95.map_or_else(String::new, |w| format!(
+            " (Wilson 95% interval {:.1}% to {:.1}%)",
+            w[0] * 100.0,
+            w[1] * 100.0
+        ))
+    )
 }
 
 fn render_multi(o: &mut String, file: &str, m: &PublishableMultiMetrics) {
     let s = &m.summary;
     let _ = writeln!(
         o,
-        "### {file}\n\nMulti-item predictor `{}`, split `{}`, commit `{}`, host {}-{}, {} scan(s), match IoU {}.\n",
-        m.predictor, m.split, m.commit, m.os, m.arch, m.n, m.match_iou
+        "### {file}\n\nMulti-item predictor `{}`, split `{}`, commit `{}`, host {}-{}, {} scan(s).\n",
+        m.predictor, m.split, m.commit, m.os, m.arch, m.n
     );
     let _ = writeln!(
         o,
@@ -331,15 +330,15 @@ pub fn run_report(args: &[String]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::golden::evalrun::evaluate;
-    use crate::golden::lock::tests::synthetic_set;
+    use crate::golden_set::evalrun::evaluate;
+    use crate::golden_set::lock::tests::synthetic_set;
 
     #[test]
     fn the_report_renders_aggregates_with_caveats_and_the_noise_placeholder() {
         let dir = tempfile::tempdir().expect("tempdir");
         let p = synthetic_set(dir.path(), 0);
         for i in 0..8 {
-            crate::golden::lock::tests::add_label(&p, &format!("secret-name-{i}.png"), None);
+            crate::golden_set::lock::tests::add_label(&p, &format!("secret-name-{i}.png"), None);
         }
         // Real pixels are not needed to render: evaluate with a predictor file that fails everything.
         let lock_args: Vec<String> = [
@@ -352,7 +351,7 @@ mod tests {
         ]
         .map(str::to_owned)
         .to_vec();
-        crate::golden::lock::run_lock(&lock_args).expect("locks");
+        crate::golden_set::lock::run_lock(&lock_args).expect("locks");
         let empty = p.data.join("none.jsonl");
         std::fs::write(&empty, "").expect("write");
         let spec = format!("jsonl:{}", empty.display());

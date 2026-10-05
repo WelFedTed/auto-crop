@@ -21,7 +21,7 @@
 mod http;
 mod images;
 
-use crate::golden::common::{Args, ensure_private, utc_now, write_atomic};
+use crate::golden_set::common::{Args, ensure_private, utc_now, write_atomic};
 use auto_crop_eval::golden::{self, GoldenItem, GoldenLabel};
 use http::{Request, Response};
 use serde::Deserialize;

@@ -12,7 +12,7 @@ mod deny_selftest;
 mod deps;
 mod doctor;
 mod eval;
-mod golden;
+mod golden_set;
 mod hostile;
 mod identity;
 mod label;
@@ -161,9 +161,9 @@ fn main() -> ExitCode {
         "synth-setup" => synth::run_setup(&rest),
         "synth-check" => synth::run_check(&rest),
         "check-splits" => synth::run_check_splits(&rest),
-        "check-labels" => golden::check::run_check_labels(&rest),
+        "check-labels" => golden_set::check::run_check_labels(&rest),
         "label" => label::run(&rest),
-        "golden" => golden::run(&rest),
+        "golden" => golden_set::run(&rest),
         "eval" => eval::run_eval(&rest),
         "" | "help" | "--help" | "-h" => {
             print!("{HELP}");
