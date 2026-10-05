@@ -214,6 +214,18 @@ pub(crate) fn decode_raw(
     } else {
         None
     };
+    // The header walk already refused a bomb with the real zlib rules; this holds the decoder to
+    // the same cap for whatever it expanded, so the two can never disagree (the nightly `metadata`
+    // fuzzer saw a profile above the cap when the `png` crate's fuzzing build skips its zlib checks).
+    if let Some(p) = &png_icc
+        && p.len() as u64 > limits.max_metadata_bytes
+    {
+        return Err(limit_err(
+            Limit::MetadataBytes,
+            p.len() as u64,
+            limits.max_metadata_bytes,
+        ));
+    }
 
     let img = DynamicImage::from_decoder(decoder).map_err(to_err)?;
     if h.frames > 1 {
