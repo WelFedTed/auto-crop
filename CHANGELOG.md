@@ -1,10 +1,59 @@
 # Changelog
 
-## Unreleased
+## 0.0.2 (2026-10-05), pre-release, Windows only
 
-- Save as copy of a scan with several items no longer waits for the split to be accepted: a copy destroys nothing, so it is written at once; replacing the original stays held until the split is accepted.
-- One error code, `NOT_REPLACEABLE`, for a source that is never replaced in place (multi-page TIFF, a format with no writer), on the single-item and the multi-item path; the reason is in the notice. The single-item path used to answer `UNSUPPORTED_OUTPUT`.
-- A Windows package with HEIC, HEIF and AVIF input can be built in CI (`package-windows.yml`); the app and the CLI point libheif at the `libheif` folder beside the executable. HEIC and AVIF are parsed in-process (the sandboxed worker pool is not built yet).
+A second early test build. Like 0.0.1 it is **not** the CLI-only v0.1.0 of [ROADMAP.md](ROADMAP.md)
+milestone M2, none of the accuracy gates has been measured on real photos, and the confidence score is
+still an uncalibrated heuristic. Treat it as a preview, not as something to trust with irreplaceable files.
+
+### What changed
+
+- **A better page finder.** It now handles low-contrast pages far better and finds long, thin receipts from
+  their two long edges. On synthetic test images the failure rate fell from about 30% to under 2% for the
+  earlier test set, but on a second, independent set of synthetic scenes it still fails about 40% of the
+  time (long and strip receipts, partial frames, white desks). On a small hand-labelled set of real photos,
+  5 of 15 crops are within 0.9 IoU. Hand-held receipts and some long receipts are still held with a wrong
+  crop. A wrongly confident "Good" was not seen, but that is a small sample.
+- **More input formats.** WebP and TIFF open in the standard build. The separate package (below) also opens
+  **HEIC, HEIF and AVIF**. These formats are never replaced in place, because there is no writer for them
+  yet: use "Save as copy" (written as PNG, or JPEG for HEIC) with the colour profile kept.
+- **Scans with several photos or receipts** are detected by the engine, and are **held for review**; nothing
+  is written until you accept the split. Save as copy writes one file per item (`name_01`, `name_02`, ...)
+  at once, because a copy destroys nothing. The screens for choosing, editing and accepting items are
+  **not built yet**: the current window shows only the first item of such a scan, and an in-place save of a
+  held scan is refused with a generic message. All items are written or none, with crash recovery, and
+  Restore original returns the scan byte for byte.
+- One error code, `NOT_REPLACEABLE`, for a source that is never replaced in place (multi-page TIFF, a format
+  with no writer), with the reason in the notice.
+- **Stricter, safer decoding.** Fuzzing found and fixed: a crash on a rare kind of JPEG (4:2:0 with one scan
+  per colour component is now refused as unsupported), an edit state that could be written but not read
+  back, a size overflow in a HEIF header and a colour profile that could exceed its size limit. Truncated
+  JPEGs and files smaller than their header claims are now refused as corrupt instead of being decoded
+  with grey fill.
+- Saved edits use a new, versioned format (v2) that old edits migrate into without loss. A build older than
+  0.0.2 cannot read edits saved by this one.
+
+### The package with HEIC, HEIF and AVIF
+
+`AutoCrop-0.0.2-windows-x64.zip` contains the app, the command-line tool, three DLLs and a `libheif` plugin
+folder. HEIC and AVIF files are parsed **inside the app**, because the sandboxed helper process of the plan
+does not exist yet: use this build for your own files only. It is unsigned (Windows SmartScreen will warn).
+
+### Known limits
+
+- No screens for multi-item scans, no enhancement, no Convert, no command-line batch mode, no
+  touch-specific testing. Windows 10/11 x64 only; macOS and Linux are not built for this release.
+- Real-photo accuracy has not been measured beyond the small indicative set above.
+- Strings are English only and not yet externalised.
+
+### Verification
+
+- Automated tests run on Windows, macOS and Ubuntu CI (core, image kernels, detector, codecs, engine save and
+  restore invariants including fault injection at every step of the multi-item save, fuzz regressions).
+  Interaction budgets, real-device touch behaviour and a clean-VM install were **not** measured, and the
+  window itself was only checked to start.
+- Built in GitHub Actions, **unsigned**, with no build attestation or SBOM. Check the download against
+  `SHA256SUMS`.
 
 ## 0.0.1 (2026-10-02), pre-release, Windows only
 
