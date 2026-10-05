@@ -43,6 +43,8 @@ path = [
     "tools/synth/requirements.txt",
     "tools/synth/requirements.lock",
     "tools/synth/overrides.txt",
+    "tools/train/requirements.txt",
+    "tools/train/requirements.lock",
     "tools/synth/tests/golden_quads.json",
     "**/*.proptest-regressions",
     "fuzz/regressions/**",
