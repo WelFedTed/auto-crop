@@ -283,8 +283,11 @@ pub enum Housekeeping {
     None,
     /// Finish or undo a save that a crash interrupted.
     Recover,
-    /// [`Housekeeping::Recover`], then delete the backups past their retention (what the app does).
+    /// [`Housekeeping::Recover`], then delete the backups past their retention, at every start.
     RecoverAndPurge,
+    /// [`Housekeeping::Recover`], then the purge at most once every 24 hours (PLAN 2.7, M2.35; the
+    /// time of the last purge is kept next to the store). What [`Engine::new`], the app, does.
+    RecoverAndPurgeDaily,
 }
 
 /// Per-run options for a headless front end (the CLI, M2.39). Never persisted; the GUI never sets
@@ -331,7 +334,7 @@ pub(crate) fn jpeg(r: &Raster, quality: u8) -> Result<Vec<u8>> {
 impl Engine {
     pub fn new(paths: AppPaths) -> Self {
         let settings = Settings::load(&paths);
-        Self::start(paths, settings, Housekeeping::RecoverAndPurge)
+        Self::start(paths, settings, Housekeeping::RecoverAndPurgeDaily)
     }
 
     /// A handle with explicit settings that are never read from or written to disk (a headless run
@@ -367,9 +370,15 @@ impl Engine {
             // opened (M10.24), then purge.
             crate::group::recover(&engine.inner.store, &crate::group::NoFaults);
         }
-        if housekeeping == Housekeeping::RecoverAndPurge {
+        match housekeeping {
+            Housekeeping::RecoverAndPurge => {
+                engine.inner.store.purge(now_secs());
+            }
             // Expired backups are purged at start, at most once a day (PLAN 2.7).
-            engine.inner.store.purge_if_due(now_secs(), 86_400);
+            Housekeeping::RecoverAndPurgeDaily => {
+                engine.inner.store.purge_if_due(now_secs(), 86_400);
+            }
+            Housekeeping::None | Housekeeping::Recover => {}
         }
         engine
     }
