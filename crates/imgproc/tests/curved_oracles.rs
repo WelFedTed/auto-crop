@@ -76,7 +76,7 @@ fn max_diff(a: &Raster, b: &Raster) -> u8 {
 // ------------------------------------------------------------------------------------ (a)
 
 #[test]
-fn a_straight_rectangle_equals_the_homography_within_one_lsb() {
+fn a_straight_quad_equals_the_homography_within_one_lsb_for_any_perspective() {
     let src = noise(321, 240);
     // An axis-aligned rectangle with fractional corners, and the same rotated by 12 degrees.
     let rects: Vec<[(f64, f64); 4]> = {
@@ -89,7 +89,10 @@ fn a_straight_rectangle_equals_the_homography_within_one_lsb() {
                 cy + (x - cx) * s + (y - cy) * k,
             )
         });
-        vec![axis, rot]
+        // A perspective quad: the Coons path composes with the corner homography, so it is the
+        // homography crop too, not only for a rectangle.
+        let persp = [(40.0, 25.0), (270.0, 20.0), (250.0, 200.0), (60.0, 190.0)];
+        vec![axis, rot, persp]
     };
     let mut worst = 0u8;
     for corners in rects {
@@ -108,7 +111,9 @@ fn a_straight_rectangle_equals_the_homography_within_one_lsb() {
             assert!(d <= 1, "turns {turns}: max difference {d} LSB");
         }
     }
-    println!("oracle (a): straight rectangle vs homography, worst difference {worst} LSB");
+    println!(
+        "oracle (a): straight quads (rectangle, rotated, perspective) vs homography, worst difference {worst} LSB"
+    );
 }
 
 // ------------------------------------------------------------------------------------ (b)
@@ -252,14 +257,26 @@ impl Generator {
 
     /// The photographed page: 2 x 2 supersampling, the surround is dark grey.
     fn photograph(&self, w: u32, h: u32, blobs: bool) -> Raster {
+        self.photograph_through(w, h, blobs, Some)
+    }
+
+    /// [`Generator::photograph`] seen through a camera: `to_ortho` maps an image point back to the
+    /// point of the orthographic picture of the bent page (`None` where it sees nothing).
+    fn photograph_through(
+        &self,
+        w: u32,
+        h: u32,
+        blobs: bool,
+        to_ortho: impl Fn((f64, f64)) -> Option<(f64, f64)>,
+    ) -> Raster {
         let mut r = Raster::new(w, h);
         for iy in 0..h {
             for ix in 0..w {
                 let mut acc = 0.0;
                 for (a, b) in [(0.25, 0.25), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75)] {
                     let pt = (f64::from(ix) + a, f64::from(iy) + b);
-                    acc += self
-                        .inverse(pt)
+                    acc += to_ortho(pt)
+                        .and_then(|o| self.inverse(o))
                         .map_or(70.0, |(s, v)| page_with(s, v, blobs));
                 }
                 let g = (acc / 4.0).round() as u8;
@@ -529,6 +546,68 @@ fn a_waving_tilted_page_is_flattened_back_to_the_flat_page() {
 }
 
 #[test]
+fn a_bowed_page_photographed_at_an_angle_is_flattened_through_the_corner_homography() {
+    use auto_crop_imgproc::geometry::{apply, invert};
+    use auto_crop_imgproc::homography::Homography;
+    let g = Generator::new(120.0, 880.0, 470.0, cylinder_y, 0.0);
+    // The camera: the orthographic picture (1000 x 720) seen as a keystone quad in a 1100 x 800
+    // image (about 7% narrower at the bottom, tilted sideways a little).
+    let (ow, oh) = (1000.0, 720.0);
+    let (iw, ih) = (1100u32, 800u32);
+    let quad = [(70.0, 40.0), (1040.0, 85.0), (985.0, 760.0), (115.0, 715.0)];
+    let cam = Homography::from_quads([(0.0, 0.0), (ow, 0.0), (ow, oh), (0.0, oh)], quad).unwrap();
+    let inv = invert(&cam.0).unwrap();
+    let to_ortho = |p: (f64, f64)| apply(&inv, p.0, p.1);
+    let photo = g.photograph_through(iw, ih, true, to_ortho);
+    let rules = g.photograph_through(iw, ih, false, to_ortho);
+    // The edges as a person marks them in the photo: the orthographic curves seen by the camera.
+    let ortho = g.curves(11, 1000, 720);
+    let norm = |c: &Curve| {
+        Curve::new(
+            c.points()
+                .iter()
+                .map(|p| {
+                    let (x, y) = apply(&cam.0, p.x * ow, p.y * oh).unwrap();
+                    Pt::new(x / f64::from(iw), y / f64::from(ih))
+                })
+                .collect(),
+        )
+        .unwrap()
+    };
+    let curves = CurveWarp {
+        top: norm(&ortho.top),
+        right: norm(&ortho.right),
+        bottom: norm(&ortho.bottom),
+        left: norm(&ortho.left),
+        quarter_turns: 0,
+        mirror: false,
+    };
+    assert_eq!(curves.validate(), Ok(()));
+    let out = render_curved(&photo, &curves, UNLIMITED).unwrap();
+    let rules_out = render_curved(&rules, &curves, UNLIMITED).unwrap();
+    let (w, h) = (out.width as usize, out.height as usize);
+    let (pw, ph) = (g.top_length(), g.h);
+    let mut ideal = Raster::new(out.width, out.height);
+    for y in 0..h {
+        for x in 0..w {
+            let b = page(
+                (x as f64 + 0.5) / w as f64 * pw,
+                (y as f64 + 0.5) / h as f64 * ph,
+            )
+            .round() as u8;
+            ideal.set_pixel(x as u32, y as u32, [b, b, b]);
+        }
+    }
+    let s = ssim(&gray(&out), &gray(&ideal), w, h, 10);
+    let (straight, position) = rule_residuals(&rules_out, pw, ph, 10);
+    println!(
+        "oracle (d) bowed page + perspective: out {w} x {h}, SSIM {s:.4}, straightness {straight:.2} px, position error {position:.2} px"
+    );
+    assert!(s >= 0.97, "SSIM {s}");
+    assert!(straight < 1.5, "straightness {straight}");
+}
+
+#[test]
 fn fewer_control_points_cost_accuracy_in_a_measured_way() {
     // The boundary model is only as good as the points: 3 points cannot follow 1.5 sine periods.
     let g = Generator::new(130.0, 870.0, 440.0, wave_y, 0.0);
@@ -544,7 +623,7 @@ fn fewer_control_points_cost_accuracy_in_a_measured_way() {
 // ------------------------------------------------------------------------------------ (c) limits
 
 #[test]
-fn a_bend_the_edges_do_not_show_is_not_corrected_and_perspective_is_only_approximated() {
+fn a_bend_the_edges_do_not_show_is_not_corrected_and_perspective_alone_is_the_homography() {
     // (1) A page bent about a vertical axis (a book page open at the spine), photographed square on:
     // image x = R sin(s / R). Its edges are straight, so the boundary model has nothing to say and
     // the flat result keeps the compression: the vertical rules are NOT equally spaced.
@@ -614,65 +693,78 @@ fn a_bend_the_edges_do_not_show_is_not_corrected_and_perspective_is_only_approxi
     );
     assert!(position > 8.0, "{position}");
 
-    // (2) Perspective: a flat page photographed at an angle. The homography (straight quads keep
-    // using it) is exact; the Coons path of the same four straight edges is bilinear, so it is only
-    // approximately right. Measured, with a hard bound so it cannot get worse unnoticed.
+    // (2) Perspective alone: a flat page photographed at an angle. The curved path is composed with
+    // the corner homography, so four straight edges give the homography crop (a bare bilinear
+    // patch would not: it scored SSIM 0.57 at a 5% keystone, see docs/dev/curved-pages.md).
     let (pw, ph) = (700.0f64, 480.0f64);
-    // Forward homography: page (s, v) to image, a keystone (the far edge 20% shorter).
-    let corners = [
-        (150.0, 110.0),
-        (850.0, 110.0),
-        (780.0, 640.0),
-        (220.0, 640.0),
-    ];
-    let hm = {
-        use auto_crop_imgproc::homography::Homography;
-        Homography::from_quads([(0.0, 0.0), (pw, 0.0), (pw, ph), (0.0, ph)], corners).unwrap()
-    };
-    let inv = auto_crop_imgproc::geometry::invert(&hm.0).unwrap();
-    let mut photo = Raster::new(iw, ih);
-    for iy in 0..ih {
-        for ix in 0..iw {
-            let (s, v) =
-                auto_crop_imgproc::geometry::apply(&inv, f64::from(ix) + 0.5, f64::from(iy) + 0.5)
-                    .unwrap();
-            let val = if (0.0..=pw).contains(&s) && (0.0..=ph).contains(&v) {
-                page(s, v)
-            } else {
-                70.0
-            };
-            let b = val.round() as u8;
-            photo.set_pixel(ix, iy, [b, b, b]);
-        }
-    }
-    let norm = |(x, y): (f64, f64)| Pt::new(x / f64::from(iw), y / f64::from(ih));
-    let q = QuadWarp::new(corners.map(norm));
-    let against_flat = |out: &Raster| {
-        let (w, h) = (out.width as usize, out.height as usize);
-        let mut ideal = Raster::new(out.width, out.height);
-        for y in 0..h {
-            for x in 0..w {
-                let b = page(
-                    (x as f64 + 0.5) / w as f64 * pw,
-                    (y as f64 + 0.5) / h as f64 * ph,
+    // Forward homography: page (s, v) to image, a keystone: the bottom edge is `k` shorter than the
+    // top one (5% is a casual hand-held tilt, 20% a steep one).
+    let keystone = |k: f64| -> (f64, f64, u8) {
+        let inset = 350.0 * k;
+        let corners = [
+            (150.0, 110.0),
+            (850.0, 110.0),
+            (850.0 - inset, 640.0),
+            (150.0 + inset, 640.0),
+        ];
+        let hm = {
+            use auto_crop_imgproc::homography::Homography;
+            Homography::from_quads([(0.0, 0.0), (pw, 0.0), (pw, ph), (0.0, ph)], corners).unwrap()
+        };
+        let inv = auto_crop_imgproc::geometry::invert(&hm.0).unwrap();
+        let mut photo = Raster::new(iw, ih);
+        for iy in 0..ih {
+            for ix in 0..iw {
+                let (s, v) = auto_crop_imgproc::geometry::apply(
+                    &inv,
+                    f64::from(ix) + 0.5,
+                    f64::from(iy) + 0.5,
                 )
-                .round() as u8;
-                ideal.set_pixel(x as u32, y as u32, [b, b, b]);
+                .unwrap();
+                let val = if (0.0..=pw).contains(&s) && (0.0..=ph).contains(&v) {
+                    page(s, v)
+                } else {
+                    70.0
+                };
+                let b = val.round() as u8;
+                photo.set_pixel(ix, iy, [b, b, b]);
             }
         }
-        ssim(&gray(out), &gray(&ideal), w, h, 10)
+        let norm = |(x, y): (f64, f64)| Pt::new(x / f64::from(iw), y / f64::from(ih));
+        let q = QuadWarp::new(corners.map(norm));
+        let against_flat = |out: &Raster| {
+            let (w, h) = (out.width as usize, out.height as usize);
+            let mut ideal = Raster::new(out.width, out.height);
+            for y in 0..h {
+                for x in 0..w {
+                    let b = page(
+                        (x as f64 + 0.5) / w as f64 * pw,
+                        (y as f64 + 0.5) / h as f64 * ph,
+                    )
+                    .round() as u8;
+                    ideal.set_pixel(x as u32, y as u32, [b, b, b]);
+                }
+            }
+            ssim(&gray(out), &gray(&ideal), w, h, 10)
+        };
+        let coons = render_curved(&photo, &CurveWarp::from_quad(&q), UNLIMITED).unwrap();
+        let hom = render_quad(&photo, &q, UNLIMITED).unwrap();
+        (
+            against_flat(&coons),
+            against_flat(&hom),
+            max_diff(&coons, &hom),
+        )
     };
-    let coons = render_curved(&photo, &CurveWarp::from_quad(&q), UNLIMITED).unwrap();
-    let hom = render_quad(&photo, &q, UNLIMITED).unwrap();
-    let (s_coons, s_hom) = (against_flat(&coons), against_flat(&hom));
-    println!(
-        "limit: perspective keystone, SSIM against the flat page: homography {s_hom:.3}, Coons path {s_coons:.3}"
-    );
-    assert!(s_hom > 0.9, "the homography path is the reference: {s_hom}");
-    assert!(
-        s_coons < s_hom - 0.3,
-        "bilinear is not projective: {s_coons}"
-    );
+    for k in [0.05, 0.10, 0.20] {
+        let (s_coons, s_hom, diff) = keystone(k);
+        println!(
+            "perspective keystone {:.0}%, SSIM against the flat page: homography {s_hom:.3}, Coons path {s_coons:.3}, pixel difference {diff} LSB",
+            k * 100.0
+        );
+        assert!(s_hom > 0.9, "the homography path is the reference: {s_hom}");
+        // Composed with the corner homography, four straight edges ARE the homography crop.
+        assert!(diff <= 1, "{diff} LSB at {k}");
+    }
 }
 
 // ------------------------------------------------------------------------------------ plumbing
@@ -695,7 +787,7 @@ fn the_dense_grid_warp_agrees_with_the_exact_one() {
     let page = bulging_page();
     let exact = render_curved(&src, &page, UNLIMITED).unwrap();
     let (w, h) = (exact.width, exact.height);
-    let nodes = coons_grid_px(src.width, src.height, &page, 41, 33);
+    let nodes = coons_grid_px(src.width, src.height, &page, 41, 33).unwrap();
     let view = ImageRef {
         width: src.width,
         height: src.height,
@@ -825,7 +917,7 @@ fn cancellation_polls_once_per_band_and_returns_no_image() {
         quarter_turns: 0,
         mirror: false,
     };
-    let (_, h) = output_size(src.width, src.height, &page, UNLIMITED);
+    let (_, h) = output_size(src.width, src.height, &page, UNLIMITED).unwrap();
     assert!(h as usize > 20 * BAND_ROWS, "{h} rows");
     let token = After {
         limit: 3,
@@ -851,14 +943,27 @@ fn cancellation_polls_once_per_band_and_returns_no_image() {
 }
 
 #[test]
-fn the_output_size_follows_the_arc_lengths_and_the_caps() {
+fn the_output_size_follows_the_rectified_arc_lengths_and_the_caps() {
+    // Straight edges: the size a plain quad crop gets, perspective or not.
+    let n = |x: f64, y: f64| Pt::new(x / 1000.0, y / 800.0);
+    let q = QuadWarp::new([
+        n(120.0, 90.0),
+        n(880.0, 70.0),
+        n(840.0, 700.0),
+        n(160.0, 740.0),
+    ]);
+    let want = auto_crop_imgproc::render::output_size(1000, 800, &q, UNLIMITED);
+    assert_eq!(
+        output_size(1000, 800, &CurveWarp::from_quad(&q), UNLIMITED),
+        Some(want)
+    );
+    // A bulging page is longer than the straight quad through its corners, both ways.
     let page = bulging_page();
-    let (w, h) = output_size(1000, 800, &page, UNLIMITED);
-    let [t, r, b, l] = page.arc_lengths((1000.0, 800.0));
-    assert_eq!(w, t.max(b).round() as u32);
-    assert_eq!(h, l.max(r).round() as u32);
-    // A curved edge is longer than its chord.
-    assert!(f64::from(w) > 0.8 * 1000.0);
+    let (w, h) = output_size(1000, 800, &page, UNLIMITED).unwrap();
+    let straight =
+        output_size(1000, 800, &CurveWarp::from_quad(&page.outline()), UNLIMITED).unwrap();
+    assert!(w > straight.0 && h > straight.1, "{w}x{h} vs {straight:?}");
+    // The cap only shrinks.
     let capped = output_size(
         1000,
         800,
@@ -867,8 +972,12 @@ fn the_output_size_follows_the_arc_lengths_and_the_caps() {
             max_pixels: 100_000,
             max_edge: u32::MAX,
         },
-    );
+    )
+    .unwrap();
     assert!(u64::from(capped.0) * u64::from(capped.1) <= 101_000);
-    // Never enlarged: the cap only shrinks.
     assert!(capped.0 < w);
+    // A quarter turn swaps the sides.
+    let mut turned = page.clone();
+    turned.quarter_turns = 1;
+    assert_eq!(output_size(1000, 800, &turned, UNLIMITED), Some((h, w)));
 }

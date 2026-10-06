@@ -87,7 +87,7 @@ fn budget(out: (u32, u32), threads: usize) -> usize {
 fn curved_12mp_extra_heap_is_the_output_plus_the_band_scratch() {
     let src = source(4000, 3000);
     let page = page();
-    let size = output_size(4000, 3000, &page, UNLIMITED);
+    let size = output_size(4000, 3000, &page, UNLIMITED).unwrap();
     println!("page flattens to {} x {}", size.0, size.1);
     for threads in [1usize, 8] {
         let (extra, out_bytes, dims) = render(&src, &page, threads);
@@ -126,5 +126,36 @@ fn curved_12mp_timing() {
             "curved 12 MP source -> {} x {}: best of 6 on {threads} thread(s): {best:.0} ms",
             dims.0, dims.1
         );
+        // The same size through the plain homography warp, for scale (a straight quad of the page's
+        // corners).
+        let c = page.corners();
+        let px = c.map(|p| (p.x * 4000.0 - 0.5, p.y * 3000.0 - 0.5));
+        let (w, h) = (f64::from(dims.0), f64::from(dims.1));
+        let m = auto_crop_imgproc::geometry::homography(
+            [
+                (-0.5, -0.5),
+                (w - 0.5, -0.5),
+                (w - 0.5, h - 0.5),
+                (-0.5, h - 0.5),
+            ],
+            px,
+        )
+        .unwrap();
+        let mut best = f64::INFINITY;
+        for _ in 0..6 {
+            let t = Instant::now();
+            pool.install(|| {
+                auto_crop_imgproc::warp::warp_perspective_image(
+                    src.as_ref(),
+                    &m,
+                    dims.0,
+                    dims.1,
+                    &NeverCancel,
+                )
+            })
+            .unwrap();
+            best = best.min(t.elapsed().as_secs_f64() * 1000.0);
+        }
+        println!("homography, same size: best of 6 on {threads} thread(s): {best:.0} ms");
     }
 }

@@ -230,6 +230,13 @@ pub struct ArcCurve {
 }
 
 impl ArcCurve {
+    /// The arc-length table of any polyline of at least 2 points (`None` for fewer): the curve's
+    /// own polyline moved into another space (the renderer rectifies it with the page's corner
+    /// homography), measured in `scale` space.
+    pub fn from_points(pts: Vec<Pt>, scale: (f64, f64)) -> Option<Self> {
+        (pts.len() >= 2).then(|| Self::from_polyline(pts, scale))
+    }
+
     fn from_polyline(pts: Vec<Pt>, scale: (f64, f64)) -> Self {
         let mut cum = Vec::with_capacity(pts.len());
         let mut total = 0.0;
