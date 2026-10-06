@@ -19,6 +19,7 @@ pub mod lossless;
 pub mod memory;
 pub mod migrate;
 pub mod output;
+pub mod outputs;
 pub mod packaged;
 pub mod paths;
 mod restore;
@@ -33,7 +34,7 @@ pub mod store;
 pub mod util;
 
 pub use api::*;
-pub use engine::{Engine, Notify};
+pub use engine::{Engine, Housekeeping, Notify, RunOptions};
 pub use error::ErrKind;
 pub use items_detect::{
     ClassicalItemDetector, DetectedItem, ItemDetector, NoSplit, SplitDetection,

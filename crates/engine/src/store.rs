@@ -313,6 +313,17 @@ impl Store {
         walk(&self.dir)
     }
 
+    /// Deletes one backup entry (the original, its manifest and everything stored beside it).
+    /// Only a directory inside the store with a valid id is ever removed. This is the one place a
+    /// stored original is destroyed on request (`auto-crop backups purge`); callers decide which
+    /// entries may go. Returns whether the entry is gone.
+    pub fn remove(&self, id: &str) -> bool {
+        match self.entry_dir(id) {
+            Some(dir) if dir.is_dir() => fs::remove_dir_all(dir).is_ok(),
+            _ => false,
+        }
+    }
+
     /// Deletes backups past their retention that are not pinned. Only directories inside the store
     /// with a valid id are ever removed, and a backup whose output was never committed is kept.
     pub fn purge(&self, now: i64) -> usize {

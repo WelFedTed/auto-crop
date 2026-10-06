@@ -616,6 +616,24 @@ impl Engine {
         r
     }
 
+    /// Saves one image as part of a run the caller names, so a front end that saves item by item
+    /// (the CLI, in parallel) still gets ONE backup run that `restore_run` finds. Behaves exactly
+    /// like one image of [`Engine::save_items`].
+    pub fn save_in_run(
+        &self,
+        id: u32,
+        target: SaveTarget,
+        run_id: &str,
+        run_name: &str,
+    ) -> SaveOutcome {
+        let run_name: String = run_name
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(80)
+            .collect();
+        self.save_dispatch(id, target, run_id, &run_name)
+    }
+
     /// Saves one image: one file the way it always was, or, when it has two or more crops (or was
     /// split before), several as one group.
     pub(crate) fn save_dispatch(

@@ -264,6 +264,29 @@ pub(crate) struct Inner {
     pub(crate) reserved: Mutex<ReservedKeys>,
     /// Commands that touched several images at once (a split preset on 20 scans): one undo.
     pub(crate) session: Mutex<auto_crop_core::SessionHistory<u32>>,
+    /// Per-run knobs of a headless front end (crop margin); the defaults are what every other
+    /// front end has always had.
+    pub(crate) run: Mutex<RunOptions>,
+}
+
+/// What an engine does on start-up besides being created (see [`Engine::with_settings`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Housekeeping {
+    /// Nothing: no recovery, no purge. Nothing is written until something is saved.
+    None,
+    /// Finish or undo a save that a crash interrupted.
+    Recover,
+    /// [`Housekeeping::Recover`], then delete the backups past their retention (what the app does).
+    RecoverAndPurge,
+}
+
+/// Per-run options for a headless front end (the CLI, M2.39). Never persisted; the GUI never sets
+/// them. (Quality, metadata and the pixel cap are [`crate::EngineOptions`].)
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct RunOptions {
+    /// Percent of the crop size added on every side of each auto-detected crop (negative trims);
+    /// 0 is the paper edge itself. The quad is scaled about its centre and clamped to the frame.
+    pub margin_pct: f32,
 }
 
 /// A cheap-to-clone handle on the engine.
@@ -301,6 +324,17 @@ pub(crate) fn jpeg(r: &Raster, quality: u8) -> Result<Vec<u8>> {
 impl Engine {
     pub fn new(paths: AppPaths) -> Self {
         let settings = Settings::load(&paths);
+        Self::start(paths, settings, Housekeeping::RecoverAndPurge)
+    }
+
+    /// A handle with explicit settings that are never read from or written to disk (a headless run
+    /// reproduces from its command line, PLAN 2.12). `housekeeping` says which start-up work runs:
+    /// [`Engine::new`] does everything; dry runs and listings do nothing, so they write nothing.
+    pub fn with_settings(paths: AppPaths, settings: Settings, housekeeping: Housekeeping) -> Self {
+        Self::start(paths, settings.sanitised(), housekeeping)
+    }
+
+    fn start(paths: AppPaths, settings: Settings, housekeeping: Housekeeping) -> Self {
         let store = Store::new(paths.backups_dir());
         let engine = Self {
             inner: Arc::new(Inner {
@@ -317,13 +351,35 @@ impl Engine {
                 options: Mutex::new(crate::output::EngineOptions::default()),
                 reserved: Mutex::new(ReservedKeys::default()),
                 session: Mutex::new(auto_crop_core::SessionHistory::new()),
+                run: Mutex::new(RunOptions::default()),
             }),
         };
-        // A crash may have interrupted a split save: finish or undo it before anything is opened
-        // (M10.24), then purge.
-        crate::group::recover(&engine.inner.store, &crate::group::NoFaults);
-        engine.inner.store.purge(now_secs());
+        if housekeeping != Housekeeping::None {
+            // A crash may have interrupted a split save: finish or undo it before anything is
+            // opened (M10.24), then purge.
+            crate::group::recover(&engine.inner.store, &crate::group::NoFaults);
+        }
+        if housekeeping == Housekeeping::RecoverAndPurge {
+            engine.inner.store.purge(now_secs());
+        }
         engine
+    }
+
+    /// Sets the per-run options of a headless front end; call before analysing.
+    pub fn set_run_options(&self, o: RunOptions) {
+        *lock(&self.inner.run) = o;
+    }
+
+    pub(crate) fn run_options(&self) -> RunOptions {
+        *lock(&self.inner.run)
+    }
+
+    /// The current edit state of an item (what a save would render), for tools that write the
+    /// edit out (`auto-crop analyze --emit-edit`).
+    pub fn edit_state(&self, id: u32) -> Option<EditState> {
+        let item = self.item(id)?;
+        let it = lock(&item);
+        it.history.as_ref().map(|h| h.current().clone())
     }
 
     /// Installs the multi-item detector (the classical one in the app, a stub in tests).
@@ -561,6 +617,7 @@ impl Engine {
             profile,
             ..state.split
         };
+        apply_margin(&mut state, self.run_options().margin_pct);
         Ok(Analysis {
             format: decoded.format,
             snapshot,
@@ -1010,6 +1067,28 @@ impl Engine {
             })
         })();
         result.unwrap_or_else(RestoreOutcome::failed)
+    }
+}
+
+/// Scales every quad about its centre by `1 + 2 * pct / 100` and clamps it to the frame. The
+/// provenance and confidence of the items are untouched, so a margin never makes a held item look
+/// reviewed.
+fn apply_margin(state: &mut EditState, pct: f32) {
+    if !pct.is_finite() || pct == 0.0 {
+        return;
+    }
+    let k = 1.0 + 2.0 * f64::from(pct.clamp(-40.0, 100.0)) / 100.0;
+    for item in &mut state.items {
+        if let auto_crop_core::Geometry::Quad(q) = &mut item.geometry {
+            let n = q.corners.len() as f64;
+            let cx = q.corners.iter().map(|c| c.x).sum::<f64>() / n;
+            let cy = q.corners.iter().map(|c| c.y).sum::<f64>() / n;
+            for c in &mut q.corners {
+                c.x = cx + (c.x - cx) * k;
+                c.y = cy + (c.y - cy) * k;
+            }
+            *q = q.clone().sanitised();
+        }
     }
 }
 
