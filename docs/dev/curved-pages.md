@@ -38,7 +38,8 @@ to the EXIF-oriented image (0..1, y down), like every other quad. Corner order i
   `cum[k] <= target`, clamped to `n - 2`; the point is the lerp of polyline points `k` and `k + 1` by
   `(target - cum[k]) / (cum[k+1] - cum[k])` (0 if that span is 0). A curve of zero length returns its first point.
   A point at `t = 0.5` is halfway along the edge, whatever the control point spacing is.
-- Curves may leave the 0..1 frame slightly (a page cut by the frame) but must be finite and must not
+- Curves may leave the 0..1 frame slightly (a page cut by the frame; the validator allows up to one frame
+  width or height beyond each side, normalised coordinates in -1..=2) but must be finite and must not
   self-intersect (validated: a coarse polyline test).
 
 ## Label format (golden labels and manifests)
@@ -137,7 +138,8 @@ only have to expose it). Names are the Rust ones; JSON is camelCase.
   refuse a document with curves as `SCHEMA_TOO_NEW` instead of half-reading it). `render_hash` and
   `item_render_hash` include the control points, the turns and the mirror, so history, the per-crop cache key
   (`CropView.renderKey`) and "accepted" see every change.
-* `CurveWarp::validate()` (called by every edit, and by the renderer): finite, 2..=32 points, neighbouring
+* `CurveWarp::validate()` (called by every edit, and by the renderer): finite, within -1..=2 of the frame,
+  2..=32 points, neighbouring
   points more than 1e-9 apart, the four end-point pairs meet within 1e-6, the outline has an area, and a
   coarse polyline test (8 samples per segment) finds no crossing. `validate_with_quad(&QuadWarp)` also
   compares with a quad. Any failure is `ErrKind::Degenerate` (`DEGENERATE`).

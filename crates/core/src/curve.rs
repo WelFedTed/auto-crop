@@ -30,6 +30,10 @@ pub const MAX_POINTS: usize = 32;
 pub const SAMPLES_PER_SEGMENT: usize = 64;
 /// How closely the end points of the curves must agree with each other and with the quad.
 pub const CORNER_TOLERANCE: f64 = 1e-6;
+/// How far a curve point may lie outside the frame: normalised coordinates must be in
+/// `-FRAME_MARGIN..=1 + FRAME_MARGIN` (a page cut by the frame, never a number that overflows a
+/// pixel computation).
+pub const FRAME_MARGIN: f64 = 1.0;
 /// Samples per segment of the coarse self-intersection test.
 const CHECK_SAMPLES: usize = 8;
 /// Smallest knot interval (guards a division by zero for coincident points).
@@ -46,6 +50,8 @@ pub enum CurveError {
     NonFinite,
     #[error("two neighbouring points of a curve coincide")]
     CoincidentPoints,
+    #[error("a curve point is more than one frame width or height outside the image")]
+    OutOfRange,
     #[error("the end points of the curves do not meet (or do not match the quad)")]
     CornerMismatch,
     #[error("the page outline crosses itself")]
@@ -361,6 +367,13 @@ impl CurveWarp {
             }
             if c.0.iter().any(|p| !p.is_finite()) {
                 return Err(CurveError::NonFinite);
+            }
+            let range = -FRAME_MARGIN..=1.0 + FRAME_MARGIN;
+            if c.0
+                .iter()
+                .any(|p| !range.contains(&p.x) || !range.contains(&p.y))
+            {
+                return Err(CurveError::OutOfRange);
             }
             if c.0.windows(2).any(|w| dist(w[0], w[1]) < MIN_KNOT) {
                 return Err(CurveError::CoincidentPoints);
@@ -753,6 +766,16 @@ mod tests {
             pt(0.9, 0.9),
         ]));
         assert_eq!(line.validate(), Err(CurveError::NoArea));
+
+        // A page may be cut by the frame, but not run off to numbers that overflow a pixel
+        // computation.
+        let mut far = ok.clone();
+        far.top = curve(&[(0.1, 0.1), (0.5, -0.9), (0.9, 0.1)]);
+        assert_eq!(far.validate(), Ok(()));
+        far.top = curve(&[(0.1, 0.1), (0.5, -1.5), (0.9, 0.1)]);
+        assert_eq!(far.validate(), Err(CurveError::OutOfRange));
+        far.top = curve(&[(0.1, 0.1), (1e300, 0.5), (0.9, 0.1)]);
+        assert_eq!(far.validate(), Err(CurveError::OutOfRange));
     }
 
     #[test]

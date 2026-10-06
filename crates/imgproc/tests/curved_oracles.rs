@@ -981,3 +981,60 @@ fn the_output_size_follows_the_rectified_arc_lengths_and_the_caps() {
     turned.quarter_turns = 1;
     assert_eq!(output_size(1000, 800, &turned, UNLIMITED), Some((h, w)));
 }
+
+proptest::proptest! {
+    #![proptest_config(proptest::prelude::ProptestConfig::with_cases(128))]
+
+    /// Whatever pages the validator lets through (corners anywhere near the frame, any bow, any
+    /// turns and mirror, pages that run past the frame), rendering never panics, respects the
+    /// pixel cap and its own size, or says why not.
+    #[test]
+    fn any_validated_page_renders_within_its_limits_or_errors_cleanly(
+        corners in proptest::collection::vec((-0.4f64..1.4, -0.4f64..1.4), 4),
+        bows in proptest::collection::vec(-0.12f64..0.12, 12),
+        extra in proptest::collection::vec(0usize..3, 4),
+        turns in 0u8..8,
+        mirror in proptest::bool::ANY,
+    ) {
+        let c: Vec<Pt> = corners.iter().map(|&(x, y)| Pt::new(x, y)).collect();
+        let edge = |a: Pt, b: Pt, k: usize| -> Curve {
+            let mut pts = vec![a];
+            for i in 0..extra[k] {
+                let t = (i + 1) as f64 / (extra[k] + 1) as f64;
+                let (dx, dy) = (b.x - a.x, b.y - a.y);
+                let off = bows[k * 3 + i];
+                pts.push(Pt::new(a.x + dx * t - dy * off, a.y + dy * t + dx * off));
+            }
+            pts.push(b);
+            Curve::new(pts).unwrap()
+        };
+        let page = CurveWarp {
+            top: edge(c[0], c[1], 0),
+            right: edge(c[1], c[2], 1),
+            bottom: edge(c[2], c[3], 2),
+            left: edge(c[3], c[0], 3),
+            quarter_turns: turns,
+            mirror,
+        };
+        let src = textured(80, 60);
+        let cap = 200_000u64;
+        let limits = Limits::pixels(cap);
+        let r = render_curved(&src, &page, limits);
+        if page.validate().is_err() {
+            proptest::prop_assert_eq!(r, Err(RenderError::DegenerateQuad));
+        } else {
+            match r {
+                Ok(out) => {
+                    proptest::prop_assert_eq!(
+                        Some((out.width, out.height)),
+                        output_size(80, 60, &page, limits)
+                    );
+                    // Each side rounds to the nearest pixel, so a sliver can overshoot the cap by a little.
+                    proptest::prop_assert!(u64::from(out.width) * u64::from(out.height) <= cap * 2);
+                    proptest::prop_assert_eq!(out.data.len(), out.width as usize * out.height as usize * 3);
+                }
+                Err(e) => proptest::prop_assert_eq!(e, RenderError::DegenerateQuad),
+            }
+        }
+    }
+}
