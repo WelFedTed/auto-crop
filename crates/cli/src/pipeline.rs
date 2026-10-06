@@ -12,7 +12,7 @@
 
 use crate::inputs::Candidate;
 use crate::manifest::{ConfidenceRec, ItemRecord, Status, code};
-use auto_crop_codecs::{CodecError, Format, MAX_PIXELS, probe};
+use auto_crop_codecs::{CodecError, Format, probe};
 use auto_crop_core::{Band, CancelToken, Confidence, ErrKind};
 use auto_crop_engine::memory::{MemoryBudget, Permit, job_weight};
 use auto_crop_engine::util::blake3_hex;
@@ -151,7 +151,7 @@ pub fn prepare(sh: &Shared, idx: usize, cand: &Candidate) -> Prepared {
         return Prepared::Done(Box::new(rec));
     }
     let pixels = u64::from(pr.width) * u64::from(pr.height);
-    if pixels > MAX_PIXELS {
+    if pixels > sh.engine.options().max_pixels {
         return fail(ErrKind::TooLarge);
     }
     drop(bytes);

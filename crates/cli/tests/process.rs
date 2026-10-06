@@ -986,3 +986,48 @@ fn odd_argument_lists_never_crash_the_binary() {
     }
     assert_eq!(hash(&a), ha, "no odd command line touched the file");
 }
+
+#[test]
+fn the_engine_options_quality_presets_strip_location_and_the_pixel_cap_apply() {
+    let sb = Sandbox::new();
+    let a = good_photo(&sb.work().join("a.jpg"), 1);
+    let before = hash(&a);
+    let out = |n: &str| sb.dir.path().join(n);
+    let run = |dir: &str, extra: &[&str]| {
+        let dest = out(dir);
+        let mut v = vec!["process", "--json", "--output", s(&dest)];
+        v.extend_from_slice(extra);
+        v.push(s(&a));
+        sb.run(&v)
+    };
+    let small = run("small", &["--quality", "small"]);
+    let best = run("best", &["--quality", "best"]);
+    assert_eq!(
+        (small.code(), best.code()),
+        (0, 0),
+        "{} {}",
+        small.stderr(),
+        best.stderr()
+    );
+    assert_eq!(small.json()["run"]["options"]["quality"], "small");
+    let len = |d: &str| fs::metadata(out(d).join("a.jpg")).unwrap().len();
+    assert!(
+        len("small") < len("best"),
+        "small {} < best {}",
+        len("small"),
+        len("best")
+    );
+    let strip = run("strip", &["--strip-location", "--quality", "80"]);
+    assert_eq!(strip.code(), 0, "{}", strip.stderr());
+    assert_eq!(strip.json()["run"]["options"]["strip_location"], true);
+    assert_eq!(strip.json()["run"]["options"]["quality"], "80");
+    assert_valid_manifest(&strip.json());
+    // The pixel cap: 1200 x 900 is more than a million pixels.
+    let capped = run("capped", &["--max-pixels", "1000000"]);
+    assert_eq!(capped.code(), 3, "{}", capped.stderr());
+    assert_eq!(items(&capped.json())[0]["code"], "TOO_LARGE");
+    assert!(!out("capped").join("a.jpg").exists());
+    let r = sb.run(&["process", "--quality", "fast", s(&a)]);
+    assert_eq!(r.code(), 2);
+    assert_eq!(hash(&a), before);
+}

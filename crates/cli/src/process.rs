@@ -27,9 +27,7 @@ use auto_crop_engine::fsplan::ReservedKeys;
 use auto_crop_engine::memory::{MIB, MemoryBudget, system_cap};
 use auto_crop_engine::store::{BackupState, Store};
 use auto_crop_engine::util::{new_id, now_secs, rfc3339};
-use auto_crop_engine::{
-    Engine, Housekeeping, JPEG_SAVE_QUALITY, RunOptions, SaveOutcome, SaveTarget,
-};
+use auto_crop_engine::{Engine, Housekeeping, RunOptions, SaveOutcome, SaveTarget};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
@@ -291,10 +289,7 @@ fn save_copies(
     let quads = quads_of(&sh.engine, r.id);
     let result = (|| -> Result<Vec<writer::Rendered>, ErrKind> {
         let bytes = fs::read(&cand.path).map_err(|e| ErrKind::from_io(&e))?;
-        let (raster, _fmt, icc) = writer::decode_source(&bytes)?;
-        drop(bytes);
-        let quality = args.quality.unwrap_or(JPEG_SAVE_QUALITY);
-        writer::render_all(&raster, &quads, format, quality, icc.as_deref())
+        writer::render_all(&bytes, &quads, format, &sh.engine.options())
     })();
     let files = match result {
         Ok(f) if f.len() == plan.paths.len() => f,
@@ -478,9 +473,9 @@ pub fn run(args: ProcessArgs, env: &Env) -> u8 {
         },
     );
     engine.set_run_options(RunOptions {
-        jpeg_quality: args.quality,
         margin_pct: args.detect.margin,
     });
+    engine.set_options(args.knobs.engine_options());
     let jobs = args.jobs.unwrap_or_else(default_jobs).max(1);
     let sh = Shared {
         engine,
@@ -638,7 +633,9 @@ pub fn run(args: ProcessArgs, env: &Env) -> u8 {
                 },
                 margin_percent: args.detect.margin,
                 format: args.format.name(),
-                quality: args.quality,
+                quality: args.knobs.quality_name(),
+                strip_location: args.knobs.strip_location,
+                max_pixels: args.knobs.max_pixels,
                 accept_splits: args.accept_splits,
                 reprocess: args.reprocess,
                 recursive: args.input.recursive,

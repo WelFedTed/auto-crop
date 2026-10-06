@@ -21,12 +21,12 @@
 
 use crate::args::{FormatArg, IfExists, OutputMode};
 use crate::inputs::Candidate;
-use auto_crop_codecs::{Format, MAX_PIXELS, decode, encode};
+use auto_crop_codecs::{Format, decode};
 use auto_crop_core::{ErrKind, QuadWarp};
+use auto_crop_engine::EngineOptions;
 use auto_crop_engine::fsplan::{OnCollision, PlanError, PlanInput, ReservedKeys, plan_group};
+use auto_crop_engine::outputs::{default_output_format, render_outputs};
 use auto_crop_engine::util::{blake3_hex, new_id};
-use auto_crop_imgproc::Raster;
-use auto_crop_imgproc::render::{Limits, render_quad};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -38,15 +38,7 @@ pub fn out_format(source: Format, want: FormatArg) -> Format {
     match want {
         FormatArg::Jpg => Format::Jpeg,
         FormatArg::Png => Format::Png,
-        FormatArg::Keep => {
-            if source.is_encodable() {
-                source
-            } else if source == Format::Heic {
-                Format::Jpeg
-            } else {
-                Format::Png
-            }
-        }
+        FormatArg::Keep => default_output_format(source),
     }
 }
 
@@ -153,40 +145,24 @@ pub struct Rendered {
     pub format: Format,
 }
 
-/// Renders every quad of `raster` and encodes it. A panic in a codec fails the call, not the run.
+/// Renders every quad of the source file's `bytes` through the engine's own output path (lossless
+/// JPEG when exact, else decode once, render, encode with the engine's quality and metadata
+/// policy), so the files equal what an in-place save writes. `format` is the planned output format.
 pub fn render_all(
-    raster: &Raster,
+    bytes: &[u8],
     quads: &[QuadWarp],
     format: Format,
-    quality: u8,
-    icc: Option<&[u8]>,
+    opts: &EngineOptions,
 ) -> Result<Vec<Rendered>, ErrKind> {
-    quads
-        .iter()
-        .map(|q| {
-            auto_crop_engine::run_isolated(std::panic::AssertUnwindSafe(|| {
-                let out = render_quad(raster, q, Limits::pixels(MAX_PIXELS))
-                    .map_err(|_| ErrKind::NoCrop)?;
-                let bytes = encode(&out, format, quality, icc)
-                    .map_err(auto_crop_engine::error::codec_err)?;
-                Ok::<_, ErrKind>(Rendered {
-                    bytes,
-                    width: out.width,
-                    height: out.height,
-                    format,
-                })
-            }))
-            .unwrap_or(Err(ErrKind::InternalPanic))
+    Ok(render_outputs(bytes, quads, Some(format), opts)?
+        .into_iter()
+        .map(|r| Rendered {
+            bytes: r.bytes,
+            width: r.width,
+            height: r.height,
+            format: r.format,
         })
-        .collect()
-}
-
-/// Decodes `bytes` of a source file (the same limits as the engine) for rendering.
-pub fn decode_source(bytes: &[u8]) -> Result<(Raster, Format, Option<Vec<u8>>), ErrKind> {
-    let d = auto_crop_engine::run_isolated(|| decode(bytes))
-        .map_err(|_| ErrKind::InternalPanic)?
-        .map_err(auto_crop_engine::error::codec_err)?;
-    Ok((d.raster, d.format, d.icc))
+        .collect())
 }
 
 struct Temp {
@@ -317,6 +293,8 @@ pub fn commit_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use auto_crop_codecs::encode;
+    use auto_crop_imgproc::Raster;
     use std::sync::Mutex;
 
     fn png(w: u32, h: u32, c: [u8; 3]) -> Rendered {

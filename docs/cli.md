@@ -67,22 +67,25 @@ auto-crop doctor
 This is the default and the reason for the rest of this page: **`auto-crop process` with no output
 option overwrites your files.** It does so in a way you can undo.
 
-1. The image is analysed and the result is rendered and encoded in memory.
+1. The image is analysed and the result is rendered and encoded in memory. A JPEG crop that is exactly
+   axis-aligned is made by moving the JPEG's coefficients (no re-encode, `jpeg.lossless`); everything
+   else is rendered once and encoded once. EXIF orientation is written as 1, the colour profile is kept,
+   and GPS is kept unless `--strip-location`.
 2. The result is written to a temporary file in the same folder, made durable, read back and decoded;
-   its size and pixel dimensions must be what was encoded.
+   its size, format, pixel dimensions and orientation must be what was encoded. There must be room on
+   the disk for it and for the backup, or nothing is written.
 3. A **backup of the original** is copied into the backup store and verified against the hash taken
    when the file was read. No verified backup, no write.
 4. The file is checked once more (it must still be what was read) and the temporary file replaces it
-   in one atomic step. The original's modification time is kept.
+   in one atomic step (`ReplaceFileW` on Windows). The original's modification time is kept.
 5. The backup is recorded as belonging to that output, so `restore` can tell an untouched result from
    one you edited afterwards.
 
 If anything fails before step 4 the original is untouched and the item is reported as failed. A Ctrl+C
 finishes the file in progress and stops, so each file is either as it was or fully replaced with its backup
-in place. After a crash (a power cut, a kill) the same holds for the file itself, and a scan that was being
-split into several files is finished or undone by the next start of the tool or the app (the files are
-written together or not at all); a crash can leave a stray `.autocrop-*.tmp` file in the folder, which is
-safe to delete (the sweep that removes those is a separate roadmap item).
+in place. After a crash (a power cut, a kill) the same holds for the file itself: each save is journalled,
+and the next start of `process` or `restore` (or of the app) finishes it or puts the old bytes back from the
+backup; a scan that was being split into several files is written together or not at all.
 
 **Where the backups are, and for how long.** `%LOCALAPPDATA%\AutoCrop\backups` on Windows,
 `~/Library/Application Support/AutoCrop/backups` on macOS, `$XDG_DATA_HOME/auto-crop/backups` on Linux
@@ -169,10 +172,13 @@ At most one of:
 
 For the three copy modes: `--name-template T` sets the file name (`{name}`, `{n}`, `{ext}`; the extension is
 added if the template has no `{ext}`), `--if-exists keep-both|skip` says what to do when a name is taken
-(default `keep-both`: the stem gets `(2)`), `--format jpg|png|keep` and `--quality 1-100` set the format and the
-JPEG quality (default: the source's format when this build can write it, else PNG, and quality 92).
-`--quality` also sets the quality of an in-place JPEG. Replacing an original in another format is not
-available (usage error). `--margin PERCENT` grows (or, negative, trims) every crop by PERCENT of its size on each
+(default `keep-both`: the stem gets `(2)`), `--format jpg|png|keep` sets the format (default: the source's
+when this build can write it, else PNG, JPEG for HEIC). `--quality small|balanced|best|1-100` sets the JPEG quality in every
+mode: a preset is taken from the source's own quality (balanced: its estimate plus 5, kept within 80 to 95; small: minus
+10, 60 to 85; best: plus 10, 90 to 97; 90, 80 and 95 when the source has no standard tables), a number is used as given
+(default balanced). `--strip-location` drops GPS, XMP and IPTC metadata from every file written (the colour profile is
+kept); `--max-pixels N` refuses images larger than N pixels (default 100 million, at most 500 million; `TOO_LARGE`).
+Replacing an original in another format is not available (usage error). `--margin PERCENT` grows (or, negative, trims) every crop by PERCENT of its size on each
 side (a scale about the crop's centre, clamped to the image); it applies in every mode.
 
 A scan with several items is written as `name_01`, `name_02`... (zero-padded to at least two digits), in
@@ -394,13 +400,12 @@ Ctrl+C does.
 
 From [PLAN 2.12](plan/02-architecture.md) and ROADMAP M2, not implemented in this tool yet (each is a
 roadmap item, not a promise of a date): `--preset receipt|document|photo|flatbed|convert-only` and the
-`convert` command, `--enhance`, `--content-tight`, `--strip-location`, `--max-pixels`, `--deterministic`,
+`convert` command, `--enhance`, `--content-tight`, `--deterministic`,
 `--require-sandbox`, `--dpi`, `--bits`, `--colour`, `--if-exists replace`, `--follow-symlinks`, `backups
 reindex`, `eval`, shell completions and man pages, and the batch scheduler shared with the app
 (M5.20). Replacing an original with a file of another format is not available. The engine commit protocol
-is the app's (verified temp file, backup, atomic replace); a SQLite journal and the Windows
-`ReplaceFileW` swap of the full design (M2.28) are separate roadmap items, and the free-space check before a
-write is not done yet. Of the numbers in this page, the default job count, the memory cap and the cut-offs
+is the app's: this tool calls the engine's save and restore, it has no write path of its own for originals.
+Of the numbers in this page, the default job count, the memory cap and the cut-offs
 are provisional.
 
 ## Design notes

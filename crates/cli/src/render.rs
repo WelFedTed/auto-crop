@@ -20,7 +20,7 @@ use crate::writer::{self, format_name, out_format};
 use auto_crop_codecs::Format;
 use auto_crop_core::{ErrKind, Geometry, QuadWarp, STRICT_CUTOFF};
 use auto_crop_engine::fsplan::expand_name;
-use auto_crop_engine::{Engine, Housekeeping, JPEG_SAVE_QUALITY, RunOptions};
+use auto_crop_engine::{Engine, Housekeeping, RunOptions};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
@@ -161,9 +161,9 @@ pub fn run(args: RenderArgs, env: &Env) -> u8 {
         settings.split_profile = args.profile;
         let engine = Engine::with_settings(env.paths.clone(), settings, Housekeeping::None);
         engine.set_run_options(RunOptions {
-            jpeg_quality: None,
             margin_pct: args.margin,
         });
+        engine.set_options(args.knobs.engine_options());
         let sh = Shared {
             engine,
             budget: crate::process::budget(None),
@@ -253,15 +253,7 @@ pub fn run(args: RenderArgs, env: &Env) -> u8 {
     }
     let rendered = (|| -> Result<Vec<writer::Rendered>, ErrKind> {
         let bytes = fs::read(&abs).map_err(|e| ErrKind::from_io(&e))?;
-        let (raster, _fmt, icc) = writer::decode_source(&bytes)?;
-        drop(bytes);
-        writer::render_all(
-            &raster,
-            &quads,
-            format,
-            args.quality.unwrap_or(JPEG_SAVE_QUALITY),
-            icc.as_deref(),
-        )
+        writer::render_all(&bytes, &quads, format, &args.knobs.engine_options())
     })();
     let files = match rendered {
         Ok(f) => f,

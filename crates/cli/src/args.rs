@@ -10,6 +10,7 @@
 //! unknown flag is a usage error with a suggestion. Parsing never touches the file system.
 
 use auto_crop_core::{SplitPolicy, SplitProfile};
+use auto_crop_engine::{EngineOptions, QualityPreset, QualitySetting};
 use std::path::PathBuf;
 
 /// One flag of a command.
@@ -228,8 +229,19 @@ pub fn process_flags() -> Vec<Flag> {
         val(
             "quality",
             None,
-            "1-100",
-            "JPEG quality of written files (default 92)",
+            "small|balanced|best|1-100",
+            "JPEG quality of written files: a preset taken from the source's own quality (default balanced) or a fixed number",
+        ),
+        sw(
+            "strip-location",
+            None,
+            "Drop GPS, XMP and IPTC metadata from written files (other EXIF is kept)",
+        ),
+        val(
+            "max-pixels",
+            None,
+            "N",
+            "Refuse images larger than N pixels (default 100 million, at most 500 million)",
         ),
     ]);
     f.extend(detect_flags());
@@ -285,6 +297,12 @@ pub fn analyze_flags() -> Vec<Flag> {
             "Write each image's edit state as DIR/<name>.edit.json (for `render --edit`)",
         ),
         sw("timings", None, "Include per-stage times in the report"),
+        val(
+            "max-pixels",
+            None,
+            "N",
+            "Refuse images larger than N pixels (default 100 million, at most 500 million)",
+        ),
     ]);
     f.extend(pool_flags());
     f.extend(global_flags());
@@ -311,7 +329,23 @@ pub fn render_flags() -> Vec<Flag> {
             "jpg|png|keep",
             "Output format (default keep)",
         ),
-        val("quality", None, "1-100", "JPEG quality (default 92)"),
+        val(
+            "quality",
+            None,
+            "small|balanced|best|1-100",
+            "JPEG quality: a preset taken from the source's own quality (default balanced) or a fixed number",
+        ),
+        sw(
+            "strip-location",
+            None,
+            "Drop GPS, XMP and IPTC metadata from the output",
+        ),
+        val(
+            "max-pixels",
+            None,
+            "N",
+            "Refuse images larger than N pixels (default 100 million, at most 500 million)",
+        ),
         sw("force", None, "Overwrite an existing output file"),
     ];
     f.extend(
@@ -675,6 +709,69 @@ impl FormatArg {
     }
 }
 
+/// The output knobs that are the engine's own options (quality, metadata, pixel cap).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Knobs {
+    pub quality: Option<QualitySetting>,
+    pub strip_location: bool,
+    pub max_pixels: Option<u64>,
+}
+
+impl Knobs {
+    /// The engine's options for a run: its defaults with what the command line changed.
+    pub fn engine_options(&self) -> EngineOptions {
+        let mut o = EngineOptions::default();
+        if let Some(q) = self.quality {
+            o.quality = q;
+        }
+        o.strip_location = self.strip_location;
+        if let Some(m) = self.max_pixels {
+            o.max_pixels = m;
+        }
+        o
+    }
+
+    /// The quality as written in the manifest: `small`, `balanced`, `best` or the number.
+    pub fn quality_name(&self) -> Option<String> {
+        self.quality.map(|q| match q {
+            QualitySetting::Fixed { value } => value.to_string(),
+            QualitySetting::Preset { preset } => match preset {
+                QualityPreset::Small => "small",
+                QualityPreset::Balanced => "balanced",
+                QualityPreset::Best => "best",
+            }
+            .to_owned(),
+        })
+    }
+}
+
+fn knobs(p: &Parsed) -> Res<Knobs> {
+    let quality = match p.value("quality") {
+        None => None,
+        Some("small") => Some(QualitySetting::Preset {
+            preset: QualityPreset::Small,
+        }),
+        Some("balanced") => Some(QualitySetting::Preset {
+            preset: QualityPreset::Balanced,
+        }),
+        Some("best") => Some(QualitySetting::Preset {
+            preset: QualityPreset::Best,
+        }),
+        Some(_) => number(p, "quality", 1u8, 100)
+            .map_err(|_| {
+                Usage(
+                    "`--quality` needs small, balanced, best or a number from 1 to 100".to_owned(),
+                )
+            })?
+            .map(|value| QualitySetting::Fixed { value }),
+    };
+    Ok(Knobs {
+        quality,
+        strip_location: p.has("strip-location"),
+        max_pixels: number(p, "max-pixels", 1_000_000u64, 500_000_000)?,
+    })
+}
+
 fn format_arg(p: &Parsed) -> Res<FormatArg> {
     match p.value("format") {
         None | Some("keep") => Ok(FormatArg::Keep),
@@ -733,7 +830,7 @@ pub struct ProcessArgs {
     pub name_template: Option<String>,
     pub if_exists: IfExists,
     pub format: FormatArg,
-    pub quality: Option<u8>,
+    pub knobs: Knobs,
     pub accept_splits: bool,
     pub reprocess: bool,
     pub dry_run: bool,
@@ -823,7 +920,7 @@ fn process(p: &Parsed) -> Res<ProcessArgs> {
         name_template,
         if_exists,
         format,
-        quality: number(p, "quality", 1u8, 100)?,
+        knobs: knobs(p)?,
         accept_splits: p.has("accept-splits"),
         reprocess: p.has("reprocess"),
         dry_run: p.has("dry-run"),
@@ -841,6 +938,7 @@ pub struct AnalyzeArgs {
     pub detect: DetectArgs,
     pub emit_edit: Option<PathBuf>,
     pub timings: bool,
+    pub knobs: Knobs,
     pub jobs: Option<usize>,
     pub mem_limit_mb: Option<u64>,
 }
@@ -851,7 +949,7 @@ pub struct RenderArgs {
     pub output: PathBuf,
     pub edit: Option<PathBuf>,
     pub format: FormatArg,
-    pub quality: Option<u8>,
+    pub knobs: Knobs,
     pub force: bool,
     pub margin: f32,
     pub split: SplitPolicy,
@@ -1046,6 +1144,7 @@ pub fn parse_cli(args: &[String]) -> Res<Cli> {
                 input: inputs(&p, "analyze")?,
                 detect: detect(&p)?,
                 emit_edit: p.value("emit-edit").map(PathBuf::from),
+                knobs: knobs(&p)?,
                 timings: p.has("timings"),
                 jobs,
                 mem_limit_mb,
@@ -1070,7 +1169,7 @@ pub fn parse_cli(args: &[String]) -> Res<Cli> {
                 output: PathBuf::from(out),
                 edit: p.value("edit").map(PathBuf::from),
                 format: format_arg(&p)?,
-                quality: number(&p, "quality", 1u8, 100)?,
+                knobs: knobs(&p)?,
                 force: p.has("force"),
                 margin: d.0,
                 split,
@@ -1348,8 +1447,12 @@ mod tests {
         assert_eq!(p.detect.split, SplitPolicy::Never);
         assert_eq!(p.mode, OutputMode::Suffix("_c".to_owned()));
         assert_eq!(
-            (p.jobs, p.mem_limit_mb, p.quality),
-            (Some(2), Some(512), Some(80))
+            (p.jobs, p.mem_limit_mb, p.knobs.quality),
+            (
+                Some(2),
+                Some(512),
+                Some(QualitySetting::Fixed { value: 80 })
+            )
         );
         assert_eq!(p.if_exists, IfExists::Skip);
         assert_eq!(p.progress, Progress::Never);

@@ -291,9 +291,9 @@ pub fn run(args: AnalyzeArgs, env: &Env) -> u8 {
     // Analysis writes nothing at all: no recovery sweep, no purge.
     let engine = Engine::with_settings(env.paths.clone(), settings, Housekeeping::None);
     engine.set_run_options(RunOptions {
-        jpeg_quality: None,
         margin_pct: args.detect.margin,
     });
+    engine.set_options(args.knobs.engine_options());
     let sh = Shared {
         engine,
         budget: budget(args.mem_limit_mb),
