@@ -18,7 +18,7 @@ ort = ["dep:ort"]
 rten = ["dep:rten", "dep:rten-tensor"]
 
 [dependencies]
-sha2 = "0.10"
+sha2 = "0.11"
 thiserror.workspace = true
 # default-features off: no `download-binaries` (the downloaded runtime fails to link on Ubuntu 22.04
 # and is not covered by our hash policy), no `copy-dylibs`, no `tls-native` (no TLS stack in the
