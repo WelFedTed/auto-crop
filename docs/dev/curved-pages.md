@@ -215,3 +215,41 @@ exact render.
   from the display proxy, saves at the source's own scale.
 * The CLI does not read curves (`--curves FILE` is out of scope). `render --edit` of a state with a curved
   crop ignores that crop.
+
+## The editor (shell and UI)
+
+`crates/shell`: the commands `curve_from_quad(id, crop)`, `set_curves(id, crop, curves, phase, label, gesture)`
+(`phase: "live"` validates and records nothing; anything else is one undo step per gesture id) and
+`clear_curves(id, crop)`; `curves` is the `CurveSet` of `ui/src/lib/types.ts` (the JSON of `CurveWarp`). The flattened
+preview of a candidate set is NOT an IPC call: it is the `acimg` route
+`/<token>/<id>/crop/<crop>/curve-<thumb|result>?t=..&r=..&b=..&l=..&q=<turns>&m=<0|1>` (flat lists of normalised
+`x,y,x,y...` per edge, digits, commas, dots and minus signs only; `parse_curve_query` is strict). `thumb` is the small
+fast one for a drag in progress, `result` the full preview size (the straight-crop comparison); a newer request of the
+same kind cancels an older one (`Superseded`, answered 204), a shape the renderer refuses is answered 422. Nothing is
+committed or cached; the committed picture is the ordinary per-crop image (`crop/<crop>/result?k=<renderKey>`).
+
+`ui/src`: `curve.ts` is the spline, arc length, validation and Coons patch in TypeScript, held to
+`curved-pages-vectors.json` to 1e-9 (`curve.test.ts`); it draws the outline, picks handles and refuses what the engine
+would refuse, and never computes pixels (only the browser mock does, `mock-scene.ts`). `curve-edit.ts` is the pure
+state machine of the handles (`curve-edit.test.ts`). Behaviour:
+
+* Straight | Curved per crop. Curved calls `curve_from_quad`; Straight (or Back to straight) calls `clear_curves`
+  (Undo brings the curves back). Corner handles of a curved page move the end points of the two curves that meet
+  there and the interior points follow the chord (the labeller's rule), through `set_curves`; the quad operations
+  the engine refuses (`set_crop_edit`, angle, merge, cut) are disabled with the reason, and an `ITEM_OP` on a curved
+  page is explained.
+* One handle per corner and per interior point, and one hollow handle in the middle of an edge that has none (it
+  becomes a point when dragged or on Enter). 16 px dot in a 48 px hit area; double-click or press and hold on an edge
+  adds a point, double-click on a point or Delete removes it (an edge keeps its two corners, at most 32 points);
+  roving tab stop with `[` `]` / Page keys / Home / End, arrows nudge 1 px, Shift 10 px, Alt a quarter pixel; Esc
+  deselects; Add point, Remove, Straighten and Reset buttons; the selected point has x and y fields. A drag is one
+  `set_curves` with a fresh gesture id; a burst of nudges shares one (`GestureClock`, 500 ms).
+* The picture: while dragging, the inset asks for the `curve-thumb` preview about every 90 ms; when the drag lands it
+  keeps that picture until the committed crop image has loaded. Flattened | Straight crop compares with the same
+  corners and straight edges (`curve-result` of the reset set).
+* A curved page is held: `CropView.band` is `check` until `accept_scan`, the banner says 'Curved page: review, then
+  accept', Replace original is off with the reason until then (the engine answers `HELD_FOR_REVIEW`, notice
+  `curved.held`), Save as copy always works, Save all never writes it unaccepted.
+* Try sample images writes `receipt_curved.jpg`: a receipt bent by an analytic model (`samples::curved_page_point`) whose
+  edges are known exactly (`curved_sample_edges`); the plain detector gets its bottom edge wrong (Check, weak edge),
+  which is a fair picture of what the editor is for.
