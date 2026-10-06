@@ -31,7 +31,7 @@ auto-crop-imgproc = { path = "../imgproc" }
 # Pure-Rust decoders only (zune-jpeg 0.5.15, png, tiff, image-webp). HEIC and the libjpeg-turbo path
 # arrive in M6 and M1.18/M1.19 (ADR-0004/0005).
 thiserror.workspace = true
-image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff", "webp"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff", "webp", "bmp"] }
 # Pin: zune-jpeg 0.5.15 is the release we measured (ROADMAP M1.15); the 0.5.16 release candidate is not
 # adopted. `image` resolves to this exact version anyway; the pin keeps a lockfile refresh from moving it.
 zune-jpeg = "=0.5.15"

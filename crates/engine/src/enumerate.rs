@@ -135,18 +135,12 @@ mod tests {
 
     #[test]
     fn the_extension_list_is_what_this_build_decodes() {
-        for yes in ["a.jpg", "a.JPEG", "a.png", "a.tif", "a.TIFF", "a.webp"] {
+        for yes in [
+            "a.jpg", "a.JPEG", "a.png", "a.tif", "a.TIFF", "a.webp", "a.BMP",
+        ] {
             assert!(is_candidate(Path::new(yes)), "{yes}");
         }
-        for no in [
-            "a.gif",
-            "a.bmp",
-            "a.jxl",
-            "a.pdf",
-            "a.txt",
-            "a",
-            ".autocrop-1.png",
-        ] {
+        for no in ["a.gif", "a.jxl", "a.pdf", "a.txt", "a", ".autocrop-1.png"] {
             assert!(!is_candidate(Path::new(no)), "{no}");
         }
         // HEIC, HEIF and AVIF are candidates exactly when the codecs can decode them.

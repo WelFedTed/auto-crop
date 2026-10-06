@@ -346,11 +346,7 @@ fn probe_reports_the_stored_icc_size_byte_exact_for_jpeg_tiff_and_webp() {
 
 #[test]
 fn recognised_only_formats_sniff_but_do_not_probe() {
-    for (bytes, f) in [
-        (gif_stub(), Format::Gif),
-        (bmp_stub(), Format::Bmp),
-        (jxl_stub(), Format::Jxl),
-    ] {
+    for (bytes, f) in [(gif_stub(), Format::Gif), (jxl_stub(), Format::Jxl)] {
         assert_eq!(sniff(&bytes), Some(f));
         assert_eq!(probe(&bytes), Err(CodecError::NotDecodable(f)));
         assert!(!f.is_decodable());

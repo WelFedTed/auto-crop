@@ -3,6 +3,7 @@
 
 //! Behavioural tests of the codec pipeline, built on the generated fixtures of `crate::fixtures`.
 
+mod bmp;
 mod decode;
 mod limits;
 mod lossless;

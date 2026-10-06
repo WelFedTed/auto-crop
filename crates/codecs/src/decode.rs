@@ -105,6 +105,7 @@ fn image_format(f: Format) -> ImageFormat {
         Format::Jpeg => ImageFormat::Jpeg,
         Format::Png => ImageFormat::Png,
         Format::Tiff => ImageFormat::Tiff,
+        Format::Bmp => ImageFormat::Bmp,
         _ => ImageFormat::WebP,
     }
 }

@@ -1175,6 +1175,37 @@ pub fn bmp_stub() -> Vec<u8> {
     v
 }
 
+/// A BMP of `rgb` (RGB8 rows, top to bottom) as 24-bit `BITMAPINFOHEADER`, bottom-up unless
+/// `top_down` (then the height is stored negative).
+pub fn bmp_rgb24(w: u32, h: u32, rgb: &[u8], top_down: bool) -> Vec<u8> {
+    let row = ((w as usize * 3).div_ceil(4)) * 4;
+    let mut px = vec![0u8; row * h as usize];
+    for y in 0..h as usize {
+        let dst = if top_down { y } else { h as usize - 1 - y };
+        for x in 0..w as usize {
+            let s = (y * w as usize + x) * 3;
+            let d = dst * row + x * 3;
+            // BMP stores B, G, R.
+            px[d] = rgb[s + 2];
+            px[d + 1] = rgb[s + 1];
+            px[d + 2] = rgb[s];
+        }
+    }
+    let mut v = b"BM".to_vec();
+    v.extend_from_slice(&((54 + px.len()) as u32).to_le_bytes());
+    v.extend_from_slice(&[0; 4]);
+    v.extend_from_slice(&54u32.to_le_bytes());
+    v.extend_from_slice(&40u32.to_le_bytes());
+    v.extend_from_slice(&(w as i32).to_le_bytes());
+    let height = if top_down { -(h as i32) } else { h as i32 };
+    v.extend_from_slice(&height.to_le_bytes());
+    v.extend_from_slice(&1u16.to_le_bytes());
+    v.extend_from_slice(&24u16.to_le_bytes());
+    v.extend_from_slice(&[0; 24]); // BI_RGB, size, resolution, palette counts
+    v.extend_from_slice(&px);
+    v
+}
+
 pub fn jxl_stub() -> Vec<u8> {
     vec![0xFF, 0x0A, 0, 0, 0, 0]
 }

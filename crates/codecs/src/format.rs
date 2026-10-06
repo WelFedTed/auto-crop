@@ -40,12 +40,12 @@ impl Format {
         }
     }
 
-    /// True for the formats [`crate::decode`] reads in this build: JPEG, PNG, TIFF and WebP
+    /// True for the formats [`crate::decode`] reads in this build: JPEG, PNG, TIFF, WebP and BMP
     /// always, HEIC and AVIF with the `heif` feature (libheif, libde265 and dav1d).
     pub fn is_decodable(self) -> bool {
         matches!(
             self,
-            Format::Jpeg | Format::Png | Format::Tiff | Format::Webp
+            Format::Jpeg | Format::Png | Format::Tiff | Format::Webp | Format::Bmp
         ) || (cfg!(feature = "heif") && matches!(self, Format::Heic | Format::Avif))
     }
 

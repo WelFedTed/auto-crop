@@ -67,16 +67,16 @@ use image::ImageEncoder;
 /// Largest image accepted by default (PLAN C1: 100 MP).
 pub const MAX_PIXELS: u64 = DEFAULT_MAX_PIXELS;
 
-/// Formats this build can decode: JPEG, PNG, TIFF and WebP always; HEIC and AVIF with the `heif`
-/// feature (so the list never promises more than [`decode`] delivers).
+/// Formats this build can decode: JPEG, PNG, TIFF, WebP and BMP always; HEIC and AVIF with the
+/// `heif` feature (so the list never promises more than [`decode`] delivers).
 pub fn supported_input_formats() -> &'static [&'static str] {
     #[cfg(feature = "heif")]
     {
-        &["jpeg", "png", "tiff", "webp", "heic", "avif"]
+        &["jpeg", "png", "tiff", "webp", "bmp", "heic", "avif"]
     }
     #[cfg(not(feature = "heif"))]
     {
-        &["jpeg", "png", "tiff", "webp"]
+        &["jpeg", "png", "tiff", "webp", "bmp"]
     }
 }
 
@@ -86,12 +86,12 @@ pub fn supported_input_extensions() -> &'static [&'static str] {
     #[cfg(feature = "heif")]
     {
         &[
-            "jpg", "jpeg", "png", "tif", "tiff", "webp", "heic", "heif", "avif",
+            "jpg", "jpeg", "png", "tif", "tiff", "webp", "bmp", "heic", "heif", "avif",
         ]
     }
     #[cfg(not(feature = "heif"))]
     {
-        &["jpg", "jpeg", "png", "tif", "tiff", "webp"]
+        &["jpg", "jpeg", "png", "tif", "tiff", "webp", "bmp"]
     }
 }
 

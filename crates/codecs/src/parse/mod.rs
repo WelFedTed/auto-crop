@@ -9,6 +9,7 @@
 use crate::{CodecError, DecodeLimits, Format, Limit};
 use std::ops::Range;
 
+pub(crate) mod bmp;
 pub(crate) mod heif;
 pub(crate) mod jpeg;
 pub(crate) mod png;
@@ -118,6 +119,7 @@ pub(crate) fn parse(
         Format::Png => png::parse(bytes, limits)?,
         Format::Tiff => tiff::parse(bytes, limits)?,
         Format::Webp => webp::parse(bytes, limits)?,
+        Format::Bmp => bmp::parse(bytes, limits)?,
         Format::Heic | Format::Avif => heif::parse(bytes, format, limits)?,
         other => return Err(CodecError::NotDecodable(other)),
     };
