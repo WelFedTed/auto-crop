@@ -14,7 +14,7 @@
 //! restore completes.
 
 use crate::api::*;
-use crate::commit::{free_name, swap, write_temp};
+use crate::commit::{TempWrite, free_name, swap, write_temp};
 use crate::engine::{Engine, Snapshot, lock, stat_of};
 use crate::error::{ErrKind, Result};
 use crate::group::move_no_clobber;
@@ -24,6 +24,26 @@ use crate::util::{blake3_hex, now_secs};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
+
+/// The restore's temp file: the original's bytes with its mtime and attributes, re-read and checked
+/// against the hash recorded when it was backed up before anything is swapped (PLAN 2.7 "Restore
+/// original": the same verify as a save). Nothing is left behind on failure.
+pub(crate) fn verified_temp(
+    dir: &Path,
+    bytes: &[u8],
+    hash: &str,
+    mtime: std::time::SystemTime,
+    attrs: Option<u32>,
+) -> Result<TempWrite> {
+    let t = write_temp(dir, bytes, Some(mtime))?;
+    let ok = fs::read(&t.path).is_ok_and(|b| blake3_hex(&b) == hash);
+    if !ok {
+        t.discard();
+        return Err(ErrKind::VerifyFailed);
+    }
+    crate::store::apply_attrs(&t.path, attrs);
+    Ok(t)
+}
 
 fn hash_hex(p: &Path) -> Option<String> {
     hash_file(p).ok().map(|id| id.to_hex())
@@ -185,7 +205,13 @@ impl Engine {
                 target.clone()
             };
             if !already_original {
-                let tmp = write_temp(&dir, &orig_bytes, Some(mtime))?;
+                let tmp = verified_temp(
+                    &dir,
+                    &orig_bytes,
+                    &m.original_blake3,
+                    mtime,
+                    m.original_attrs,
+                )?;
                 let placed = if dest == target && current.is_some() {
                     // ReplaceAnyway: what is there is kept in the backup first.
                     if let Some(pre) = store.pre_restore_path(&m) {

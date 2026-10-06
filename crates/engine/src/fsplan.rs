@@ -22,6 +22,7 @@
 //! refuses to overwrite): a name taken in between aborts with `PlanStale`, nothing is written.
 
 use crate::error::ErrKind;
+use auto_crop_codecs::Format;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -30,6 +31,23 @@ use std::path::{Path, PathBuf};
 pub const DEFAULT_TEMPLATE_N: &str = "{name}_{n}";
 /// The one-to-one template.
 pub const DEFAULT_TEMPLATE_1: &str = "{name}";
+
+/// The one rule for what may be replaced in place (PLAN 2.7 "What may be replaced"): a source is
+/// replaced only if it is a single-frame image **and** this build can write its format without
+/// dropping content. Every path (the single-item save, the multi-item group, the CLI) asks here;
+/// nothing else decides. `None`: replaceable. `Some(notice)`: the source stays byte-identical and
+/// the notice code says why (`tiff.multi_page`, `anim.first_frame_only`, `heic.multi_image`,
+/// `format.write_unavailable`).
+pub fn replace_refusal(format: Format, frames: u32) -> Option<&'static str> {
+    if frames > 1 {
+        return Some(match format {
+            Format::Png | Format::Webp | Format::Gif => "anim.first_frame_only",
+            Format::Heic | Format::Avif => "heic.multi_image",
+            _ => "tiff.multi_page",
+        });
+    }
+    (!format.is_encodable()).then_some("format.write_unavailable")
+}
 
 /// Longest `{name}` substituted, in characters (a source name is never trusted to be short).
 const MAX_NAME_CHARS: usize = 100;
@@ -583,6 +601,61 @@ mod tests {
         let p = plan_group(&inp).unwrap();
         assert_eq!(p.paths[0], old[0]);
         assert_eq!(p.paths[2], dir.path().join("a_03.jpg"));
+    }
+
+    #[test]
+    fn the_replaceability_gate_is_one_rule() {
+        assert_eq!(replace_refusal(Format::Jpeg, 1), None);
+        assert_eq!(replace_refusal(Format::Png, 1), None);
+        // Animated PNG, animated WebP and GIF, multi-page TIFF, multi-image HEIC: never replaced.
+        assert_eq!(
+            replace_refusal(Format::Png, 3),
+            Some("anim.first_frame_only")
+        );
+        assert_eq!(
+            replace_refusal(Format::Webp, 2),
+            Some("anim.first_frame_only")
+        );
+        assert_eq!(replace_refusal(Format::Tiff, 4), Some("tiff.multi_page"));
+        assert_eq!(replace_refusal(Format::Heic, 2), Some("heic.multi_image"));
+        // No writer in this build.
+        for f in [
+            Format::Tiff,
+            Format::Webp,
+            Format::Heic,
+            Format::Avif,
+            Format::Bmp,
+            Format::Gif,
+        ] {
+            assert_eq!(
+                replace_refusal(f, 1),
+                Some("format.write_unavailable"),
+                "{f:?}"
+            );
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(10_000))]
+
+        /// M2.27: over 10,000 generated cases, the names of one group are pairwise distinct under
+        /// the collision key, however hostile the stem and the extension are, and each is one
+        /// sanitised component.
+        #[test]
+        fn names_of_a_group_never_share_a_collision_key(
+            stem in "\\PC{0,30}",
+            ext in "[a-zA-Z]{0,5}",
+            total in 1usize..120,
+        ) {
+            let mut seen = HashSet::new();
+            for rank in 1..=total {
+                let rank_of = (total > 1).then_some((rank, total));
+                if let Ok(name) = expand_name(DEFAULT_TEMPLATE_N, &stem, rank_of, &ext) {
+                    prop_assert!(seen.insert(collision_key(&name)), "{name:?} collides");
+                    prop_assert_eq!(Path::new(&name).components().count(), 1);
+                }
+            }
+        }
     }
 
     proptest! {

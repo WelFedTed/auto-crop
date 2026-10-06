@@ -1323,6 +1323,45 @@ pub fn recover(store: &Store, hook: &dyn FaultHook) -> RecoveryReport {
     report
 }
 
+/// Is `name` exactly a temp name this engine makes: `.autocrop-<28 hex digits>.tmp`?
+fn is_own_temp_name(name: &str) -> bool {
+    name.strip_prefix(".autocrop-")
+        .and_then(|r| r.strip_suffix(".tmp"))
+        .is_some_and(|id| id.len() == 28 && id.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+/// Removes orphan temp files from `dir` (ROADMAP M2.83, PLAN 2.7 "stray `.autocrop-*.tmp` files
+/// are swept"): files named exactly like ours (`.autocrop-<id>.tmp`) that no journal names (a
+/// journalled temp is recovery's to deal with) and that are older than `min_age`. The age comes
+/// from the id itself (its first 12 hex digits are the creation time in milliseconds), so it
+/// survives a copy of the folder and needs no file times. Anything else, including a file merely
+/// called `.autocrop-something.tmp`, is left alone. Returns what was removed.
+pub fn sweep_orphans(store: &Store, dir: &Path, min_age: Duration) -> Vec<PathBuf> {
+    let named: std::collections::HashSet<PathBuf> = fs::read_dir(store.groups_dir())
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| read_journal(&e.path()))
+        .flat_map(|j| j.outputs.into_iter().map(|o| PathBuf::from(o.temp)))
+        .collect();
+    let now_ms = unix_ms(SystemTime::now());
+    let mut removed = Vec::new();
+    for e in fs::read_dir(dir).into_iter().flatten().flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if !is_own_temp_name(&name) || named.contains(&e.path()) {
+            continue;
+        }
+        let created = i64::from_str_radix(&name[".autocrop-".len()..".autocrop-".len() + 12], 16)
+            .unwrap_or(i64::MAX);
+        let old_enough = now_ms.saturating_sub(created) >= min_age.as_millis() as i64;
+        let is_file = e.file_type().is_ok_and(|t| t.is_file());
+        if old_enough && is_file && remove_with_retry(&e.path()).is_ok() {
+            removed.push(e.path());
+        }
+    }
+    removed
+}
+
 /// Journals still on disk (tests and diagnostics).
 pub fn pending_journals(store: &Store) -> usize {
     fs::read_dir(store.groups_dir())
@@ -1345,4 +1384,76 @@ pub fn stray_temps(dir: &Path) -> Vec<PathBuf> {
                 .is_some_and(|n| n.to_string_lossy().starts_with(".autocrop-"))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_named(dir: &Path, age_ms: i64) -> PathBuf {
+        let id = format!("{:012x}{:016x}", unix_ms(SystemTime::now()) - age_ms, 7u64);
+        let p = dir.join(format!(".autocrop-{id}.tmp"));
+        fs::write(&p, b"orphan").unwrap();
+        p
+    }
+
+    #[test]
+    fn only_our_own_old_unjournalled_temps_are_swept() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::new(root.path().join("backups"));
+        let dir = root.path().join("photos");
+        fs::create_dir_all(&dir).unwrap();
+        let old = temp_named(&dir, 3_600_000);
+        let fresh = temp_named(&dir, 1_000);
+        let stranger = dir.join(".autocrop-notours.tmp");
+        let wrong_ext = dir.join(format!(".autocrop-{:028x}.png", 1));
+        let photo = dir.join("a.jpg");
+        for p in [&stranger, &wrong_ext, &photo] {
+            fs::write(p, b"x").unwrap();
+        }
+        let gone = sweep_orphans(&store, &dir, Duration::from_secs(300));
+        assert_eq!(gone, std::slice::from_ref(&old));
+        assert!(
+            !old.exists()
+                && fresh.exists()
+                && stranger.exists()
+                && wrong_ext.exists()
+                && photo.exists()
+        );
+        // A temp that a journal names is recovery's, not the sweep's.
+        let journalled = temp_named(&dir, 3_600_000);
+        fs::create_dir_all(store.groups_dir()).unwrap();
+        let j = Journal {
+            schema: JOURNAL_SCHEMA,
+            id: "j".repeat(28),
+            owner: None,
+            phase: Phase::Writing,
+            created_at: 0,
+            source: SourceRec {
+                path: photo.to_string_lossy().into_owned(),
+                size: 1,
+                mtime_ms: 0,
+                blake3: String::new(),
+            },
+            unlink_source: false,
+            backup_id: None,
+            backup_created: false,
+            outputs: vec![JOutput {
+                item_id: 0,
+                index: 1,
+                temp: journalled.to_string_lossy().into_owned(),
+                final_path: photo.to_string_lossy().into_owned(),
+                blake3: String::new(),
+                size: 0,
+                mtime_ms: 0,
+                replaces: None,
+            }],
+            retire: Vec::new(),
+            edit: None,
+            in_place: false,
+        };
+        write_journal(&store, &j).unwrap();
+        assert!(sweep_orphans(&store, &dir, Duration::from_secs(300)).is_empty());
+        assert!(journalled.exists());
+    }
 }

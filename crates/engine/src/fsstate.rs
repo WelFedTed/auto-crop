@@ -86,8 +86,9 @@ const SYNC_ROOTS: [&str; 7] = [
 /// Does `path` sit inside a folder a sync client manages (by name)? A heuristic: it only decides
 /// whether to attach a notice.
 pub fn in_sync_root(path: &Path) -> bool {
-    path.components().any(|c| {
-        let n = c.as_os_str().to_string_lossy().to_lowercase();
+    // Split on both separators so the answer does not depend on which OS spelled the path.
+    path.to_string_lossy().split(['/', '\\']).any(|c| {
+        let n = c.to_lowercase();
         SYNC_ROOTS
             .iter()
             .any(|r| n == *r || n.starts_with(&format!("{r} -")))

@@ -313,6 +313,9 @@ pub struct BackupsView {
     pub location: String,
     pub used_bytes: u64,
     pub free_bytes: Option<u64>,
+    /// `store.large` (10 GB used) and `store.low_space` (under 5 GB free on the store's volume).
+    #[serde(default)]
+    pub warnings: Vec<String>,
     pub runs: Vec<BackupRun>,
 }
 

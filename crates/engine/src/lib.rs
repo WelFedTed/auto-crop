@@ -5,6 +5,7 @@
 
 pub mod api;
 pub mod commit;
+pub mod convert;
 mod engine;
 pub mod enumerate;
 pub mod error;

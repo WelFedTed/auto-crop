@@ -6,7 +6,7 @@
 //! receives plain serialisable views.
 
 use crate::api::*;
-use crate::commit::{free_name, swap, write_temp};
+use crate::commit::{free_name, swap};
 use crate::enumerate;
 use crate::error::{ErrKind, Result, codec_err};
 use crate::fsplan::ReservedKeys;
@@ -92,6 +92,8 @@ pub(crate) struct Item {
     pub(crate) saved: Option<SavedRec>,
     /// Frames, pages or IFDs the source declares (a multi-page TIFF is never replaced).
     pub(crate) frames: u32,
+    /// The EXIF orientation the source declared (1 = none), applied to the pixels at decode.
+    pub(crate) exif_orientation: u8,
     /// The `render_hash` of the state the user accepted for saving (M10.29): a held split scan is
     /// written only while its current state still has this hash.
     pub(crate) accepted: Option<u64>,
@@ -151,9 +153,11 @@ impl Item {
             crops,
             split,
             history_position: self.history.as_ref().map_or(0, |h| h.position()),
-            open_only: (self.status == ItemStatus::Ready
-                && (self.frames > 1 || !self.format.is_encodable()))
-            .then(|| crate::scan::not_replaceable_notice(self.frames).to_owned()),
+            // The one replaceability gate (`fsplan::replace_refusal`) names the reason.
+            open_only: (self.status == ItemStatus::Ready)
+                .then(|| crate::fsplan::replace_refusal(self.format, self.frames))
+                .flatten()
+                .map(str::to_owned),
         }
     }
 
@@ -339,6 +343,7 @@ impl Engine {
 
     fn start(paths: AppPaths, settings: Settings, housekeeping: Housekeeping) -> Self {
         let store = Store::new(paths.backups_dir());
+        store.set_method(crate::output::EngineOptions::default().backup_method);
         let engine = Self {
             inner: Arc::new(Inner {
                 paths,
@@ -363,7 +368,8 @@ impl Engine {
             crate::group::recover(&engine.inner.store, &crate::group::NoFaults);
         }
         if housekeeping == Housekeeping::RecoverAndPurge {
-            engine.inner.store.purge(now_secs());
+            // Expired backups are purged at start, at most once a day (PLAN 2.7).
+            engine.inner.store.purge_if_due(now_secs(), 86_400);
         }
         engine
     }
@@ -383,6 +389,12 @@ impl Engine {
         let item = self.item(id)?;
         let it = lock(&item);
         it.history.as_ref().map(|h| h.current().clone())
+    }
+
+    /// Removes orphan `.autocrop-<id>.tmp` files (older than five minutes, named by no journal)
+    /// from `dir`; returns how many. Called for every folder that is opened.
+    pub fn sweep_temps(&self, dir: &Path) -> usize {
+        crate::group::sweep_orphans(&self.inner.store, dir, Duration::from_secs(300)).len()
     }
 
     /// Installs the multi-item detector (the classical one in the app, a stub in tests).
@@ -427,6 +439,17 @@ impl Engine {
     /// front end can show them at once. Files already open are skipped.
     pub fn open_paths(&self, roots: &[PathBuf], include_subfolders: bool) -> OpenSummary {
         let found = enumerate::collect(roots, include_subfolders);
+        // Orphan temp files of an interrupted save are swept from the folders being opened
+        // (PLAN 2.7: only folders that are open or that a journal names).
+        let mut dirs: std::collections::BTreeSet<PathBuf> = found
+            .files
+            .iter()
+            .filter_map(|f| f.parent().map(Path::to_path_buf))
+            .collect();
+        dirs.extend(roots.iter().filter(|r| r.is_dir()).cloned());
+        for d in &dirs {
+            self.sweep_temps(d);
+        }
         let mut summary = OpenSummary::default();
         summary.skipped += found.links_skipped;
         let mut known: std::collections::HashSet<PathBuf> = lock(&self.inner.items)
@@ -462,6 +485,7 @@ impl Engine {
                 generation: 0,
                 saved: None,
                 frames: 1,
+                exif_orientation: 1,
                 accepted: None,
             };
             lock(&self.inner.items).insert(id, Arc::new(Mutex::new(item)));
@@ -531,6 +555,7 @@ impl Engine {
                     it.orig_mtime_ms = a.snapshot.mtime_ms;
                     it.dims = a.raster_dims;
                     it.frames = a.frames;
+                    it.exif_orientation = a.exif_orientation;
                     it.accepted = None;
                     it.thumb_src = Some(Arc::new(a.thumb_src));
                     it.icc = a.icc.map(Arc::new);
@@ -631,6 +656,7 @@ impl Engine {
             confidence,
             state,
             frames: decoded.frames.max(1),
+            exif_orientation: decoded.exif_orientation,
         })
     }
 
@@ -896,7 +922,14 @@ impl Engine {
         BackupsView {
             location: self.inner.store.dir().to_string_lossy().into_owned(),
             used_bytes: self.inner.store.used_bytes(),
-            free_bytes: None,
+            free_bytes: crate::space::available_space(self.inner.store.dir()).ok(),
+            warnings: self
+                .inner
+                .store
+                .warnings()
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
             runs,
         }
     }
@@ -953,7 +986,10 @@ impl Engine {
     }
 
     pub fn purge_now(&self) -> usize {
-        self.inner.store.purge(now_secs())
+        let n = self.inner.store.purge(now_secs());
+        // "Purge now" counts as today's purge.
+        self.inner.store.purge_if_due(now_secs(), i64::MAX);
+        n
     }
 
     pub fn restore_run(&self, run_id: &str, notify: &dyn Fn(ItemView)) -> Vec<RestoreOutcome> {
@@ -968,6 +1004,41 @@ impl Engine {
         ms.iter()
             .map(|m| self.restore_manifest(m.clone(), RestoreMode::Auto, notify))
             .collect()
+    }
+
+    /// The saved backup that `path` belongs to: the newest one whose original sat at `path`, or
+    /// one of whose outputs is `path` (a conversion's new file). `None` if no backup knows it.
+    pub fn backup_for_path(&self, path: &Path) -> Option<String> {
+        let want = crate::fsplan::path_key(path);
+        self.inner
+            .store
+            .list()
+            .into_iter()
+            .filter(|m| m.state == BackupState::Saved)
+            .find(|m| {
+                crate::fsplan::path_key(Path::new(&m.original_path)) == want
+                    || m.outputs
+                        .iter()
+                        .any(|o| crate::fsplan::path_key(Path::new(&o.path)) == want)
+            })
+            .map(|m| m.id)
+    }
+
+    /// Restores the original of the file at `path` (a saved file or a converted one), with the
+    /// same choices as [`Engine::restore_file`]; `derived` says what happens to the files a
+    /// split or a conversion made. After a restart, or with no `library.db`, this works the same:
+    /// every backup directory describes itself.
+    pub fn restore_path(
+        &self,
+        path: &Path,
+        mode: RestoreMode,
+        derived: DerivedAction,
+        notify: &dyn Fn(ItemView),
+    ) -> RestoreOutcome {
+        match self.backup_for_path(path) {
+            Some(id) => self.restore_file_derived(&format!("{id}/0"), mode, derived, notify),
+            None => RestoreOutcome::failed(ErrKind::OriginalExpired),
+        }
     }
 
     pub fn restore_file(
@@ -1025,8 +1096,14 @@ impl Engine {
                     .and_then(|s| s.to_str())
                     .unwrap_or("image");
                 let dest = free_name(&dir.join(format!("{stem} (restored).{}", m.format)));
-                let tmp = write_temp(&dir, &orig_bytes, Some(mtime))?;
-                swap(&tmp.path, &dest).inspect_err(|_| tmp.discard())?;
+                let tmp = crate::restore::verified_temp(
+                    &dir,
+                    &orig_bytes,
+                    &m.original_blake3,
+                    mtime,
+                    m.original_attrs,
+                )?;
+                crate::group::move_no_clobber(&tmp.path, &dest).inspect_err(|_| tmp.discard())?;
                 return Ok(RestoreOutcome {
                     ok: true,
                     needs_choice: false,
@@ -1051,7 +1128,13 @@ impl Engine {
                 {
                     fs::copy(&target, &pre).map_err(|e| ErrKind::from_io(&e))?;
                 }
-                let tmp = write_temp(&dir, &orig_bytes, Some(mtime))?;
+                let tmp = crate::restore::verified_temp(
+                    &dir,
+                    &orig_bytes,
+                    &m.original_blake3,
+                    mtime,
+                    m.original_attrs,
+                )?;
                 swap(&tmp.path, &target).inspect_err(|_| tmp.discard())?;
             }
             m.state = BackupState::Restored;
@@ -1118,4 +1201,5 @@ struct Analysis {
     confidence: Confidence,
     state: EditState,
     frames: u32,
+    exif_orientation: u8,
 }

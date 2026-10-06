@@ -45,6 +45,11 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["f
 tracing-appender = "0.2"
 sysinfo = { version = "0.37", default-features = false, features = ["system"] }
 
+# Copy-on-write backups (M2.34): clonefile on macOS, FICLONE on Linux, block cloning on ReFS. MIT OR
+# Apache-2.0; where the file system cannot clone it fails, and the store falls back to a hardlink or
+# a copy.
+reflink-copy = "0.1"
+
 # Free space of a volume (the preflight, M2.34); the Windows twin is `src/ffi/windows.rs`. Already in
 # the tree through `tempfile`; its `fs` API is safe Rust.
 [target.'cfg(unix)'.dependencies]

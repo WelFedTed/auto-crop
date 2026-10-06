@@ -98,6 +98,8 @@ pub struct EngineOptions {
     pub hydrate_cloud_files: bool,
     /// The pixel cap of every decode (`--max-pixels`); the codecs clamp it to their ceiling.
     pub max_pixels: u64,
+    /// Which backup methods may be tried (reflink, hardlink, copy).
+    pub backup_method: crate::store::MethodPref,
 }
 
 impl Default for EngineOptions {
@@ -110,6 +112,7 @@ impl Default for EngineOptions {
             verify: VerifyMode::Full,
             hydrate_cloud_files: false,
             max_pixels: auto_crop_codecs::DEFAULT_MAX_PIXELS,
+            backup_method: crate::store::MethodPref::Auto,
         }
     }
 }

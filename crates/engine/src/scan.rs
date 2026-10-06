@@ -700,8 +700,13 @@ impl Engine {
                 let mut o = SaveOutcome::failed(id, e);
                 if e == ErrKind::NotReplaceable {
                     // The same code and the same notice vocabulary as a split scan's refusal.
-                    let frames = self.item(id).map_or(1, |i| lock(&i).frames);
-                    o.notices = vec![not_replaceable_notice(frames).to_owned()];
+                    let (format, frames) = self.item(id).map_or((Format::Jpeg, 1), |i| {
+                        let it = lock(&i);
+                        (it.format, it.frames)
+                    });
+                    o.notices = crate::fsplan::replace_refusal(format, frames)
+                        .map(|n| vec![n.to_owned()])
+                        .unwrap_or_default();
                 }
                 o
             }
@@ -803,11 +808,8 @@ impl Engine {
         // What may be replaced (PLAN 2.7): single-frame sources this build can write back.
         let out_fmt = match target {
             SaveTarget::Replace => {
-                if frames > 1 || !fmt.is_encodable() {
-                    return Err((
-                        ErrKind::NotReplaceable,
-                        vec![not_replaceable_notice(frames).to_owned()],
-                    ));
+                if let Some(notice) = crate::fsplan::replace_refusal(fmt, frames) {
+                    return Err((ErrKind::NotReplaceable, vec![notice.to_owned()]));
                 }
                 fmt
             }
@@ -1096,16 +1098,6 @@ impl Engine {
                 output_count: m.outputs.len(),
                 restored: m.state == crate::store::BackupState::Restored,
             })
-    }
-}
-
-/// The reason a source is never replaced in place, as a notice (one vocabulary for the split and
-/// the single-item path; the code is `NOT_REPLACEABLE` for both).
-pub(crate) fn not_replaceable_notice(frames: u32) -> &'static str {
-    if frames > 1 {
-        "tiff.multi_page"
-    } else {
-        "format.write_unavailable"
     }
 }
 

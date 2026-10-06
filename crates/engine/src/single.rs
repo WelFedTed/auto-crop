@@ -39,6 +39,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
+/// A crop covering at least this share of the frame is a no-op (PLAN 2.7).
+pub const NOOP_MIN_COVERAGE: f64 = 0.97;
+/// ... if it is also skewed by less than this many degrees.
+pub const NOOP_MAX_SKEW_DEG: f32 = 0.1;
+
 /// Notice code of a save that took the lossless JPEG path (the UI may show a "lossless" badge).
 pub const NOTICE_LOSSLESS: &str = "jpeg.lossless";
 
@@ -99,12 +104,16 @@ impl Engine {
         // back without dropping content, so the source stays byte-identical. A copy is written in a
         // format the build can write: JPEG for HEIC (the conversion target of PLAN 3.5), PNG for
         // the rest (lossless, carries the ICC profile).
-        let (fmt, copy_ext) = if src_format.is_encodable() {
+        let frames = lock(&item).frames;
+        let (fmt, copy_ext) = if !copy {
+            // The one gate (`fsplan::replace_refusal`): the same code and notice as a split
+            // scan's refusal; the dispatcher adds the notice.
+            if crate::fsplan::replace_refusal(src_format, frames).is_some() {
+                return Err(ErrKind::NotReplaceable);
+            }
             (src_format, None)
-        } else if !copy {
-            // The same code as a split scan's refusal; the notice with the reason is added by
-            // the dispatcher (`not_replaceable_notice`).
-            return Err(ErrKind::NotReplaceable);
+        } else if src_format.is_encodable() {
+            (src_format, None)
         } else {
             let out = if src_format == Format::Heic {
                 Format::Jpeg
@@ -369,6 +378,29 @@ impl Engine {
         })
     }
 
+    /// The no-op rule of the idempotency guard (ROADMAP M2.38): a crop that covers at least 97% of
+    /// the frame, is not skewed by 0.1 degrees or more, is not turned or mirrored, and whose source
+    /// carries no EXIF turn changes nothing worth a rewrite, so a save would only cost a backup and
+    /// a generation. `false` for an item with no crop.
+    pub fn is_noop(&self, id: u32) -> bool {
+        let Some(item) = self.item(id) else {
+            return false;
+        };
+        let it = lock(&item);
+        let Some(q) = it
+            .history
+            .as_ref()
+            .and_then(|h| h.current().quad().cloned())
+        else {
+            return false;
+        };
+        it.exif_orientation == 1
+            && q.quarter_turns % 4 == 0
+            && !q.mirror
+            && q.fine_deg.abs() < NOOP_MAX_SKEW_DEG
+            && q.signed_area() >= NOOP_MIN_COVERAGE
+    }
+
     /// The options of every save and open (quality, metadata policy, lossless path, verify depth,
     /// cloud downloads, pixel cap).
     pub fn options(&self) -> crate::output::EngineOptions {
@@ -376,6 +408,7 @@ impl Engine {
     }
 
     pub fn set_options(&self, o: crate::output::EngineOptions) {
+        self.inner.store.set_method(o.backup_method);
         *lock(&self.inner.options) = o;
     }
 }
