@@ -102,7 +102,7 @@
       {#if item.openOnly}
         <span class="badge neutral" title={noticeText(item.openOnly)} data-open-only>{S.grid.openOnlyBadge}</span>
       {/if}
-      {#if reason}
+      {#if reason && !curvedOnly}
         <div class="reason">{reason}</div>
       {/if}
     {/if}
