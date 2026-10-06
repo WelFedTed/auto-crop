@@ -70,7 +70,14 @@ const DATA_DIRS: &[&str] = &[
 ];
 
 /// Lines `.gitignore` must keep.
-pub const REQUIRED_IGNORES: &[&str] = &["/corpus-cache/", "/corpora/", "/datasets/", "/golden/"];
+pub const REQUIRED_IGNORES: &[&str] = &[
+    "/corpus-cache/",
+    "/corpora/",
+    "/datasets/",
+    "/golden/",
+    // The owner's private sample images and golden set (B21).
+    "/_data",
+];
 
 fn matches_dir(path: &str, pattern: &str) -> bool {
     let mut p = path.split('/');
