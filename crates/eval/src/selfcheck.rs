@@ -53,6 +53,8 @@ pub fn parallelogram_manifest(n: usize, seed: u64) -> Manifest {
             height: 480,
             quad,
             items: Vec::new(),
+            curves: None,
+            items_curves: Vec::new(),
             tags,
         };
         text.push_str(&serde_json::to_string(&it).expect("manifest item serialises"));

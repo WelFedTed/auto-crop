@@ -602,23 +602,398 @@ fn the_page_is_one_self_contained_document_that_parses() {
     }
 }
 
+/// Runs `node` on a script. `None` means node is not installed: the caller must say so loudly (a
+/// skipped check is not a passed check). Set `AUTO_CROP_REQUIRE_NODE=1` (CI can) to make a missing
+/// node a failure instead.
+fn run_node(args: &[&std::ffi::OsStr], what: &str) -> Option<std::process::Output> {
+    match std::process::Command::new("node").args(args).output() {
+        Ok(o) => Some(o),
+        Err(e) => {
+            eprintln!(
+                "\n!!!!!!!! SKIPPED: {what} NOT CHECKED, node could not be started ({e}). Install node or set AUTO_CROP_REQUIRE_NODE=1 to make this a failure. !!!!!!!!\n"
+            );
+            assert!(
+                std::env::var_os("AUTO_CROP_REQUIRE_NODE").is_none(),
+                "AUTO_CROP_REQUIRE_NODE is set but node is not available: {what} was not checked"
+            );
+            None
+        }
+    }
+}
+
 #[test]
 fn the_script_has_valid_syntax_when_node_is_available() {
     let dir = tempfile::tempdir().expect("tempdir");
     let js = dir.path().join("page.js");
     std::fs::write(&js, script_of(PAGE)).expect("write");
-    match std::process::Command::new("node")
-        .arg("--check")
-        .arg(&js)
-        .output()
-    {
-        Ok(o) => assert!(
+    if let Some(o) = run_node(
+        &["--check".as_ref(), js.as_os_str()],
+        "the page script syntax",
+    ) {
+        assert!(
             o.status.success(),
             "node --check failed:\n{}",
             String::from_utf8_lossy(&o.stderr)
-        ),
-        Err(_) => eprintln!(
-            "node is not installed; the script syntax was not checked (the browser test covers it)"
-        ),
+        );
     }
+}
+
+/// The pure curve-math block of the page script (between its two marker comments).
+fn curve_block() -> &'static str {
+    let script = script_of(PAGE);
+    let start = script
+        .find("// ==== curve-math begin")
+        .expect("begin marker");
+    let end = script.find("// ==== curve-math end").expect("end marker");
+    &script[start..end]
+}
+
+const CURVE_EXPORTS: &str = "module.exports = { segmentPoint, curvePolyline, arcPoint, nearestOnPolyline, retargetInterior, edgeIsStraight, boundaryCrossings, EDGE_NAMES, MAX_CURVE_POINTS, ARC_SAMPLES };";
+
+/// Runs `check` (JavaScript that `require`s `./curve_math.js` and reads `./input.json`) against the
+/// page's own curve math. Returns false when node is missing (already reported loudly).
+fn run_curve_check(input: &serde_json::Value, check: &str, what: &str) -> bool {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("curve_math.js"),
+        format!("'use strict';\n{}\n{CURVE_EXPORTS}\n", curve_block()),
+    )
+    .expect("write");
+    std::fs::write(dir.path().join("input.json"), input.to_string()).expect("write");
+    let main = dir.path().join("check.js");
+    std::fs::write(&main, format!("'use strict';\n{check}\n")).expect("write");
+    let Some(o) = run_node(&[main.as_os_str()], what) else {
+        return false;
+    };
+    assert!(
+        o.status.success(),
+        "{what} failed:\n{}\n{}",
+        String::from_utf8_lossy(&o.stdout),
+        String::from_utf8_lossy(&o.stderr)
+    );
+    true
+}
+
+const JS_HELPERS: &str = r#"
+const m = require('./curve_math.js');
+const fs = require('fs');
+const input = JSON.parse(fs.readFileSync(__dirname + '/input.json', 'utf8'));
+let checks = 0;
+function near(a, b, tol, what) {
+  checks++;
+  if (!(Math.abs(a - b) <= tol)) throw new Error(what + ': ' + a + ' vs ' + b);
+}
+function nearPt(a, b, tol, what) { near(a[0], b[0], tol, what + ' x'); near(a[1], b[1], tol, what + ' y'); }
+"#;
+
+#[test]
+fn the_page_spline_equals_the_rust_spline() {
+    use auto_crop_eval::curves::{point_at, polyline};
+    let curves: Vec<Vec<[f64; 2]>> = vec![
+        vec![[0.1, 0.1], [0.9, 0.1]],
+        vec![[0.1, 0.1], [0.5, 0.06], [0.9, 0.1]],
+        vec![[0.9, 0.1], [0.94, 0.3], [0.91, 0.6], [0.9, 0.9]],
+        vec![
+            [0.9, 0.9],
+            [0.7, 0.97],
+            [0.3, 0.93],
+            [0.2, 0.96],
+            [0.1, 0.9],
+        ],
+        vec![[0.1, 0.9], [0.05, 0.5], [0.1, 0.1]],
+        // very uneven spacing
+        vec![[0.0, 0.0], [0.01, 0.002], [0.9, 0.1], [1.0, 0.0]],
+        vec![[-0.05, 0.4], [0.3, 0.45], [0.6, 0.5], [1.05, 0.38]],
+    ];
+    let ts = [0.0, 0.1, 0.25, 0.5, 0.8, 1.0];
+    let cases: Vec<serde_json::Value> = curves
+        .iter()
+        .map(|c| {
+            let poly: Vec<[f64; 2]> = polyline(c, 16).into_iter().map(|(p, _)| p).collect();
+            let arcs: Vec<[f64; 2]> = ts.iter().map(|t| point_at(c, *t)).collect();
+            serde_json::json!({ "pts": c, "polyline16": poly, "arc_ts": ts, "arc_points": arcs })
+        })
+        .collect();
+    let check = format!(
+        "{JS_HELPERS}{}",
+        r#"
+input.cases.forEach((c, k) => {
+  const poly = m.curvePolyline(c.pts, 16);
+  near(poly.pts.length, c.polyline16.length, 0, 'sample count ' + k);
+  poly.pts.forEach((p, i) => nearPt(p, c.polyline16[i], 1e-12, 'curve ' + k + ' sample ' + i));
+  c.arc_ts.forEach((t, i) => nearPt(m.arcPoint(c.pts, t), c.arc_points[i], 1e-9, 'curve ' + k + ' arc ' + t));
+});
+console.log('ok ' + checks + ' comparisons');
+"#
+    );
+    run_curve_check(
+        &serde_json::json!({ "cases": cases }),
+        &check,
+        "the JavaScript spline against the Rust spline",
+    );
+}
+
+#[test]
+fn the_page_crossing_test_agrees_with_the_rust_validator() {
+    use auto_crop_eval::curves::{Curves, problems};
+    let q: auto_crop_eval::geom::Quad = [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]];
+    let mk = |top_mid: Vec<[f64; 2]>| {
+        let mut t = vec![q[0]];
+        t.extend(top_mid);
+        t.push(q[1]);
+        Curves {
+            top: Some(t),
+            right: Some(vec![q[1], [0.94, 0.5], q[2]]),
+            bottom: Some(vec![q[2], [0.5, 0.95], q[3]]),
+            left: Some(vec![q[3], [0.06, 0.5], q[0]]),
+        }
+    };
+    let variants = [
+        mk(vec![[0.5, 0.06]]),
+        mk(vec![[0.5, 0.4]]),
+        mk(vec![[0.5, 1.2]]),
+        mk(vec![[0.6, 0.1], [0.6, 0.3], [0.4, 0.3], [0.4, -0.05]]),
+        mk(vec![[0.3, 0.08], [0.7, 0.12]]),
+    ];
+    let cases: Vec<serde_json::Value> = variants
+        .iter()
+        .map(|c| {
+            let edges: Vec<Vec<[f64; 2]>> = (0..4).map(|e| c.full_edge(&q, e)).collect();
+            let crosses = problems(&q, c).iter().any(|m| m.contains("cross"));
+            serde_json::json!({ "edges": edges, "crosses": crosses })
+        })
+        .collect();
+    assert!(
+        cases.iter().any(|c| c["crosses"] == true) && cases.iter().any(|c| c["crosses"] == false)
+    );
+    let check = format!(
+        "{JS_HELPERS}{}",
+        r#"
+input.cases.forEach((c, k) => {
+  const found = m.boundaryCrossings(c.edges);
+  near(found.length > 0 ? 1 : 0, c.crosses ? 1 : 0, 0, 'case ' + k + ' crossing verdict');
+});
+console.log('ok ' + checks + ' verdicts');
+"#
+    );
+    run_curve_check(
+        &serde_json::json!({ "cases": cases }),
+        &check,
+        "the JavaScript crossing test against the Rust validator",
+    );
+}
+
+#[test]
+fn the_page_curve_helpers_follow_their_documented_rules() {
+    let check = format!(
+        "{JS_HELPERS}{}",
+        r#"
+// Corner-move rule: an edge's interior points keep their (a, b) place in the chord frame, so a
+// similarity of the chord carries the whole bend with it.
+function frame(p, q, x) {
+  const dx = q[0] - p[0], dy = q[1] - p[1], l2 = dx * dx + dy * dy;
+  return [((x[0] - p[0]) * dx + (x[1] - p[1]) * dy) / l2, ((x[0] - p[0]) * dy - (x[1] - p[1]) * dx) / l2];
+}
+const P = [100, 100], Q = [500, 120], inner = [[200, 90], [330, 150], [420, 100]];
+for (const [P2, Q2] of [[[120, 80], [500, 120]], [[100, 100], [560, 300]], [[10, 10], [90, 40]], [[100, 100], [500, 120]]]) {
+  const moved = m.retargetInterior(inner, P, Q, P2, Q2);
+  inner.forEach((x, i) => {
+    const a = frame(P, Q, x), b = frame(P2, Q2, moved[i]);
+    near(a[0], b[0], 1e-9, 'a'); near(a[1], b[1], 1e-9, 'b');
+  });
+}
+// Unmoved chord: nothing changes. Pure translation: everything translates.
+m.retargetInterior(inner, P, Q, P, Q).forEach((x, i) => nearPt(x, inner[i], 1e-9, 'identity'));
+m.retargetInterior(inner, P, Q, [P[0] + 7, P[1] - 3], [Q[0] + 7, Q[1] - 3]).forEach((x, i) => nearPt(x, [inner[i][0] + 7, inner[i][1] - 3], 1e-9, 'translate'));
+// A zero-length chord cannot define a frame: the points just follow the start corner.
+m.retargetInterior([[5, 5]], [1, 1], [1, 1], [3, 3], [9, 9]).forEach((x) => nearPt(x, [7, 7], 1e-9, 'degenerate'));
+// Straight edges: none, collinear in order, and bent or out of order.
+near(m.edgeIsStraight([0, 0], [10, 0], []) ? 1 : 0, 1, 0, 'empty is straight');
+near(m.edgeIsStraight([0, 0], [10, 0], [[3, 0], [7, 0]]) ? 1 : 0, 1, 0, 'collinear is straight');
+near(m.edgeIsStraight([0, 0], [10, 0], [[3, 0.5]]) ? 1 : 0, 0, 0, 'bent is not straight');
+near(m.edgeIsStraight([0, 0], [10, 0], [[7, 0], [3, 0]]) ? 1 : 0, 0, 0, 'out of order is not straight');
+near(m.edgeIsStraight([0, 0], [10, 0], [[12, 0]]) ? 1 : 0, 0, 0, 'beyond the end is not straight');
+// A point is found on the curve it sits on, with the segment it belongs to.
+const curve = [[0, 0], [10, 5], [20, 0], [30, 5]];
+const poly = m.curvePolyline(curve, 24);
+const mid = poly.pts[36]; // halfway along the second segment
+const hit = m.nearestOnPolyline(poly, [mid[0] + 0.05, mid[1] + 0.05]);
+near(hit.seg, 1, 0, 'segment of a point');
+near(hit.d < 0.3 ? 1 : 0, 1, 0, 'distance to the curve');
+const first = m.nearestOnPolyline(poly, [3, 3]);
+near(first.seg, 0, 0, 'first segment');
+// Arc-length fractions are halfway whatever the point spacing.
+nearPt(m.arcPoint([[0, 0], [1, 0], [100, 0]], 0.5), [50, 0], 0.2, 'arc midpoint');
+near(m.MAX_CURVE_POINTS, 32, 0, 'point cap');
+console.log('ok ' + checks + ' checks');
+"#
+    );
+    run_curve_check(&serde_json::json!({}), &check, "the page curve helpers");
+}
+
+const CURVES_JSON: &str = r#"{"top":[[0.2,0.2],[0.5,0.15],[0.8,0.2]],"right":[[0.8,0.2],[0.84,0.5],[0.8,0.8]],"left":[[0.2,0.8],[0.17,0.5],[0.2,0.2]]}"#;
+
+fn payload_with_curves(curves: &str) -> String {
+    format!(
+        "{{\"slices\":[\"phone-document\"],\"items\":[{{\"quad\":{GOOD_QUAD},\"curves\":{curves},\"partial_frame\":false,\"curved\":false,\"touching\":false,\"hand_held\":true,\"folded\":false}}],\"seconds\":5}}"
+    )
+}
+
+#[test]
+fn curves_round_trip_through_the_server_check_labels_and_the_manifest_bridge() {
+    let f = fixture();
+    let r = f.post("/api/save/1", &payload_with_curves(CURVES_JSON));
+    assert_eq!(r.status, 200, "{}", String::from_utf8_lossy(&r.body));
+    let on_disk = golden::parse_label(
+        &std::fs::read_to_string(f.labels.join("img1.png.json")).expect("label file"),
+    )
+    .expect("parses");
+    let item = &on_disk.items[0];
+    let curves = item.curves.as_ref().expect("curves are kept");
+    assert_eq!(curves.top.as_ref().map(Vec::len), Some(3));
+    assert!(
+        curves.bottom.is_none(),
+        "an absent edge stays absent (straight)"
+    );
+    // Bent curves imply the curved flag: the server sets it although the page sent false.
+    assert!(item.curved);
+    // The API gives the page its curves back.
+    let meta = json_of(&f.get("/api/meta/1"));
+    assert_eq!(meta["label"]["items"][0]["curves"]["top"][1][1], 0.15);
+    assert!(meta["label"]["items"][0]["curves"].get("bottom").is_none());
+    // check-labels passes, and the bridge to the harness manifest carries the curves.
+    let rep =
+        golden::check_dir(&f.labels, &f.images, golden::CheckOptions::default()).expect("checks");
+    assert!(rep.errors.is_empty(), "{:?}", rep.errors);
+    let (rows, _) = golden::manifest_items(
+        std::slice::from_ref(&on_disk),
+        &|_: &GoldenLabel| Some("dev".to_owned()),
+        false,
+    );
+    assert_eq!(rows[0].curves.as_ref(), item.curves.as_ref());
+    assert_eq!(
+        rows[0].tags.get("flag-curved").map(String::as_str),
+        Some("yes")
+    );
+    assert!(auto_crop_eval::manifest::validate(&rows).is_empty());
+    // A page with only straight edges saves no `curves` key, and an older label (no key) still loads.
+    assert_eq!(
+        f.post("/api/save/2", &payload(GOOD_QUAD, "[\"flatbed-single\"]"))
+            .status,
+        200
+    );
+    let plain = std::fs::read_to_string(f.labels.join("img2.png.json")).expect("file");
+    assert!(!plain.contains("curves"), "{plain}");
+    let meta = json_of(&f.get("/api/meta/2"));
+    assert!(meta["label"]["items"][0].get("curves").is_none());
+    // Saving the curved image again without curves drops them.
+    assert_eq!(
+        f.post("/api/save/1", &payload(GOOD_QUAD, "[\"phone-document\"]"))
+            .status,
+        200
+    );
+    let again =
+        golden::parse_label(&std::fs::read_to_string(f.labels.join("img1.png.json")).expect("f"))
+            .expect("parses");
+    assert!(again.items[0].curves.is_none());
+}
+
+#[test]
+fn invalid_curves_are_refused_by_the_server_and_by_check_labels() {
+    let f = fixture();
+    let cases = [
+        // First point is not the top-left corner.
+        (
+            r#"{"top":[[0.25,0.2],[0.5,0.15],[0.8,0.2]]}"#,
+            "curves.top: the first point",
+        ),
+        // Too few points.
+        (r#"{"left":[[0.2,0.8]]}"#, "curves.left: 1 point(s)"),
+        // A curve that crosses the opposite edge.
+        (
+            r#"{"top":[[0.2,0.2],[0.5,1.4],[0.8,0.2]]}"#,
+            "curves.top crosses curves.bottom",
+        ),
+        // A loop.
+        (
+            r#"{"top":[[0.2,0.2],[0.6,0.2],[0.6,0.5],[0.4,0.5],[0.4,0.1],[0.8,0.2]]}"#,
+            "curves.top crosses itself",
+        ),
+        // Far outside the frame.
+        (
+            r#"{"top":[[0.2,0.2],[0.5,-9.0],[0.8,0.2]]}"#,
+            "outside the frame",
+        ),
+    ];
+    for (curves, needle) in cases {
+        let r = f.post("/api/save/0", &payload_with_curves(curves));
+        assert_eq!(
+            r.status,
+            422,
+            "{curves}: {}",
+            String::from_utf8_lossy(&r.body)
+        );
+        let msg = json_of(&r)["errors"].to_string();
+        assert!(msg.contains(needle), "`{needle}` missing in {msg}");
+        assert!(msg.contains("item 0"), "{msg}");
+        assert!(
+            !f.labels.join("img0.png.json").exists(),
+            "nothing is written"
+        );
+    }
+    // Unknown edge names and wrong shapes are refused as bad payloads.
+    for bad in [
+        r#"{"middle":[[0,0],[1,1]]}"#,
+        r#"{"top":[[0.2,0.2,0.1],[0.8,0.2]]}"#,
+    ] {
+        assert_eq!(
+            f.post("/api/save/0", &payload_with_curves(bad)).status,
+            400,
+            "{bad}"
+        );
+    }
+    // A label file with bad curves written by hand is reported by check-labels, clearly.
+    let mut l = golden::new_label(
+        "img0.png",
+        &golden::sha256_file(&f.images.join("img0.png")).expect("hash"),
+        160,
+        120,
+    );
+    l.slices = vec!["flatbed-single".to_owned()];
+    let mut item = GoldenItem::new([[0.2, 0.2], [0.8, 0.2], [0.8, 0.8], [0.2, 0.8]]);
+    item.curves =
+        Some(serde_json::from_str(r#"{"top":[[0.2,0.2],[0.5,0.15],[0.81,0.2]]}"#).expect("curves"));
+    l.items = vec![item];
+    std::fs::create_dir_all(&f.labels).expect("mkdir");
+    std::fs::write(f.labels.join("img0.png.json"), golden::label_to_json(&l)).expect("write");
+    let rep =
+        golden::check_dir(&f.labels, &f.images, golden::CheckOptions::default()).expect("checks");
+    assert_eq!(rep.errors.len(), 1, "{:?}", rep.errors);
+    assert!(
+        rep.errors[0].starts_with("img0.png.json: item 0: curves.top: the last point"),
+        "{}",
+        rep.errors[0]
+    );
+}
+
+#[test]
+fn the_page_offers_the_curved_edges_controls() {
+    let script = script_of(PAGE);
+    for id in ["curvemode", "cadd", "cdel", "creset", "csel", "curvehint"] {
+        assert!(PAGE.contains(&format!("id=\"{id}\"")), "{id}");
+    }
+    assert_eq!(PAGE.matches("data-straighten=\"").count(), 4);
+    // Every button has a name a screen reader can say, and the live region is polite.
+    assert!(PAGE.contains("id=\"csel\" role=\"status\" aria-live=\"polite\""));
+    // The handles are as promised: 48 px touch targets (HANDLE) and 16 px visible dots.
+    assert!(script.contains("const DOT = 7;") && script.contains("const HANDLE = 24"));
+    for key in [
+        "case 'c': case 'C'",
+        "case '[':",
+        "case ']':",
+        "case 'p': case 'P'",
+    ] {
+        assert!(script.contains(key), "{key}");
+    }
+    assert!(script.contains("addEventListener('dblclick'") && script.contains("LONG_PRESS_MS"));
 }

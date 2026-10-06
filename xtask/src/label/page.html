@@ -8,8 +8,8 @@
 <meta name="referrer" content="no-referrer">
 <title>Auto Crop labeller</title>
 <style nonce="{{NONCE}}">
-:root{--bg:#161a1f;--panel:#1f252c;--line:#38424d;--fg:#e8edf2;--dim:#9aa7b4;--accent:#3da0ff;--top:#ffd84d;--ok:#4cc38a;--warn:#f0a23b;--bad:#ff6b6b;--assist:#ff9f43}
-@media (prefers-color-scheme:light){:root{--bg:#eef1f4;--panel:#fff;--line:#c5ced8;--fg:#18222c;--dim:#56636f;--accent:#0b6fd6;--top:#b07c00;--ok:#0b8a54;--warn:#a85d00;--bad:#c62828;--assist:#c25b00}}
+:root{--bg:#161a1f;--panel:#1f252c;--line:#38424d;--fg:#e8edf2;--dim:#9aa7b4;--accent:#3da0ff;--top:#ffd84d;--ok:#4cc38a;--warn:#f0a23b;--bad:#ff6b6b;--assist:#ff9f43;--curve:#ff5ad9}
+@media (prefers-color-scheme:light){:root{--bg:#eef1f4;--panel:#fff;--line:#c5ced8;--fg:#18222c;--dim:#56636f;--accent:#0b6fd6;--top:#b07c00;--ok:#0b8a54;--warn:#a85d00;--bad:#c62828;--assist:#c25b00;--curve:#b4138f}}
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
 body{background:var(--bg);color:var(--fg);font:14px/1.35 system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column;overscroll-behavior:none}
@@ -52,6 +52,15 @@ input[type=text]{width:100%;min-height:36px;border:1px solid var(--line);border-
 #help kbd{background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:0 5px}
 .q{fill:rgba(61,160,255,.14);stroke:var(--accent);stroke-width:2;vector-effect:non-scaling-stroke}
 .q.cur{fill:rgba(61,160,255,.22)}
+.q.dash{fill:rgba(61,160,255,.06);stroke-dasharray:6 5}
+.q.cur.dash{fill:rgba(61,160,255,.10)}
+.cv{fill:none;stroke:var(--curve);stroke-width:3;vector-effect:non-scaling-stroke}
+.cdot{fill:var(--curve);stroke:#fff;stroke-width:2;vector-effect:non-scaling-stroke}
+.cdot.sel{fill:var(--top)}
+.cghost{fill:rgba(255,90,217,.25);stroke:var(--curve);stroke-width:2;stroke-dasharray:3 2;vector-effect:non-scaling-stroke}
+.chit{fill:transparent;cursor:move}
+#csel{min-height:2.7em;color:var(--dim)}
+#curves .row button{min-height:36px}
 .top{stroke:var(--top);stroke-width:4;vector-effect:non-scaling-stroke;fill:none}
 .sg{fill:rgba(255,159,67,.10);stroke:var(--assist);stroke-width:2;stroke-dasharray:8 6;vector-effect:non-scaling-stroke}
 .dot{fill:var(--accent);stroke:#fff;stroke-width:2;vector-effect:non-scaling-stroke}
@@ -86,6 +95,7 @@ input[type=text]{width:100%;min-height:36px;border:1px solid var(--line);border-
    <h3>Labelling</h3>
    <p>Mark each document or photo by clicking its four corners: <b>top-left of the upright item first</b>, then clockwise (top-right, bottom-right, bottom-left). The <b class="topc">yellow edge</b> is the top. Drag a handle, or select it and use the arrow keys (Shift = 10 px, Alt = fine). Corners may lie outside the picture for partial frames.</p>
    <p>Then tick the slice tags (at least one) and flags. A label is saved automatically as soon as it is valid. Only your own judgement goes in: no suggestion is shown unless you ask for it below, and then the label is marked <i>assisted</i> and excluded from the golden evaluation.</p>
+   <p><b>Curved edges</b> (a crumpled receipt, a bowed page): after the four corners are placed, press <kbd>C</kbd> or tick <i>Curved edges mode</i>. Each edge shows a round handle at its middle: drag it to bend the edge into a smooth curve. <b>Double-click</b> or <b>long-press</b> on a curve adds another point; <b>double-click</b> a point or press <kbd>Delete</kbd> removes it; <kbd>[</kbd> / <kbd>]</kbd> select the previous / next handle and the arrow keys nudge it; <kbd>P</kbd> adds a point; <kbd>Esc</kbd> deselects. <i>Straighten</i> flattens one edge, <i>Reset all curves</i> flattens all four. The dashed blue outline is the straight quad; the pink lines are the curves. Moving a corner carries the edge with it (its bend scales and turns with the edge).</p>
    <p><kbd>,</kbd> / <kbd>.</kbd> previous / next &middot; <kbd>Enter</kbd> save and next &middot; <kbd>G</kbd> next unlabelled &middot; <kbd>S</kbd> skip &middot; <kbd>N</kbd> add item &middot; <kbd>Del</kbd> delete item &middot; <kbd>1</kbd>-<kbd>4</kbd> select corner &middot; <kbd>Backspace</kbd> undo last corner &middot; <kbd>R</kbd> rotate which edge is the top &middot; <kbd>F</kbd> fit &middot; <kbd>+</kbd> <kbd>-</kbd> <kbd>0</kbd> zoom &middot; wheel / pinch zoom, drag to pan &middot; <kbd>?</kbd> this help.</p>
    <p><button id="helpclose">Close</button></p>
   </div>
@@ -102,6 +112,22 @@ input[type=text]{width:100%;min-height:36px;border:1px solid var(--line);border-
     <button id="flip">Flip direction</button>
    </div>
    <div id="flags" class="mt"></div>
+  </fieldset>
+  <fieldset id="curves"><legend>Curved edges</legend>
+   <label class="chk"><input id="curvemode" type="checkbox"> Curved edges mode (C)</label>
+   <div class="dim" id="curvehint">Place the four corners first. Then drag the round handle on an edge to bend it.</div>
+   <div class="row mt">
+    <button id="cadd" aria-label="Add a point to the selected edge (P)">Add point (P)</button>
+    <button id="cdel" aria-label="Remove the selected point (Delete)">Remove point</button>
+   </div>
+   <div class="row mt" role="group" aria-label="Straighten one edge">
+    <button data-straighten="0" aria-label="Straighten the top edge">Straighten top</button>
+    <button data-straighten="1" aria-label="Straighten the right edge">Straighten right</button>
+    <button data-straighten="2" aria-label="Straighten the bottom edge">Straighten bottom</button>
+    <button data-straighten="3" aria-label="Straighten the left edge">Straighten left</button>
+   </div>
+   <div class="row mt"><button id="creset">Reset all curves</button></div>
+   <div id="csel" role="status" aria-live="polite"></div>
   </fieldset>
   <fieldset><legend>Slice tags (at least one)</legend><div id="slices"></div>
    <div class="row"><button id="noDoc">No document here</button></div>
@@ -127,8 +153,115 @@ input[type=text]{width:100%;min-height:36px;border:1px solid var(--line);border-
   const SLICES = ['receipt-long', 'thermal-fade', 'partial-frame', 'touching-items', 'phone-document', 'flatbed-single', 'flatbed-multi', 'general-photo', 'heic-device', 'negative'];
   const FLAGS = ['partial_frame', 'curved', 'touching', 'hand_held', 'folded'];
   const HANDLE = 24; // radius in screen px: 48 px touch target
+  const DOT = 7; // visible handle radius in screen px (about 16 px across with the outline)
+  const LONG_PRESS_MS = 550;
+  // ==== curve-math begin =========================================================================
+  // Pure functions: no DOM, no page state. The Rust tests run exactly this block under node and
+  // compare it with the shared spec's vectors (docs/dev/curved-pages.md). Points are [x, y] arrays.
+  // A curve is centripetal Catmull-Rom (alpha 0.5, Barry-Goldman form) through its points, with phantom
+  // end points reflected through the first and last point; two points are a straight segment.
+  const EDGE_NAMES = ['top', 'right', 'bottom', 'left'];
+  const MAX_CURVE_POINTS = 32;
+  const ARC_SAMPLES = 64;
+  const CROSS_SAMPLES = 8;
+  function pdist(a, b) { return Math.hypot(a[0] - b[0], a[1] - b[1]); }
+  function knotGap(a, b) { return Math.max(Math.sqrt(pdist(a, b)), 1e-9); }
+  function segmentPoint(p0, p1, p2, p3, u) {
+    const t0 = 0, t1 = t0 + knotGap(p0, p1), t2 = t1 + knotGap(p1, p2), t3 = t2 + knotGap(p2, p3);
+    const t = t1 + u * (t2 - t1);
+    const mix = (a, b, ta, tb) => { const w = (t - ta) / (tb - ta); return [a[0] + w * (b[0] - a[0]), a[1] + w * (b[1] - a[1])]; };
+    const a1 = mix(p0, p1, t0, t1), a2 = mix(p1, p2, t1, t2), a3 = mix(p2, p3, t2, t3);
+    return mix(mix(a1, a2, t0, t2), mix(a2, a3, t1, t3), t1, t2);
+  }
+  function segmentControls(pts, j) {
+    const n = pts.length;
+    const p0 = j === 0 ? [2 * pts[0][0] - pts[1][0], 2 * pts[0][1] - pts[1][1]] : pts[j - 1];
+    const p3 = j + 2 >= n ? [2 * pts[n - 1][0] - pts[n - 2][0], 2 * pts[n - 1][1] - pts[n - 2][1]] : pts[j + 2];
+    return [p0, pts[j], pts[j + 1], p3];
+  }
+  // Samples the whole curve, `per` samples per spline segment; returns the points and, for each, its segment.
+  function curvePolyline(pts, per) {
+    const n = pts.length, out = [], seg = [];
+    for (let j = 0; j < n - 1; j++) {
+      const c = segmentControls(pts, j);
+      for (let k = 0; k < per; k++) {
+        const u = k / per;
+        out.push(n === 2 ? [c[1][0] + u * (c[2][0] - c[1][0]), c[1][1] + u * (c[2][1] - c[1][1])] : segmentPoint(c[0], c[1], c[2], c[3], u));
+        seg.push(j);
+      }
+    }
+    out.push(pts[n - 1].slice()); seg.push(Math.max(0, n - 2));
+    return { pts: out, seg: seg };
+  }
+  // The point at arc-length fraction t (0..1), measured on the 64-samples-per-segment polyline.
+  function arcPoint(pts, t) {
+    const poly = curvePolyline(pts, ARC_SAMPLES).pts, cum = [0];
+    for (let i = 1; i < poly.length; i++) cum.push(cum[i - 1] + pdist(poly[i - 1], poly[i]));
+    const total = cum[cum.length - 1];
+    if (!(total > 0)) return poly[0].slice();
+    const target = Math.min(1, Math.max(0, t)) * total;
+    let i = 1;
+    while (i < poly.length - 1 && cum[i] < target) i++;
+    const c0 = cum[i - 1], c1 = cum[i], w = c1 > c0 ? (target - c0) / (c1 - c0) : 0;
+    return [poly[i - 1][0] + w * (poly[i][0] - poly[i - 1][0]), poly[i - 1][1] + w * (poly[i][1] - poly[i - 1][1])];
+  }
+  // Nearest point of a sampled polyline to q: { d, p, seg } (seg = the spline segment it lies on).
+  function nearestOnPolyline(poly, q) {
+    let best = null;
+    for (let i = 0; i + 1 < poly.pts.length; i++) {
+      const a = poly.pts[i], b = poly.pts[i + 1], dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+      const w = l2 > 0 ? Math.min(1, Math.max(0, ((q[0] - a[0]) * dx + (q[1] - a[1]) * dy) / l2)) : 0;
+      const p = [a[0] + w * dx, a[1] + w * dy], d = pdist(p, q);
+      if (!best || d < best.d) best = { d: d, p: p, seg: poly.seg[i] };
+    }
+    return best;
+  }
+  // Corner moved: the interior points of an edge keep their place in the chord frame (X = P + a*d + b*perp(d),
+  // d = Q - P), so the edge turns and scales with its chord (a similarity transform P->P', Q->Q').
+  function retargetInterior(interior, p0, q0, p1, q1) {
+    const dx = q0[0] - p0[0], dy = q0[1] - p0[1], l2 = dx * dx + dy * dy;
+    if (!(l2 > 1e-18)) return interior.map((x) => [x[0] + p1[0] - p0[0], x[1] + p1[1] - p0[1]]);
+    const ex = q1[0] - p1[0], ey = q1[1] - p1[1];
+    const re = (ex * dx + ey * dy) / l2, im = (ey * dx - ex * dy) / l2;
+    return interior.map((x) => { const vx = x[0] - p0[0], vy = x[1] - p0[1]; return [p1[0] + re * vx - im * vy, p1[1] + re * vy + im * vx]; });
+  }
+  // True when the interior points add nothing to the straight edge P-Q (on the chord, in order).
+  function edgeIsStraight(p, q, interior) {
+    if (!interior.length) return true;
+    const dx = q[0] - p[0], dy = q[1] - p[1], l = Math.hypot(dx, dy);
+    if (!(l > 1e-9)) return false;
+    let last = 0;
+    for (const x of interior) {
+      const a = ((x[0] - p[0]) * dx + (x[1] - p[1]) * dy) / (l * l), b = ((x[0] - p[0]) * dy - (x[1] - p[1]) * dx) / l;
+      if (Math.abs(b) > 1e-4 * l || !(a > last) || !(a < 1)) return false;
+      last = a;
+    }
+    return true;
+  }
+  function properCross(a, b, c, d) {
+    const cr = (o, p, q) => (p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0]);
+    const d1 = cr(c, d, a), d2 = cr(c, d, b), d3 = cr(a, b, c), d4 = cr(a, b, d);
+    return d1 !== 0 && d2 !== 0 && d3 !== 0 && d4 !== 0 && (d1 > 0) !== (d2 > 0) && (d3 > 0) !== (d4 > 0);
+  }
+  // Pairs [edge, edge] of the closed boundary (four control-point lists, normalised) that cross, on a coarse polyline.
+  function boundaryCrossings(edges) {
+    const pts = [], who = [];
+    edges.forEach((ctrl, e) => { const poly = curvePolyline(ctrl, CROSS_SAMPLES).pts; for (let i = 0; i < poly.length - 1; i++) { pts.push(poly[i]); who.push(e); } });
+    const n = pts.length, found = [];
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 2; j < n; j++) {
+        if (i === 0 && j === n - 1) continue;
+        if (properCross(pts[i], pts[(i + 1) % n], pts[j], pts[(j + 1) % n])) {
+          const a = Math.min(who[i], who[j]), b = Math.max(who[i], who[j]);
+          if (!found.some((f) => f[0] === a && f[1] === b)) found.push([a, b]);
+        }
+      }
+    }
+    return found;
+  }
+  // ==== curve-math end ===========================================================================
   const S = {
-    list: null, idx: -1, meta: null, W: 0, H: 0, items: [], cur: -1, sel: -1,
+    list: null, idx: -1, meta: null, W: 0, H: 0, items: [], cur: -1, sel: -1, selC: null, curveMode: false,
     slices: new Set(), notes: '', scene: '', view: { s: 1, tx: 0, ty: 0 }, fitS: 1,
     dirty: false, timer: null, drafts: new Map(), leftover: new Map(), lastTouch: 0, active: 0,
     assisted: false, suggest: null, showSuggest: false, loadId: 0, saving: false, tileTimer: null, suggestionsOn: true
@@ -175,8 +308,35 @@ input[type=text]{width:100%;min-height:36px;border:1px solid var(--line);border-
     const neg = S.slices.has('negative');
     if (neg && S.items.length) out.push('"negative" cannot have items: delete them or untick negative');
     if (!neg && S.items.length === 0) out.push('draw the quad (or press "No document here")');
-    S.items.forEach((it, k) => { const m = quadProblem(it.pts); if (m) out.push('item ' + (k + 1) + ': ' + m); });
+    S.items.forEach((it, k) => {
+      const m = quadProblem(it.pts);
+      if (m) out.push('item ' + (k + 1) + ': ' + m);
+      else curveProblems(it).forEach((c) => out.push('item ' + (k + 1) + ': ' + c));
+    });
     return out;
+  }
+  // ---- curves of one item: it.curves[e] are the INTERIOR points of edge e (e = 0 top, 1 right, 2 bottom, 3 left),
+  // in order from corner e to corner e + 1; the end points are always the corners themselves.
+  function mkItem() { return { pts: [], flags: {}, curves: [[], [], [], []], autoCurved: false }; }
+  function toNorm(p) { return [p[0] / S.W, p[1] / S.H]; }
+  function toPx(p) { return [p[0] * S.W, p[1] * S.H]; }
+  function edgeCtrl(it, e) { return [it.pts[e]].concat(it.curves[e], [it.pts[(e + 1) % 4]]); }
+  function edgePoly(it, e, per) { const q = curvePolyline(edgeCtrl(it, e).map(toNorm), per); return { pts: q.pts.map(toPx), seg: q.seg }; }
+  function bentEdges(it) { return [0, 1, 2, 3].map((e) => !edgeIsStraight(it.pts[e], it.pts[(e + 1) % 4], it.curves[e])); }
+  function hasCurves(it) { return it.pts.length === 4 && bentEdges(it).some(Boolean); }
+  function curveProblems(it) {
+    if (it.pts.length !== 4) return [];
+    const out = [];
+    for (let e = 0; e < 4; e++) if (it.curves[e].length + 2 > MAX_CURVE_POINTS) out.push('the ' + EDGE_NAMES[e] + ' curve has more than ' + MAX_CURVE_POINTS + ' points');
+    if (out.length || !hasCurves(it)) return out;
+    boundaryCrossings([0, 1, 2, 3].map((e) => edgeCtrl(it, e).map(toNorm))).forEach((c) => {
+      out.push(c[0] === c[1] ? 'the ' + EDGE_NAMES[c[0]] + ' curve crosses itself' : 'the ' + EDGE_NAMES[c[0]] + ' and ' + EDGE_NAMES[c[1]] + ' curves cross');
+    });
+    return out;
+  }
+  function syncCurved(it) {
+    if (hasCurves(it)) { if (!it.flags.curved) { it.flags.curved = true; it.autoCurved = true; } }
+    else if (it.autoCurved) { it.flags.curved = false; it.autoCurved = false; }
   }
   function currentItem() { return S.items[S.cur] || null; }
   function placing() { const it = currentItem(); return !S.slices.has('negative') && (!it || it.pts.length < 4); }
@@ -249,13 +409,20 @@ input[type=text]{width:100%;min-height:36px;border:1px solid var(--line);border-
     }
     S.items.forEach((it, k) => {
       const pts = it.pts, cur = k === S.cur;
-      if (pts.length >= 3) el('polygon', { class: 'q' + (cur ? ' cur' : ''), points: pts.map((p) => p.join(',')).join(' ') });
+      const curved = pts.length === 4 && (hasCurves(it) || (cur && S.curveMode));
+      if (pts.length >= 3) el('polygon', { class: 'q' + (cur ? ' cur' : '') + (curved ? ' dash' : ''), points: pts.map((p) => p.join(',')).join(' ') });
       else if (pts.length === 2) el('line', { class: 'q', x1: pts[0][0], y1: pts[0][1], x2: pts[1][0], y2: pts[1][1] });
+      if (curved) for (let e = 0; e < 4; e++) el('path', { class: 'cv', d: pathOf(edgePoly(it, e, 16).pts) });
       if (pts.length >= 2) {
-        el('line', { class: 'top', x1: pts[0][0], y1: pts[0][1], x2: pts[1][0], y2: pts[1][1] });
-        const t = el('text', { class: 'tl', x: (pts[0][0] + pts[1][0]) / 2, y: (pts[0][1] + pts[1][1]) / 2, 'font-size': 13 / s, 'text-anchor': 'middle' });
+        let mx = (pts[0][0] + pts[1][0]) / 2, my = (pts[0][1] + pts[1][1]) / 2;
+        if (curved) {
+          el('path', { class: 'top', d: pathOf(edgePoly(it, 0, 16).pts) });
+          const m = toPx(arcPoint(edgeCtrl(it, 0).map(toNorm), 0.5)); mx = m[0]; my = m[1];
+        } else el('line', { class: 'top', x1: pts[0][0], y1: pts[0][1], x2: pts[1][0], y2: pts[1][1] });
+        const t = el('text', { class: 'tl', x: mx, y: my, 'font-size': 13 / s, 'text-anchor': 'middle' });
         t.textContent = 'TOP';
       }
+      if (cur && S.curveMode && pts.length === 4) drawCurveHandles(it, k, s);
       pts.forEach((p, c) => {
         const selected = cur && c === S.sel;
         el('circle', { class: 'dot' + (selected ? ' sel' : ''), cx: p[0], cy: p[1], r: 6 / s });
@@ -264,6 +431,21 @@ input[type=text]{width:100%;min-height:36px;border:1px solid var(--line);border-
         el('circle', { class: 'hit', cx: p[0], cy: p[1], r: HANDLE / s, 'data-i': k, 'data-k': c });
       });
     });
+  }
+
+  function pathOf(pts) { return 'M' + pts.map((p) => p[0].toFixed(2) + ' ' + p[1].toFixed(2)).join('L'); }
+  // Round handles on the interior points of the selected item's edges; an edge with none shows one hollow
+  // handle at its middle (arc length), which becomes a real point as soon as it is touched.
+  function drawCurveHandles(it, k, s) {
+    for (let e = 0; e < 4; e++) {
+      const inner = it.curves[e];
+      const spots = inner.length ? inner.map((p, m) => ({ p: p, m: m })) : [{ p: toPx(arcPoint(edgeCtrl(it, e).map(toNorm), 0.5)), m: -1 }];
+      spots.forEach((h) => {
+        const picked = S.selC && S.selC.e === e && S.selC.m === h.m;
+        el('circle', { class: h.m < 0 ? 'cghost' : 'cdot' + (picked ? ' sel' : ''), cx: h.p[0], cy: h.p[1], r: DOT / s });
+        el('circle', { class: 'chit', cx: h.p[0], cy: h.p[1], r: HANDLE / s, 'data-i': k, 'data-e': e, 'data-m': h.m });
+      });
+    }
   }
 
   // ---- panel ----------------------------------------------------------------------------------
@@ -285,7 +467,7 @@ input[type=text]{width:100%;min-height:36px;border:1px solid var(--line);border-
     FLAGS.forEach((name) => {
       const l = document.createElement('label'); l.className = 'chk';
       const c = document.createElement('input'); c.type = 'checkbox'; c.dataset.flag = name;
-      c.addEventListener('change', () => { touched(); const it = currentItem(); if (it) { it.flags[name] = c.checked; changed(); } });
+      c.addEventListener('change', () => { touched(); const it = currentItem(); if (it) { it.flags[name] = c.checked; if (name === 'curved') it.autoCurved = false; changed(); } });
       l.appendChild(c); l.appendChild(document.createTextNode(name.replace('_', ' ') + ' (selected item)')); fl.appendChild(l);
     });
   }
@@ -297,7 +479,7 @@ input[type=text]{width:100%;min-height:36px;border:1px solid var(--line);border-
     S.items.forEach((x, k) => {
       const b = document.createElement('button'); b.className = 'it' + (k === S.cur ? ' on' : '');
       b.textContent = 'Item ' + (k + 1) + (x.pts.length < 4 ? ' (' + x.pts.length + '/4)' : '');
-      b.addEventListener('click', () => { S.cur = k; S.sel = x.pts.length ? 0 : -1; renderPanel(); draw(); });
+      b.addEventListener('click', () => { S.cur = k; S.sel = x.pts.length ? 0 : -1; S.selC = null; renderPanel(); draw(); });
       box.appendChild(b);
     });
     if (!S.items.length) { const s = document.createElement('span'); s.style.color = 'var(--dim)'; s.textContent = 'none yet'; box.appendChild(s); }
@@ -309,11 +491,35 @@ input[type=text]{width:100%;min-height:36px;border:1px solid var(--line);border-
     let hint = '';
     if (S.slices.has('negative')) hint = 'Marked: no document in this image.';
     else if (placing()) { const n = it ? it.pts.length : 0; hint = 'Click corner ' + (n + 1) + ' of 4' + (n === 0 ? ': the TOP-LEFT of the upright item, then clockwise' : '') + '.'; }
-    else hint = 'Drag a handle, or select one and use the arrow keys. N adds another item.';
+    else if (S.curveMode) hint = 'Curved edges: drag a round handle to bend its edge. Double-click or long-press a curve to add a point; double-click a point or press Delete to remove it. C leaves this mode.';
+    else hint = 'Drag a handle, or select one and use the arrow keys. N adds another item. C bends the edges.';
     $('hint').textContent = hint; $('hint2').textContent = '';
+    renderCurvePanel();
     const pr = problems();
     if (!S.dirty && pr.length === 0 && S.items.length + (S.slices.has('negative') ? 1 : 0) > 0) setStatus('Saved.', 'ok');
     else if (pr.length) setStatus('Not saved yet: ' + pr.join('; '), S.items.length || S.slices.size ? 'warn' : '');
+  }
+  function edgeWord(e) { return EDGE_NAMES[e] + ' edge'; }
+  function describeSel() {
+    const it = currentItem();
+    if (!it) return '';
+    if (S.selC && it.curves[S.selC.e]) {
+      const e = S.selC.e, n = it.curves[e].length;
+      return S.selC.m < 0 ? 'Selected: middle handle of the ' + edgeWord(e) + ' (the arrow keys bend it)' : 'Selected: point ' + (S.selC.m + 1) + ' of ' + n + ' on the ' + edgeWord(e);
+    }
+    if (S.sel >= 0 && it.pts[S.sel]) return 'Selected: corner ' + (S.sel + 1) + ' of 4';
+    return 'Nothing selected';
+  }
+  function renderCurvePanel() {
+    const it = currentItem(), ready = !!it && it.pts.length === 4;
+    $('curvemode').checked = S.curveMode; $('curvemode').disabled = !ready && !S.curveMode;
+    $('cadd').disabled = !ready || !S.curveMode; $('cdel').disabled = !ready || !S.curveMode || !S.selC || S.selC.m < 0;
+    document.querySelectorAll('[data-straighten]').forEach((b) => { b.disabled = !ready || !it.curves[+b.dataset.straighten].length; });
+    $('creset').disabled = !ready || !it.curves.some((c) => c.length);
+    $('curvehint').textContent = !ready ? 'Place the four corners first, then drag the round handle on an edge to bend it.'
+      : S.curveMode ? 'Drag the round handles. Double-click or long-press a curve to add a point; double-click a point to remove it.'
+      : 'Tick the box (or press C) to bend the edges of the selected item.';
+    $('csel').textContent = S.curveMode ? describeSel() : '';
   }
   function renderBar() {
     const L = S.list; if (!L) return;
@@ -327,6 +533,7 @@ input[type=text]{width:100%;min-height:36px;border:1px solid var(--line);border-
     S.dirty = true;
     const it = currentItem();
     if (it && it.pts.length === 4 && outsideFrame(it.pts)) it.flags.partial_frame = true;
+    if (it) syncCurved(it);
     renderPanel(); draw();
     clearTimeout(S.timer);
     S.timer = setTimeout(() => { save(false); }, 700);
@@ -337,25 +544,129 @@ input[type=text]{width:100%;min-height:36px;border:1px solid var(--line);border-
     if (S.slices.has('negative')) { toast('Untick "negative" first'); return; }
     const last = currentItem();
     if (last && last.pts.length < 4) return;
-    S.items.push({ pts: [], flags: {} }); S.cur = S.items.length - 1; S.sel = -1;
+    S.items.push(mkItem()); S.cur = S.items.length - 1; S.sel = -1; S.selC = null;
     renderPanel(); draw();
   }
   function addPoint(p) {
     if (S.slices.has('negative')) return;
     let it = currentItem();
-    if (!it || it.pts.length >= 4) { S.items.push({ pts: [], flags: {} }); S.cur = S.items.length - 1; it = currentItem(); }
-    it.pts.push(p); S.sel = it.pts.length - 1;
+    if (!it || it.pts.length >= 4) { S.items.push(mkItem()); S.cur = S.items.length - 1; it = currentItem(); }
+    it.pts.push(p); S.sel = it.pts.length - 1; S.selC = null;
     changed();
   }
-  function undoPoint() { const it = currentItem(); if (it && it.pts.length) { it.pts.pop(); S.sel = it.pts.length - 1; if (!it.pts.length && S.items.length > 1) { S.items.splice(S.cur, 1); S.cur = Math.max(0, S.cur - 1); } changed(); } }
-  function deleteItem() { if (S.cur < 0) return; S.items.splice(S.cur, 1); S.cur = Math.min(S.cur, S.items.length - 1); S.sel = -1; changed(); }
-  function rotateTop() { const it = currentItem(); if (it && it.pts.length === 4) { it.pts.push(it.pts.shift()); changed(); } }
-  function flipDir() { const it = currentItem(); if (it && it.pts.length === 4) { const p = it.pts; it.pts = [p[0], p[3], p[2], p[1]]; changed(); } }
+  function undoPoint() { const it = currentItem(); if (it && it.pts.length) { it.pts.pop(); it.curves = [[], [], [], []]; S.selC = null; S.sel = it.pts.length - 1; if (!it.pts.length && S.items.length > 1) { S.items.splice(S.cur, 1); S.cur = Math.max(0, S.cur - 1); } changed(); } }
+  function deleteItem() { if (S.cur < 0) return; S.items.splice(S.cur, 1); S.cur = Math.min(S.cur, S.items.length - 1); S.sel = -1; S.selC = null; changed(); }
+  function rotateTop() { const it = currentItem(); if (it && it.pts.length === 4) { it.pts.push(it.pts.shift()); it.curves.push(it.curves.shift()); S.selC = null; changed(); } }
+  // Reversing the corner direction reverses every edge: the new top runs TL to BL, the old left edge walked backwards.
+  function flipDir() {
+    const it = currentItem();
+    if (it && it.pts.length === 4) {
+      const p = it.pts, c = it.curves;
+      it.pts = [p[0], p[3], p[2], p[1]];
+      it.curves = [c[3].slice().reverse(), c[2].slice().reverse(), c[1].slice().reverse(), c[0].slice().reverse()];
+      S.selC = null; changed();
+    }
+  }
+  // Moves corner k to np. The two edges that meet there keep their interior points in place relative to the edge
+  // (retargetInterior: the chord frame), so a bend turns and scales with its edge. `from` is the item's state before
+  // the move ({ pts, curves }); a drag passes its start state so that nothing drifts.
+  function moveCorner(it, k, np, from) {
+    it.pts[k] = np;
+    if (it.pts.length === 4) {
+      it.curves = [0, 1, 2, 3].map((e) => {
+        const f = (e + 1) % 4;
+        if (e !== k && f !== k) return from.curves[e].map((x) => x.slice());
+        return retargetInterior(from.curves[e], from.pts[e], from.pts[f], it.pts[e], it.pts[f]);
+      });
+    }
+  }
+  function copyState(it) { return { pts: it.pts.map((p) => p.slice()), curves: it.curves.map((c) => c.map((x) => x.slice())) }; }
   function nudge(dx, dy, fine, big) {
-    const it = currentItem(); if (!it || S.sel < 0 || !it.pts[S.sel]) return;
+    const it = currentItem(); if (!it) return;
     const step = (big ? 10 : fine ? 0.2 : 1) / S.view.s;
-    it.pts[S.sel] = [it.pts[S.sel][0] + dx * step, it.pts[S.sel][1] + dy * step];
+    if (S.curveMode && S.selC && it.pts.length === 4) {
+      let m = S.selC.m; const e = S.selC.e;
+      if (m < 0) { m = insertCurvePoint(it, e, 0, toPx(arcPoint(edgeCtrl(it, e).map(toNorm), 0.5))); if (m < 0) return; S.selC.m = m; }
+      const q = it.curves[e][m];
+      it.curves[e][m] = [q[0] + dx * step, q[1] + dy * step];
+      changed(); return;
+    }
+    if (S.sel < 0 || !it.pts[S.sel]) return;
+    moveCorner(it, S.sel, [it.pts[S.sel][0] + dx * step, it.pts[S.sel][1] + dy * step], copyState(it));
     changed();
+  }
+  function insertCurvePoint(it, e, at, p) {
+    if (it.curves[e].length + 2 >= MAX_CURVE_POINTS) { toast('The ' + edgeWord(e) + ' already has the most points a curve can have (' + MAX_CURVE_POINTS + ')'); return -1; }
+    it.curves[e].splice(at, 0, [p[0], p[1]]);
+    return at;
+  }
+  function removeCurvePoint(e, m) {
+    const it = currentItem();
+    if (!it || m < 0 || !it.curves[e] || !it.curves[e][m]) return;
+    it.curves[e].splice(m, 1);
+    S.selC = null; changed();
+  }
+  function setCurveMode(on) {
+    S.curveMode = on; S.selC = null;
+    if (on) { const it = currentItem(); if (!it || it.pts.length !== 4) toast('Place the four corners first, then bend the edges'); }
+    renderPanel(); draw();
+  }
+  function straighten(e) { const it = currentItem(); if (it && it.pts.length === 4 && it.curves[e].length) { it.curves[e] = []; S.selC = null; changed(); } }
+  function resetCurves() { const it = currentItem(); if (it && it.curves.some((c) => c.length)) { it.curves = [[], [], [], []]; S.selC = null; changed(); } }
+  // The nearest point of the selected item's curves to image point q: { e, seg, d (image px), p }.
+  function nearestCurve(it, q) {
+    let best = null;
+    for (let e = 0; e < 4; e++) {
+      const r = nearestOnPolyline(edgePoly(it, e, 24), q);
+      if (r && (!best || r.d < best.d)) best = { e: e, seg: r.seg, d: r.d, p: r.p };
+    }
+    return best;
+  }
+  // Adds a point to the edge nearest q (within the 48 px touch size); returns true when one was added.
+  function addPointNear(q) {
+    const it = currentItem(); if (!it || it.pts.length !== 4) return false;
+    const c = nearestCurve(it, q);
+    if (!c || c.d * S.view.s > HANDLE) return false;
+    const m = insertCurvePoint(it, c.e, c.seg, c.p);
+    if (m < 0) return false;
+    S.selC = { e: c.e, m: m }; S.sel = -1;
+    changed(); return true;
+  }
+  // [ and ] walk the handles of the selected item in boundary order: corner, then the points of the edge after it.
+  function handleList(it) {
+    const out = [];
+    for (let e = 0; e < 4; e++) {
+      out.push({ corner: e });
+      if (S.curveMode) { if (it.curves[e].length) it.curves[e].forEach((x, m) => out.push({ e: e, m: m })); else out.push({ e: e, m: -1 }); }
+    }
+    return out;
+  }
+  function stepHandle(dir) {
+    const it = currentItem(); if (!it || it.pts.length !== 4) return;
+    const list = handleList(it);
+    let at = list.findIndex((h) => (S.selC ? h.e === S.selC.e && h.m === S.selC.m : h.corner === S.sel));
+    at = at < 0 ? (dir > 0 ? 0 : list.length - 1) : (at + dir + list.length) % list.length;
+    const h = list[at];
+    if (h.corner !== undefined) { S.sel = h.corner; S.selC = null; } else { S.selC = { e: h.e, m: h.m }; S.sel = -1; }
+    renderPanel(); draw();
+  }
+  // Adds a point in the middle of the longest stretch of the selected edge (or of the top edge).
+  function addPointKey() {
+    const it = currentItem(); if (!it || it.pts.length !== 4 || !S.curveMode) return;
+    const e = S.selC ? S.selC.e : (S.sel >= 0 ? S.sel : 0);
+    const ctrl = edgeCtrl(it, e), poly = edgePoly(it, e, 24);
+    const len = []; for (let j = 0; j < ctrl.length - 1; j++) len.push(0);
+    for (let i = 0; i + 1 < poly.pts.length; i++) len[poly.seg[i]] += pdist(poly.pts[i], poly.pts[i + 1]);
+    let j = 0; for (let x = 1; x < len.length; x++) if (len[x] > len[j]) j = x;
+    let acc = 0, half = len[j] / 2, p = ctrl[j];
+    for (let i = 0; i + 1 < poly.pts.length; i++) {
+      if (poly.seg[i] !== j) continue;
+      const d = pdist(poly.pts[i], poly.pts[i + 1]);
+      if (acc + d >= half) { const w = d > 0 ? (half - acc) / d : 0; p = [poly.pts[i][0] + w * (poly.pts[i + 1][0] - poly.pts[i][0]), poly.pts[i][1] + w * (poly.pts[i + 1][1] - poly.pts[i][1])]; break; }
+      acc += d;
+    }
+    const m = insertCurvePoint(it, e, j, p);
+    if (m >= 0) { S.selC = { e: e, m: m }; S.sel = -1; changed(); }
   }
 
   // ---- pointers -------------------------------------------------------------------------------
@@ -369,17 +680,43 @@ input[type=text]{width:100%;min-height:36px;border:1px solid var(--line);border-
     if (ptrs.size === 2) {
       const [a, b] = [...ptrs.values()];
       pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, s: S.view.s, tx: S.view.tx, ty: S.view.ty, cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 };
+      if (drag && drag.lp) clearTimeout(drag.lp);
       drag = null; return;
     }
     const h = e.target && e.target.closest ? e.target.closest('[data-k]') : null;
     if (h) {
       const i = +h.dataset.i, k = +h.dataset.k;
-      S.cur = i; S.sel = k;
+      S.cur = i; S.sel = k; S.selC = null;
       const p = toImage(e.clientX, e.clientY), q = S.items[i].pts[k];
-      drag = { type: 'handle', i, k, ox: q[0] - p[0], oy: q[1] - p[1], moved: false };
+      drag = { type: 'handle', i, k, ox: q[0] - p[0], oy: q[1] - p[1], moved: false, from: copyState(S.items[i]) };
+      renderPanel(); draw(); return;
+    }
+    const ch = e.target && e.target.closest ? e.target.closest('[data-e]') : null;
+    if (ch && S.curveMode) {
+      const i = +ch.dataset.i, ce = +ch.dataset.e;
+      let m = +ch.dataset.m;
+      const it = S.items[i];
+      S.cur = i; S.sel = -1;
+      if (m < 0) { m = insertCurvePoint(it, ce, 0, toPx(arcPoint(edgeCtrl(it, ce).map(toNorm), 0.5))); if (m < 0) return; }
+      S.selC = { e: ce, m: m };
+      const p = toImage(e.clientX, e.clientY), q = it.curves[ce][m];
+      drag = { type: 'chandle', i, e: ce, m, ox: q[0] - p[0], oy: q[1] - p[1], moved: false };
       renderPanel(); draw(); return;
     }
     drag = { type: 'pan', sx: e.clientX, sy: e.clientY, tx: S.view.tx, ty: S.view.ty, moved: false };
+    if (S.curveMode && ptrs.size === 1) {
+      const d = drag;
+      d.lp = setTimeout(() => {
+        if (drag !== d || d.moved) return;
+        const q = toImage(d.sx, d.sy);
+        if (addPointNear(q)) {
+          // The new point is under the finger: keep dragging moves it.
+          const it = currentItem(), m = S.selC.m, pt = it.curves[S.selC.e][m];
+          drag = { type: 'chandle', i: S.cur, e: S.selC.e, m, ox: pt[0] - q[0], oy: pt[1] - q[1], moved: false };
+          toast('Point added: drag to place it');
+        }
+      }, LONG_PRESS_MS);
+    }
   });
   stage.addEventListener('pointermove', (e) => {
     if (!ptrs.has(e.pointerId)) return;
@@ -397,11 +734,16 @@ input[type=text]{width:100%;min-height:36px;border:1px solid var(--line);border-
     if (drag.type === 'handle') {
       const p = toImage(e.clientX, e.clientY);
       const it = S.items[drag.i];
-      it.pts[drag.k] = [Math.max(-S.W, Math.min(2 * S.W, p[0] + drag.ox)), Math.max(-S.H, Math.min(2 * S.H, p[1] + drag.oy))];
+      moveCorner(it, drag.k, [Math.max(-S.W, Math.min(2 * S.W, p[0] + drag.ox)), Math.max(-S.H, Math.min(2 * S.H, p[1] + drag.oy))], drag.from);
+      drag.moved = true; draw(); return;
+    }
+    if (drag.type === 'chandle') {
+      const p = toImage(e.clientX, e.clientY);
+      S.items[drag.i].curves[drag.e][drag.m] = [Math.max(-S.W, Math.min(2 * S.W, p[0] + drag.ox)), Math.max(-S.H, Math.min(2 * S.H, p[1] + drag.oy))];
       drag.moved = true; draw(); return;
     }
     const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
-    if (Math.hypot(dx, dy) > 6) { drag.moved = true; stage.classList.add('panning'); }
+    if (Math.hypot(dx, dy) > 6) { drag.moved = true; if (drag.lp) clearTimeout(drag.lp); stage.classList.add('panning'); }
     if (drag.moved) { S.view = { s: S.view.s, tx: drag.tx + dx, ty: drag.ty + dy }; applyView(); }
   });
   function endPointer(e) {
@@ -411,7 +753,8 @@ input[type=text]{width:100%;min-height:36px;border:1px solid var(--line);border-
     if (pinch) { if (ptrs.size < 2) pinch = null; drag = null; return; }
     const d = drag; drag = null;
     if (!d) return;
-    if (d.type === 'handle') { if (d.moved) changed(); return; }
+    if (d.lp) clearTimeout(d.lp);
+    if (d.type === 'handle' || d.type === 'chandle') { if (d.moved) changed(); else { renderPanel(); draw(); } return; }
     if (!d.moved && e.type === 'pointerup' && S.W && placing()) {
       const p = toImage(e.clientX, e.clientY);
       addPoint([Math.max(-S.W, Math.min(2 * S.W, p[0])), Math.max(-S.H, Math.min(2 * S.H, p[1]))]);
@@ -419,18 +762,34 @@ input[type=text]{width:100%;min-height:36px;border:1px solid var(--line);border-
   }
   stage.addEventListener('pointerup', endPointer);
   stage.addEventListener('pointercancel', endPointer);
+  // Double-click in curve mode: on a point it removes the point, on a curve it adds one.
+  stage.addEventListener('dblclick', (e) => {
+    const it = currentItem();
+    if (!S.curveMode || !it || it.pts.length !== 4) return;
+    e.preventDefault(); touched();
+    const q = toImage(e.clientX, e.clientY), s = S.view.s;
+    let hit = null;
+    for (let ed = 0; ed < 4; ed++) it.curves[ed].forEach((x, m) => { const d = pdist(q, x) * s; if (d <= HANDLE && (!hit || d < hit.d)) hit = { e: ed, m, d }; });
+    if (hit) { removeCurvePoint(hit.e, hit.m); return; }
+    addPointNear(q);
+  });
   stage.addEventListener('wheel', (e) => { e.preventDefault(); touched(); zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015))); }, { passive: false });
   stage.addEventListener('contextmenu', (e) => e.preventDefault());
 
   // ---- loading and saving ---------------------------------------------------------------------
   function snapshot() {
-    return { items: S.items.map((x) => ({ pts: x.pts.map((p) => p.slice()), flags: Object.assign({}, x.flags) })), slices: [...S.slices], notes: S.notes, scene: S.scene, cur: S.cur };
+    return { items: S.items.map((x) => ({ pts: x.pts.map((p) => p.slice()), flags: Object.assign({}, x.flags), curves: x.curves.map((c) => c.map((q) => q.slice())), autoCurved: x.autoCurved })), slices: [...S.slices], notes: S.notes, scene: S.scene, cur: S.cur };
   }
   function restore(d) {
-    S.items = d.items; S.slices = new Set(d.slices); S.notes = d.notes; S.scene = d.scene; S.cur = d.cur; S.sel = S.cur >= 0 && S.items[S.cur] && S.items[S.cur].pts.length ? 0 : -1;
+    S.items = d.items; S.selC = null; S.curveMode = S.items.some((x) => x.curves.some((c) => c.length)); S.slices = new Set(d.slices); S.notes = d.notes; S.scene = d.scene; S.cur = d.cur; S.sel = S.cur >= 0 && S.items[S.cur] && S.items[S.cur].pts.length ? 0 : -1;
   }
   function fromLabel(l) {
-    S.items = (l.items || []).map((it) => ({ pts: it.quad.map((p) => [p[0] * S.W, p[1] * S.H]), flags: { partial_frame: it.partial_frame, curved: it.curved, touching: it.touching, hand_held: it.hand_held, folded: it.folded } }));
+    S.items = (l.items || []).map((it) => {
+      // A saved curve lists all its points; the page keeps only the interior ones (the end points are the corners).
+      const curves = EDGE_NAMES.map((n) => (it.curves && it.curves[n] && it.curves[n].length > 2 ? it.curves[n].slice(1, -1).map(toPx) : []));
+      return { pts: it.quad.map(toPx), curves, autoCurved: false, flags: { partial_frame: it.partial_frame, curved: it.curved, touching: it.touching, hand_held: it.hand_held, folded: it.folded } };
+    });
+    S.curveMode = S.items.some((it) => it.curves.some((c) => c.length)); S.selC = null;
     S.slices = new Set(l.slices || []); S.notes = l.notes || ''; S.scene = l.scene_id || ''; S.cur = S.items.length ? 0 : -1; S.sel = S.items.length ? 0 : -1;
   }
   async function save(advance) {
@@ -447,7 +806,13 @@ input[type=text]{width:100%;min-height:36px;border:1px solid var(--line);border-
     const body = {
       slices: [...S.slices], scene_id: S.scene, notes: S.notes, seconds: S.active / 1000,
       items: S.items.map((it) => {
-        const o = { quad: it.pts.map((p) => [p[0] / S.W, p[1] / S.H]) };
+        const o = { quad: it.pts.map(toNorm) };
+        // Only the edges that are really bent are written, each with its two corners as end points.
+        const bent = it.pts.length === 4 ? bentEdges(it) : [];
+        if (bent.some(Boolean)) {
+          o.curves = {};
+          bent.forEach((b, e) => { if (b) o.curves[EDGE_NAMES[e]] = edgeCtrl(it, e).map(toNorm); });
+        }
         FLAGS.forEach((f) => { o[f] = !!it.flags[f]; });
         return o;
       })
@@ -482,7 +847,7 @@ input[type=text]{width:100%;min-height:36px;border:1px solid var(--line);border-
     if (!S.list || i < 0 || i >= S.list.images.length) return;
     await leave();
     const id = ++S.loadId;
-    S.idx = i; S.meta = null; S.W = 0; S.H = 0; S.items = []; S.cur = -1; S.sel = -1; S.slices = new Set(); S.notes = ''; S.scene = '';
+    S.idx = i; S.meta = null; S.W = 0; S.H = 0; S.items = []; S.cur = -1; S.sel = -1; S.selC = null; S.curveMode = false; S.slices = new Set(); S.notes = ''; S.scene = '';
     S.dirty = false; S.showSuggest = false; S.suggest = null; S.assisted = false;
     tile.removeAttribute('src'); tile.style.display = 'none'; img.removeAttribute('src');
     const entry = S.list.images[i];
@@ -536,6 +901,11 @@ input[type=text]{width:100%;min-height:36px;border:1px solid var(--line);border-
   $('undo').addEventListener('click', undoPoint);
   $('rot').addEventListener('click', rotateTop);
   $('flip').addEventListener('click', flipDir);
+  $('curvemode').addEventListener('change', () => { touched(); setCurveMode($('curvemode').checked); });
+  $('cadd').addEventListener('click', () => { touched(); addPointKey(); });
+  $('cdel').addEventListener('click', () => { touched(); if (S.selC) removeCurvePoint(S.selC.e, S.selC.m); });
+  document.querySelectorAll('[data-straighten]').forEach((b) => b.addEventListener('click', () => { touched(); straighten(+b.dataset.straighten); }));
+  $('creset').addEventListener('click', () => { touched(); resetCurves(); });
   $('fit').addEventListener('click', fit);
   $('zin').addEventListener('click', () => { const z = stageSize(); zoomAt(z.l + z.w / 2, z.t + z.h / 2, 1.5); });
   $('zout').addEventListener('click', () => { const z = stageSize(); zoomAt(z.l + z.w / 2, z.t + z.h / 2, 1 / 1.5); });
@@ -566,7 +936,7 @@ input[type=text]{width:100%;min-height:36px;border:1px solid var(--line);border-
     touched();
     const k = e.key;
     if (k.startsWith('Arrow')) { e.preventDefault(); nudge(k === 'ArrowRight' ? 1 : k === 'ArrowLeft' ? -1 : 0, k === 'ArrowDown' ? 1 : k === 'ArrowUp' ? -1 : 0, e.altKey, e.shiftKey); return; }
-    if (k >= '1' && k <= '4') { const it = currentItem(); if (it && it.pts[+k - 1]) { S.sel = +k - 1; draw(); } return; }
+    if (k >= '1' && k <= '4') { const it = currentItem(); if (it && it.pts[+k - 1]) { S.sel = +k - 1; S.selC = null; renderPanel(); draw(); } return; }
     switch (k) {
       case ',': case 'PageUp': e.preventDefault(); go(S.idx - 1); break;
       case '.': case 'PageDown': e.preventDefault(); go(S.idx + 1); break;
@@ -574,7 +944,11 @@ input[type=text]{width:100%;min-height:36px;border:1px solid var(--line);border-
       case 'g': case 'G': { const j = nextTodo(S.idx); if (j >= 0) go(j); else toast('Nothing left to do'); break; }
       case 's': case 'S': skipNow(); break;
       case 'n': case 'N': newItem(); break;
-      case 'Delete': deleteItem(); break;
+      case 'Delete': if (S.curveMode && S.selC) removeCurvePoint(S.selC.e, S.selC.m); else deleteItem(); break;
+      case 'c': case 'C': setCurveMode(!S.curveMode); break;
+      case 'p': case 'P': addPointKey(); break;
+      case '[': stepHandle(-1); break;
+      case ']': stepHandle(1); break;
       case 'Backspace': e.preventDefault(); undoPoint(); break;
       case 'r': case 'R': rotateTop(); break;
       case 'f': case 'F': fit(); break;
@@ -582,7 +956,7 @@ input[type=text]{width:100%;min-height:36px;border:1px solid var(--line);border-
       case '-': case '_': { const z = stageSize(); zoomAt(z.l + z.w / 2, z.t + z.h / 2, 1 / 1.3); break; }
       case '0': { const z = stageSize(); zoomAt(z.l + z.w / 2, z.t + z.h / 2, 1 / S.view.s); break; }
       case '?': $('help').style.display = $('help').style.display === 'block' ? 'none' : 'block'; break;
-      case 'Escape': $('help').style.display = 'none'; break;
+      case 'Escape': $('help').style.display = 'none'; S.sel = -1; S.selC = null; renderPanel(); draw(); break;
       default: break;
     }
   });

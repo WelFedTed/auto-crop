@@ -561,6 +561,8 @@ mod tests {
                 height: 300,
                 quad: items[0],
                 items,
+                curves: None,
+                items_curves: Vec::new(),
                 tags: [
                     (
                         "separation".to_owned(),

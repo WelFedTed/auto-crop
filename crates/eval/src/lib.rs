@@ -20,6 +20,7 @@
 
 pub mod calib;
 pub mod compare;
+pub mod curves;
 pub mod detector;
 pub mod geom;
 pub mod golden;
@@ -50,6 +51,7 @@ mod independence {
             ("stats.rs", include_str!("stats.rs")),
             ("multi.rs", include_str!("multi.rs")),
             ("calib.rs", include_str!("calib.rs")),
+            ("curves.rs", include_str!("curves.rs")),
         ];
         for (name, text) in sources {
             // Only look at code before the test module so this file's own words do not matter.

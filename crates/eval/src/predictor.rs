@@ -325,6 +325,8 @@ mod tests {
                 height: 100,
                 quad: [[0.2, 0.2], [0.7, 0.25], [0.72, 0.8], [0.22, 0.75]],
                 items: Vec::new(),
+                curves: None,
+                items_curves: Vec::new(),
                 tags: BTreeMap::new(),
             };
             text.push_str(&serde_json::to_string(&it).expect("serialises"));

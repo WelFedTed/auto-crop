@@ -446,6 +446,16 @@ impl Shared {
         );
         l.slices = payload.slices;
         l.items = payload.items;
+        // Bent curves imply the `curved` flag (docs/dev/curved-pages.md), so the label says it.
+        for it in &mut l.items {
+            if it
+                .curves
+                .as_ref()
+                .is_some_and(auto_crop_eval::curves::Curves::any_bent)
+            {
+                it.curved = true;
+            }
+        }
         l.scene_id = payload
             .scene_id
             .map(|s| s.trim().to_owned())

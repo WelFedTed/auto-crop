@@ -54,6 +54,8 @@ An item (or the single page of an image) gains an optional field next to `quad`:
 }
 ```
 
+Each of the four edge keys is optional: an ABSENT edge is straight (its two corners). The labeller writes only the edges that are bent, and writes no `curves` key at all for a page whose edges are all straight; every reader must therefore treat a missing edge as `[corner, next corner]` (`auto_crop_eval::curves::Curves::full_edge`). The spline is evaluated on the NORMALISED coordinates exactly as stored (the labeller's JavaScript and `crates/eval` both do this), so the shape does not depend on the image size.
+
 `quad` stays required (older tools and the quad metrics keep working); `curves` is optional and, when present,
 must agree with the quad at the corners. A label without `curves` is a straight page.
 

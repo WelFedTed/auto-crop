@@ -15,6 +15,7 @@
 //! relative to the manifest directory; absolute paths and `..` are rejected so a hostile manifest
 //! cannot point the evaluator at other files. Unknown fields are ignored (forward compatibility).
 
+use crate::curves::{self, Curves};
 use crate::geom::{self, Quad};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -42,6 +43,14 @@ pub struct ManifestItem {
     /// `quad` is the first of them, so a single-item reader still gets a valid quad.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub items: Vec<Quad>,
+    /// Curved edges of `quad` (the first item), as in the golden label (`docs/dev/curved-pages.md`):
+    /// per edge the boundary curve's points; an absent edge is straight. The harness metrics stay
+    /// quad-based and ignore it; it is carried so curve-aware tools see the same ground truth.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub curves: Option<Curves>,
+    /// Curves of every item of a multi-item row, parallel to `items`; empty when none has curves.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub items_curves: Vec<Option<Curves>>,
     #[serde(default)]
     pub tags: BTreeMap<String, String>,
 }
@@ -106,6 +115,25 @@ pub fn validate_item(it: &ManifestItem) -> Vec<String> {
             e.push(format!("item {k}: quad is not clockwise from the top-left"));
         } else if !geom::quad_is_simple(q) {
             e.push(format!("item {k}: quad edges cross"));
+        }
+    }
+    if let Some(c) = &it.curves {
+        e.extend(
+            curves::problems(&it.quad, c)
+                .into_iter()
+                .map(|p| format!("quad: {p}")),
+        );
+    }
+    if !it.items_curves.is_empty() && it.items_curves.len() != it.items.len() {
+        e.push("`items_curves` must be as long as `items`".to_owned());
+    }
+    for (k, c) in it.items_curves.iter().enumerate() {
+        if let (Some(c), Some(q)) = (c, it.items.get(k)) {
+            e.extend(
+                curves::problems(q, c)
+                    .into_iter()
+                    .map(|p| format!("item {k}: {p}")),
+            );
         }
     }
     if let Some(first) = it.items.first()
@@ -222,6 +250,8 @@ mod tests {
             height: 80,
             quad: [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]],
             items: Vec::new(),
+            curves: None,
+            items_curves: Vec::new(),
             tags: BTreeMap::new(),
         }
     }

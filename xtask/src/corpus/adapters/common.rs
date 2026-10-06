@@ -519,6 +519,8 @@ pub fn item(
         height: size.1,
         quad,
         items: Vec::new(),
+        curves: None,
+        items_curves: Vec::new(),
         tags,
     }
 }

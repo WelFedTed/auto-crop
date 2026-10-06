@@ -54,6 +54,10 @@ One JSON object per line:
 
 `quad` is the ground-truth page outline: TL, TR, BR, BL of the upright item, clockwise in a y-down frame, normalised to the EXIF-oriented image (x by width, y by height); it may leave the frame. `image` is relative to the manifest directory (absolute paths and `..` are rejected). Each tag key becomes a slice axis. A `scene_id` must not appear in two splits. Unknown fields are ignored.
 
+## Curved edges in the ground truth
+
+A manifest row may also carry `curves` (the boundary curves of `quad`, the first item) and, for multi-item rows, `items_curves` (one entry per item of `items`, `null` for a straight one): the golden-label bridge fills them from the labeller's curved-edge labels. The format is the shared one in [docs/dev/curved-pages.md](../dev/curved-pages.md): per edge (`top`, `right`, `bottom`, `left`) 2 to 32 points whose end points are the quad corners; an absent edge is straight. `manifest::validate_item` checks them with the same rules as `check-labels` (`crates/eval/src/curves.rs`). **Every metric here stays quad-based** and ignores them; the module `curves` (which imports no project crate, like `geom`) also holds `mean_boundary_distance`, a helper for a future curve-aware metric that no predictor feeds yet.
+
 ## Multi-item scenes (`run --multi`, M10.56)
 
 A manifest row may carry `items`, a list of quads in the same convention as `quad` (which must then equal the first of them; single-item manifests are unchanged). `run --multi` scores a **multi-item predictor** (`items[:CUTOFF]` is `imgproc::items::detect_items` with the receipts profile; `oracle` returns the truth) and writes `auto-crop-eval-multi-results/1`:

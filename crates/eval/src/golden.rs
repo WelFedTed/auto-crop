@@ -16,6 +16,7 @@
 //! The golden set is private (B21) and lives under the owner's gitignored `_data/`; this module
 //! only reads and checks files, it never copies or uploads anything.
 
+use crate::curves::{self, Curves};
 use crate::geom::{self, Quad};
 use crate::manifest::{ManifestItem, sha256_hex};
 use serde::{Deserialize, Serialize};
@@ -66,6 +67,11 @@ pub const IMAGE_EXTENSIONS: [&str; 14] = [
 pub struct GoldenItem {
     /// Four corners, clockwise from the top-left of the upright item, normalised.
     pub quad: Quad,
+    /// Optional curved edges (`docs/dev/curved-pages.md`): per edge the points of the boundary
+    /// curve, end points equal to the quad corners. An absent edge is straight; an absent
+    /// `curves` is a straight page. Having bent curves implies the `curved` flag.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub curves: Option<Curves>,
     #[serde(default)]
     pub partial_frame: bool,
     #[serde(default)]
@@ -82,6 +88,7 @@ impl GoldenItem {
     pub fn new(quad: Quad) -> Self {
         Self {
             quad,
+            curves: None,
             partial_frame: false,
             curved: false,
             touching: false,
@@ -90,11 +97,17 @@ impl GoldenItem {
         }
     }
 
-    /// The names of the flags that are set.
+    /// True when the item is curved: the flag is set, or it carries bent curves (the flag is
+    /// implied by the curves).
+    pub fn is_curved(&self) -> bool {
+        self.curved || self.curves.as_ref().is_some_and(Curves::any_bent)
+    }
+
+    /// The names of the flags that are set (`curved` also when bent curves imply it).
     pub fn flags(&self) -> Vec<&'static str> {
         let all = [
             self.partial_frame,
-            self.curved,
+            self.is_curved(),
             self.touching,
             self.hand_held,
             self.folded,
@@ -322,6 +335,11 @@ pub fn validate_label(l: &GoldenLabel, file_stem: Option<&str>) -> Findings {
         if let Some(p) = quad_problem(&it.quad) {
             err(&mut f, format!("item {k}: {p}"));
             continue;
+        }
+        if let Some(c) = &it.curves {
+            for p in curves::problems(&it.quad, c) {
+                err(&mut f, format!("item {k}: {p}"));
+            }
         }
         let outside = it
             .quad
@@ -633,6 +651,8 @@ pub fn manifest_items(
             if l.items.len() == 1 { "1" } else { "2+" }.to_owned(),
         );
         let quads: Vec<Quad> = l.items.iter().map(|i| i.quad).collect();
+        let item_curves: Vec<Option<Curves>> = l.items.iter().map(|i| i.curves.clone()).collect();
+        let multi = quads.len() > 1;
         rows.push(ManifestItem {
             v: 1,
             id: l.id.clone(),
@@ -642,7 +662,13 @@ pub fn manifest_items(
             width: l.width,
             height: l.height,
             quad: quads[0],
-            items: if quads.len() > 1 { quads } else { Vec::new() },
+            curves: item_curves[0].clone(),
+            items: if multi { quads } else { Vec::new() },
+            items_curves: if multi && item_curves.iter().any(Option::is_some) {
+                item_curves
+            } else {
+                Vec::new()
+            },
             tags,
         });
     }
@@ -850,10 +876,20 @@ mod tests {
         for flag in ITEM_FLAGS {
             assert!(item_props.get(flag).is_some(), "schema lacks flag {flag}");
         }
+        // The flags, `quad` and `curves`.
         assert_eq!(
             item_props.as_object().expect("props").len(),
-            ITEM_FLAGS.len() + 1
+            ITEM_FLAGS.len() + 2
         );
+        assert!(item_props.get("quad").is_some() && item_props.get("curves").is_some());
+        let curve_props = &schema["$defs"]["curves"]["properties"];
+        for name in curves::EDGE_NAMES {
+            assert!(curve_props.get(name).is_some(), "schema lacks curve {name}");
+        }
+        assert_eq!(curve_props.as_object().expect("curves").len(), 4);
+        let curve = &schema["$defs"]["curve"];
+        assert_eq!(curve["minItems"], serde_json::json!(curves::MIN_POINTS));
+        assert_eq!(curve["maxItems"], serde_json::json!(curves::MAX_POINTS));
         // Every key a label serialises is declared by the schema (additionalProperties is false),
         // and every required key is one the labeller writes.
         let json = serde_json::to_value(label("a.jpg")).expect("json");
@@ -1009,5 +1045,142 @@ mod tests {
         let none = |_: &GoldenLabel| None;
         assert!(manifest_items(&all, &none, false).0.is_empty());
         assert_eq!(manifest_sha256(&rows).len(), 64);
+    }
+
+    fn curved_label(name: &str) -> GoldenLabel {
+        let mut l = label(name);
+        l.items[0].curves = Some(Curves {
+            top: Some(vec![GOOD[0], [0.5, 0.06], GOOD[1]]),
+            right: Some(vec![GOOD[1], [0.94, 0.5], GOOD[2]]),
+            bottom: None,
+            left: Some(vec![GOOD[3], [0.06, 0.5], GOOD[0]]),
+        });
+        l
+    }
+
+    #[test]
+    fn curved_labels_validate_round_trip_and_older_labels_still_load() {
+        let l = curved_label("c.jpg");
+        let f = validate_label(&l, Some("c.jpg"));
+        assert!(f.errors.is_empty(), "{:?}", f.errors);
+        assert!(f.warnings.is_empty(), "{:?}", f.warnings);
+        let text = label_to_json(&l);
+        assert!(text.contains("\"curves\"") && !text.contains("\"bottom\""));
+        assert_eq!(parse_label(&text).expect("parses"), l);
+        // The curved flag is implied by bent curves, and a label with no curves has none.
+        assert!(l.items[0].is_curved() && l.items[0].flags().contains(&"curved"));
+        assert!(!label("a.jpg").items[0].is_curved());
+        assert!(!label_to_json(&label("a.jpg")).contains("curves"));
+        // A label written before `curves` existed (no key) loads unchanged.
+        let old = r#"{"schema_version":1,"id":"o.jpg","image":"o.jpg","image_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","width":8,"height":6,"scene_id":"o.jpg","slices":["flatbed-single"],"orientation_quarter_turns":0,"items":[{"quad":[[0.1,0.1],[0.9,0.1],[0.9,0.9],[0.1,0.9]],"partial_frame":false,"curved":true,"touching":false,"hand_held":false,"folded":false}]}"#;
+        let o = parse_label(old).expect("an old label parses");
+        assert!(o.items[0].curves.is_none() && o.items[0].curved);
+        assert!(validate_label(&o, Some("o.jpg")).errors.is_empty());
+    }
+
+    #[test]
+    fn invalid_curves_are_errors_naming_the_item_and_the_curve() {
+        let mut l = curved_label("c.jpg");
+        l.items[0].curves.as_mut().expect("curves").top =
+            Some(vec![[0.2, 0.1], [0.5, 0.06], GOOD[1]]);
+        assert!(
+            errors(&l).iter().any(
+                |e| e.contains("item 0: curves.top: the first point") && e.contains("top-left")
+            ),
+            "{:?}",
+            errors(&l)
+        );
+        let mut l = curved_label("c.jpg");
+        l.items[0].curves.as_mut().expect("curves").left = Some(vec![GOOD[3]]);
+        assert!(
+            errors(&l)
+                .iter()
+                .any(|e| e.contains("curves.left: 1 point(s)"))
+        );
+        let mut l = curved_label("c.jpg");
+        l.items[0].curves.as_mut().expect("curves").top = Some(vec![GOOD[0], [0.5, 1.3], GOOD[1]]);
+        assert!(
+            errors(&l)
+                .iter()
+                .any(|e| e.contains("item 0: curves.top crosses curves.bottom")),
+            "{:?}",
+            errors(&l)
+        );
+        // Two items: the error says which one.
+        let mut l = curved_label("c.jpg");
+        let mut bad = GoldenItem::new([[0.2, 0.2], [0.4, 0.2], [0.4, 0.4], [0.2, 0.4]]);
+        bad.curves = Some(Curves {
+            top: Some(vec![[0.2, 0.2], [0.3, 0.1]]),
+            ..Curves::default()
+        });
+        l.items.push(bad);
+        assert!(
+            errors(&l)
+                .iter()
+                .any(|e| e.starts_with("item 1: curves.top"))
+        );
+        // Unknown curve names do not parse.
+        let text = label_to_json(&curved_label("c.jpg")).replace("\"top\"", "\"middle\"");
+        assert!(parse_label(&text).is_err());
+    }
+
+    #[test]
+    fn the_manifest_bridge_carries_curves_and_marks_the_flag() {
+        let mut multi = label("m.jpg");
+        multi.items = vec![
+            curved_label("x").items.remove(0),
+            GoldenItem::new([[0.2, 0.2], [0.4, 0.2], [0.4, 0.4], [0.2, 0.4]]),
+        ];
+        let single = curved_label("s.jpg");
+        let plain = label("p.jpg");
+        let to_dev = |_: &GoldenLabel| Some("dev".to_owned());
+        let (rows, _) = manifest_items(&[single.clone(), multi, plain], &to_dev, false);
+        assert_eq!(rows[0].curves, single.items[0].curves);
+        assert!(rows[0].items_curves.is_empty());
+        assert_eq!(
+            rows[0].tags.get("flag-curved").map(String::as_str),
+            Some("yes")
+        );
+        assert_eq!(rows[1].items.len(), 2);
+        assert_eq!(rows[1].items_curves.len(), 2);
+        assert!(rows[1].items_curves[0].is_some() && rows[1].items_curves[1].is_none());
+        assert!(rows[1].curves.is_some());
+        assert!(rows[2].curves.is_none() && rows[2].items_curves.is_empty());
+        assert!(!rows[2].tags.contains_key("flag-curved"));
+        // Round trip through the manifest text, and the harness validation still passes (and
+        // rejects bad curves).
+        let text = manifest_text(&rows);
+        let back = crate::manifest::parse(&text, Path::new(".")).expect("valid manifest");
+        assert_eq!(back.items[0].curves, rows[0].curves);
+        assert_eq!(back.items[1].items_curves, rows[1].items_curves);
+        assert!(!text.lines().last().expect("line").contains("curves"));
+        let mut broken = rows[0].clone();
+        broken.curves.as_mut().expect("curves").top = Some(vec![[0.9, 0.9], [0.5, 0.5]]);
+        assert!(
+            crate::manifest::validate_item(&broken)
+                .iter()
+                .any(|e| e.contains("curves.top"))
+        );
+    }
+
+    #[test]
+    fn check_dir_reports_bad_curves_clearly() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut ok = labelled(dir.path(), "ok.png", b"ok");
+        ok.items[0].curves = curved_label("x").items[0].curves.clone();
+        write(dir.path(), "ok.png.json", label_to_json(&ok).as_bytes());
+        let mut bad = labelled(dir.path(), "bad.png", b"bad");
+        bad.items[0].curves = Some(Curves {
+            right: Some(vec![GOOD[1], [0.5, 0.5], [0.8, 0.8]]),
+            ..Curves::default()
+        });
+        write(dir.path(), "bad.png.json", label_to_json(&bad).as_bytes());
+        let r = check_dir(dir.path(), dir.path(), CheckOptions::default()).expect("runs");
+        assert_eq!(r.errors.len(), 1, "{:?}", r.errors);
+        assert!(
+            r.errors[0].starts_with("bad.png.json: item 0: curves.right: the last point"),
+            "{}",
+            r.errors[0]
+        );
     }
 }

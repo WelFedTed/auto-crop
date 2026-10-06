@@ -2,8 +2,29 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/WelFedTed/auto-crop/docs/testing/golden-label.schema.json",
   "title": "Auto Crop golden-set label",
-  "description": "One label file per image, named <image file name>.json. Labels are made blank-quad (never from the app's suggestion). Checked by `cargo xtask check-labels` (crates/eval/src/golden.rs); a unit test keeps that code and this file in step. Beyond the schema the checker enforces: the quad is finite, simple, clockwise and convex; `negative` if and only if there are no items; the file name equals id; no duplicate ids; one label per image; the image exists and its SHA-256 still matches.",
+  "description": "One label file per image, named <image file name>.json. Labels are made blank-quad (never from the app's suggestion). Checked by `cargo xtask check-labels` (crates/eval/src/golden.rs); a unit test keeps that code and this file in step. Beyond the schema the checker enforces: the quad is finite, simple, clockwise and convex; any `curves` have 2 to 32 finite points per edge, end points equal to the quad corners (1e-6) and no self-intersection or crossing of one curve by another; `negative` if and only if there are no items; the file name equals id; no duplicate ids; one label per image; the image exists and its SHA-256 still matches.",
   "type": "object",
+  "$defs": {
+    "point": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number" }, "description": "[x, y] normalised to the EXIF-oriented image, y down." },
+    "curve": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/point" },
+      "description": "Points along one page edge, in order. The first and last point ARE the quad corners (equal within 1e-6, enforced by the checker, not expressible here); the points in between lie on the edge. Between points the curve is a centripetal Catmull-Rom spline (alpha 0.5) with phantom end points; two points are a straight edge. Finite, no self-intersection (checked)."
+    },
+    "curves": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional curved edges of the item (docs/dev/curved-pages.md). top runs TL to TR, right TR to BR, bottom BR to BL, left BL to TL. An absent edge is straight (the labeller writes only the edges that are bent); an absent `curves` is a straight page. Bent curves imply the `curved` flag.",
+      "properties": {
+        "top": { "$ref": "#/$defs/curve" },
+        "right": { "$ref": "#/$defs/curve" },
+        "bottom": { "$ref": "#/$defs/curve" },
+        "left": { "$ref": "#/$defs/curve" }
+      }
+    }
+  },
   "required": ["schema_version", "id", "image", "image_sha256", "width", "height", "scene_id", "slices", "orientation_quarter_turns", "items"],
   "additionalProperties": false,
   "properties": {
@@ -42,8 +63,9 @@
             "description": "Four corners TL, TR, BR, BL of the upright item (so the first edge is the top edge), clockwise on screen, normalised to the EXIF-oriented image (x / width, y / height); may lie outside the frame for partial frames. Changed from the first draft, which said source pixels: the harness manifest is normalised, so labels are too.",
             "items": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number" } }
           },
+          "curves": { "$ref": "#/$defs/curves" },
           "partial_frame": { "type": "boolean" },
-          "curved": { "type": "boolean" },
+          "curved": { "type": "boolean", "description": "The page is curved or crumpled. Implied when `curves` has a bent edge." },
           "touching": { "type": "boolean" },
           "hand_held": { "type": "boolean" },
           "folded": { "type": "boolean" }
