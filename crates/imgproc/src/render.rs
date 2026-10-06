@@ -13,7 +13,8 @@ use auto_crop_core::QuadWarp;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RenderError {
-    /// The four corners do not form a usable quadrilateral.
+    /// The four corners do not form a usable quadrilateral (also: curves that are not a valid
+    /// page outline, or a flat page smaller than 2 x 2 pixels).
     DegenerateQuad,
     /// The cancel token fired between bands; no partial output escapes.
     Cancelled,
@@ -61,11 +62,17 @@ pub fn output_size(src_w: u32, src_h: u32, q: &QuadWarp, limits: Limits) -> (u32
     let c = corners_px(src_w, src_h, q);
     let w = (dist(c[0], c[1]) + dist(c[3], c[2])) / 2.0;
     let h = (dist(c[0], c[3]) + dist(c[1], c[2])) / 2.0;
-    let (mut w, mut h) = if q.quarter_turns % 2 == 1 {
+    let (w, h) = if q.quarter_turns % 2 == 1 {
         (h, w)
     } else {
         (w, h)
     };
+    cap_size(w, h, limits)
+}
+
+/// A natural size in pixels shrunk (never enlarged) to the pixel cap and the long-edge cap of
+/// `limits`, rounded, at least 1 x 1. Shared by the quad and the curved render.
+pub(crate) fn cap_size(w: f64, h: f64, limits: Limits) -> (u32, u32) {
     let mut scale: f64 = 1.0;
     let pixels = w * h;
     if pixels > limits.max_pixels as f64 {
@@ -75,8 +82,8 @@ pub fn output_size(src_w: u32, src_h: u32, q: &QuadWarp, limits: Limits) -> (u32
     if long > f64::from(limits.max_edge) {
         scale = scale.min(f64::from(limits.max_edge) / long);
     }
-    w = (w * scale).round().max(1.0);
-    h = (h * scale).round().max(1.0);
+    let w = (w * scale).round().max(1.0);
+    let h = (h * scale).round().max(1.0);
     (w as u32, h as u32)
 }
 

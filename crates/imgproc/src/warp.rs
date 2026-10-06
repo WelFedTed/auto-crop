@@ -162,6 +162,76 @@ fn convolve_edge<T: Sample, const C: usize, const N: usize>(
     )
 }
 
+/// Round to the nearest 1/65536 and read the integer out of the mantissa: a plain `as i64` is a
+/// saturating conversion (several instructions); this one vectorises.
+#[inline(always)]
+fn fixed(t: f64) -> i64 {
+    (t * (1u64 << POS_BITS) as f64 + MAGIC).to_bits() as i64 - MAGIC_BITS
+}
+
+/// Samples one output row at the fixed-point source positions `tx`, `ty` (`tx[u] < 0` means
+/// "outside the source": the pixel is left as it is, zero). Shared by the homography warp and the
+/// map-driven warp, so both produce bytes by the very same kernel.
+#[inline(always)]
+fn sample_row<T: Sample, const C: usize, const N: usize>(
+    view: &View<'_, T>,
+    lut: &[[f32; 6]],
+    tx: &[i64],
+    ty: &[i64],
+    row: &mut [T],
+) {
+    let (sw, sh) = (view.w, view.h);
+    for u in 0..tx.len() {
+        let (px, py) = (tx[u], ty[u]);
+        if px < 0 {
+            continue;
+        }
+        let (x0, xwhole, wx) = locate::<T>(lut, px);
+        let (y0, ywhole, wy) = locate::<T>(lut, py);
+        let o = &mut row[u * C..u * C + C];
+
+        // Whole-pixel position: copy (exact, and much cheaper).
+        if xwhole && ywhole {
+            let ix = x0.clamp(0, sw as i32 - 1) as usize;
+            let iy = y0.clamp(0, sh as i32 - 1) as usize;
+            let s = (iy * sw + ix) * C;
+            o.copy_from_slice(&view.data[s..s + C]);
+            continue;
+        }
+
+        let acc: [f32; C] = if x0 >= 2
+            && y0 >= 2
+            && (x0 - 2) as usize * C + N <= sw * C
+            && ((y0 + 3) as usize) < sh
+        {
+            let (x0, y0) = (x0 as usize, y0 as usize);
+            let tap = |k: usize| -> &[T; N] {
+                let s = ((y0 - 2 + k) * sw + (x0 - 2)) * C;
+                <&[T; N]>::try_from(&view.data[s..s + N]).expect("window of N samples")
+            };
+            convolve::<T, C, N>([tap(0), tap(1), tap(2), tap(3), tap(4), tap(5)], &wx, &wy)
+        } else {
+            convolve_edge::<T, C, N>(view, x0, y0, &wx, &wy)
+        };
+        for c in 0..C {
+            o[c] = T::from_f32_round(acc[c]);
+        }
+    }
+}
+
+/// Converts a source position (pixel-centre coordinates) to fixed point, or `-1` for "outside":
+/// more than half a pixel beyond the edge, NaN or infinite.
+#[inline(always)]
+fn to_fixed(x: f64, y: f64, x_hi: f64, y_hi: f64) -> (i64, i64) {
+    // Half a pixel of slack so edge pixels sample cleanly; also rejects NaN and infinity.
+    let inside = x >= -0.5 && x < x_hi && y >= -0.5 && y < y_hi;
+    if inside {
+        (fixed(x + 1.0), fixed(y + 1.0))
+    } else {
+        (-1, -1)
+    }
+}
+
 /// Warps one band of output rows (`v0..v0 + rows`) into `chunk`.
 fn warp_band<T: Sample, const C: usize, const N: usize>(
     view: &View<'_, T>,
@@ -178,10 +248,6 @@ fn warp_band<T: Sample, const C: usize, const N: usize>(
     // sources keep sub-0.001 px accuracy; the loop has no data-dependent branches.
     let mut tx = vec![-1i64; dw];
     let mut ty = vec![-1i64; dw];
-    // Round to the nearest 1/65536 and read the integer out of the mantissa: a plain `as i64`
-    // is a saturating conversion (several instructions); this one vectorises.
-    let fixed =
-        |t: f64| -> i64 { (t * (1u64 << POS_BITS) as f64 + MAGIC).to_bits() as i64 - MAGIC_BITS };
     for (r, row) in chunk.chunks_exact_mut(dw * C).enumerate() {
         let v = (v0 + r) as f64;
         let (nx0, ny0, d0) = (m[1] * v + m[2], m[4] * v + m[5], m[7] * v + m[8]);
@@ -190,47 +256,37 @@ fn warp_band<T: Sample, const C: usize, const N: usize>(
             let inv = 1.0 / (m[6] * uf + d0);
             let x = (m[0] * uf + nx0) * inv;
             let y = (m[3] * uf + ny0) * inv;
-            // Half a pixel of slack so edge pixels sample cleanly; also rejects NaN and infinity.
-            let inside = x >= -0.5 && x < x_hi && y >= -0.5 && y < y_hi;
-            tx[u] = if inside { fixed(x + 1.0) } else { -1 };
-            ty[u] = if inside { fixed(y + 1.0) } else { -1 };
+            (tx[u], ty[u]) = to_fixed(x, y, x_hi, y_hi);
         }
+        sample_row::<T, C, N>(view, lut, &tx, &ty, row);
+    }
+}
+
+/// A map provider: fills `xs` and `ys` with the source position (pixel-centre coordinates, the
+/// same convention as the matrix of [`warp_perspective_image`]) of every pixel of output row `row`.
+/// Called once per output row, from several threads at once.
+pub type MapRow<'a> = dyn Fn(usize, &mut [f64], &mut [f64]) + Sync + 'a;
+
+/// Warps one band driven by a map provider instead of a matrix.
+fn warp_band_map<T: Sample, const C: usize, const N: usize>(
+    view: &View<'_, T>,
+    map: &MapRow<'_>,
+    v0: usize,
+    dw: usize,
+    chunk: &mut [T],
+) {
+    let lut = lut();
+    let (x_hi, y_hi) = (view.w as f64 - 0.5, view.h as f64 - 0.5);
+    let mut xs = vec![0.0f64; dw];
+    let mut ys = vec![0.0f64; dw];
+    let mut tx = vec![-1i64; dw];
+    let mut ty = vec![-1i64; dw];
+    for (r, row) in chunk.chunks_exact_mut(dw * C).enumerate() {
+        map(v0 + r, &mut xs, &mut ys);
         for u in 0..dw {
-            let (px, py) = (tx[u], ty[u]);
-            if px < 0 {
-                continue;
-            }
-            let (x0, xwhole, wx) = locate::<T>(lut, px);
-            let (y0, ywhole, wy) = locate::<T>(lut, py);
-            let o = &mut row[u * C..u * C + C];
-
-            // Whole-pixel position: copy (exact, and much cheaper).
-            if xwhole && ywhole {
-                let ix = x0.clamp(0, sw as i32 - 1) as usize;
-                let iy = y0.clamp(0, sh as i32 - 1) as usize;
-                let s = (iy * sw + ix) * C;
-                o.copy_from_slice(&view.data[s..s + C]);
-                continue;
-            }
-
-            let acc: [f32; C] = if x0 >= 2
-                && y0 >= 2
-                && (x0 - 2) as usize * C + N <= sw * C
-                && ((y0 + 3) as usize) < sh
-            {
-                let (x0, y0) = (x0 as usize, y0 as usize);
-                let tap = |k: usize| -> &[T; N] {
-                    let s = ((y0 - 2 + k) * sw + (x0 - 2)) * C;
-                    <&[T; N]>::try_from(&view.data[s..s + N]).expect("window of N samples")
-                };
-                convolve::<T, C, N>([tap(0), tap(1), tap(2), tap(3), tap(4), tap(5)], &wx, &wy)
-            } else {
-                convolve_edge::<T, C, N>(view, x0, y0, &wx, &wy)
-            };
-            for c in 0..C {
-                o[c] = T::from_f32_round(acc[c]);
-            }
+            (tx[u], ty[u]) = to_fixed(xs[u], ys[u], x_hi, y_hi);
         }
+        sample_row::<T, C, N>(view, lut, &tx, &ty, row);
     }
 }
 
@@ -323,6 +379,119 @@ pub fn warp_perspective(src: &Raster, dst_to_src: &[f64; 9], out_w: u32, out_h: 
         height: out_h,
         data,
     }
+}
+
+/// The band loop of the map-driven warp: ~64-row bands, one cancel check per band, extra heap
+/// of four row-sized vectors per worker thread (no full-frame map, no f32 copy of anything).
+fn warp_map_with_view<T: Sample>(
+    view: &View<'_, T>,
+    channels: u8,
+    dw: usize,
+    dh: usize,
+    cancel: &dyn Cancel,
+    map: &MapRow<'_>,
+) -> Result<Vec<T>, Cancelled> {
+    let c = usize::from(channels);
+    let mut out = vec![T::default(); dw * dh * c];
+    if dw == 0 || dh == 0 {
+        return Ok(out);
+    }
+    let band_len = dw * c * BAND_ROWS;
+    let result: Result<(), Cancelled> =
+        out.par_chunks_mut(band_len)
+            .enumerate()
+            .try_for_each(|(band, chunk)| {
+                if cancel.is_cancelled() {
+                    return Err(Cancelled);
+                }
+                let v0 = band * BAND_ROWS;
+                match c {
+                    1 => warp_band_map::<T, 1, 12>(view, map, v0, dw, chunk),
+                    2 => warp_band_map::<T, 2, 16>(view, map, v0, dw, chunk),
+                    3 => warp_band_map::<T, 3, 20>(view, map, v0, dw, chunk),
+                    _ => warp_band_map::<T, 4, 24>(view, map, v0, dw, chunk),
+                }
+                Ok(())
+            });
+    result.map(|()| out)
+}
+
+/// Resamples `src` into a new `out_w` x `out_h` image where output pixel `(x, y)` takes the source
+/// position `map` gives for its row (the coordinate-provider seam of ROADMAP M4.25 and M12.30).
+/// Lanczos3, u8 or u16, 1 to 4 channels, bit-identical across thread counts, stops at the next
+/// band boundary with `Err(Cancelled)`. Positions more than half a pixel outside the source give
+/// zero, exactly as [`warp_perspective_image`].
+pub fn warp_map_image<T: Sample>(
+    src: ImageRef<'_, T>,
+    out_w: u32,
+    out_h: u32,
+    cancel: &dyn Cancel,
+    map: &MapRow<'_>,
+) -> Result<Image<T>, Cancelled> {
+    let (dw, dh) = (out_w as usize, out_h as usize);
+    let data = if src.width == 0 || src.height == 0 {
+        vec![T::default(); dw * dh * usize::from(src.channels)]
+    } else {
+        let view = View {
+            data: src.data,
+            w: src.width as usize,
+            h: src.height as usize,
+            m: [0.0; 9],
+        };
+        warp_map_with_view(&view, src.channels, dw, dh, cancel, map)?
+    };
+    Ok(Image {
+        width: out_w,
+        height: out_h,
+        channels: src.channels,
+        data,
+    })
+}
+
+/// A dense source-space grid: `cols * rows` node positions (source pixel-centre coordinates),
+/// row-major, covering the output from edge to edge (node `(i, j)` sits at the output's
+/// `(i / (cols - 1), j / (rows - 1))` of its width and height).
+#[derive(Debug, Clone, Copy)]
+pub struct SrcGrid<'a> {
+    pub cols: usize,
+    pub rows: usize,
+    pub nodes: &'a [(f64, f64)],
+}
+
+/// [`warp_map_image`] driven by a [`SrcGrid`]: output pixel `(x, y)` (its centre, `(x + 0.5) /
+/// out_w` across) takes the bilinear interpolation of the four surrounding nodes. `None` for a
+/// grid with fewer than 2 x 2 nodes or the wrong node count.
+pub fn warp_grid_image<T: Sample>(
+    src: ImageRef<'_, T>,
+    grid: SrcGrid<'_>,
+    out_w: u32,
+    out_h: u32,
+    cancel: &dyn Cancel,
+) -> Option<Result<Image<T>, Cancelled>> {
+    if grid.cols < 2 || grid.rows < 2 || grid.nodes.len() != grid.cols * grid.rows {
+        return None;
+    }
+    let (ow, oh) = (f64::from(out_w.max(1)), f64::from(out_h.max(1)));
+    let map = move |y: usize, xs: &mut [f64], ys: &mut [f64]| {
+        let gv =
+            ((y as f64 + 0.5) / oh * (grid.rows - 1) as f64).clamp(0.0, (grid.rows - 1) as f64);
+        let j = (gv.floor() as usize).min(grid.rows - 2);
+        let fv = gv - j as f64;
+        let (top, bot) = (
+            &grid.nodes[j * grid.cols..(j + 1) * grid.cols],
+            &grid.nodes[(j + 1) * grid.cols..(j + 2) * grid.cols],
+        );
+        for (x, (px, py)) in xs.iter_mut().zip(ys.iter_mut()).enumerate() {
+            let gu =
+                ((x as f64 + 0.5) / ow * (grid.cols - 1) as f64).clamp(0.0, (grid.cols - 1) as f64);
+            let i = (gu.floor() as usize).min(grid.cols - 2);
+            let fu = gu - i as f64;
+            let (a, b, c, d) = (top[i], top[i + 1], bot[i], bot[i + 1]);
+            *px = (1.0 - fv) * ((1.0 - fu) * a.0 + fu * b.0) + fv * ((1.0 - fu) * c.0 + fu * d.0);
+            *py = (1.0 - fv) * ((1.0 - fu) * a.1 + fu * b.1) + fv * ((1.0 - fu) * c.1 + fu * d.1);
+        }
+    };
+    Some(warp_map_image(src, out_w, out_h, cancel, &map))
 }
 
 #[cfg(test)]

@@ -4,6 +4,7 @@
 //! Pure image-processing kernels. Must not depend on any codec or I/O crate.
 
 pub mod cancel;
+pub mod curved;
 pub mod detect;
 pub mod geometry;
 pub mod homography;
