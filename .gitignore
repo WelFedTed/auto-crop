@@ -33,4 +33,5 @@ spikes/**/target-dyn/
 /corpora/
 /datasets/
 /golden/
-/_data/.claude/worktrees/
+/_data
+/.claude/worktrees/
