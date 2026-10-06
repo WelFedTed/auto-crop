@@ -8,20 +8,27 @@ pub mod commit;
 mod engine;
 pub mod enumerate;
 pub mod error;
+// The only `unsafe` of the crate (Win32 `ReplaceFileW`, `GetDiskFreeSpaceExW`); see the module docs.
+mod ffi;
 pub mod fsplan;
+pub mod fsstate;
 pub mod group;
 pub mod items_detect;
 pub mod logging;
+pub mod lossless;
 pub mod memory;
 pub mod migrate;
+pub mod output;
 pub mod packaged;
 pub mod paths;
 mod restore;
 pub mod samples;
 mod scan;
 pub mod settings;
+mod single;
 pub mod skeleton;
 pub mod source;
+pub mod space;
 pub mod store;
 pub mod util;
 
@@ -31,6 +38,7 @@ pub use error::ErrKind;
 pub use items_detect::{
     ClassicalItemDetector, DetectedItem, ItemDetector, NoSplit, SplitDetection,
 };
+pub use output::{EngineOptions, QualityPreset, QualitySetting};
 pub use paths::AppPaths;
 pub use scan::{CropImage, ProcessedInfo};
 pub use settings::Settings;

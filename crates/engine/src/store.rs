@@ -129,6 +129,7 @@ impl Default for Manifest {
 }
 
 /// Everything needed to back an original up.
+#[derive(Clone)]
 pub struct NewBackup<'a> {
     pub source: &'a Path,
     pub source_blake3: &'a str,

@@ -6,7 +6,7 @@
 //! receives plain serialisable views.
 
 use crate::api::*;
-use crate::commit::{free_name, swap, verify_temp, write_temp};
+use crate::commit::{free_name, swap, write_temp};
 use crate::enumerate;
 use crate::error::{ErrKind, Result, codec_err};
 use crate::fsplan::ReservedKeys;
@@ -14,9 +14,9 @@ use crate::items_detect::{ClassicalItemDetector, ItemDetector, worst_confidence}
 use crate::paths::AppPaths;
 use crate::scan::{GroupOut, crop_views};
 use crate::settings::Settings;
-use crate::store::{BackupKind, BackupState, Manifest, NewBackup, OutputRec, Store};
+use crate::store::{BackupKind, BackupState, Manifest, Store};
 use crate::util::{blake3_hex, display_name, new_id, now_secs, rfc3339, unix_ms};
-use auto_crop_codecs::{Format, MAX_PIXELS, decode, encode, probe};
+use auto_crop_codecs::{Format, decode, encode};
 use auto_crop_core::{
     Confidence, EditState, Forced, History, Origin, QuadWarp, SplitPolicy, SplitState,
 };
@@ -38,8 +38,6 @@ const THUMB_SRC_EDGE: u32 = 640;
 pub(crate) const THUMB_EDGE: u32 = 256;
 pub(crate) const RESULT_EDGE: u32 = 1400;
 pub(crate) const JPEG_PREVIEW_QUALITY: u8 = 86;
-/// Quality for JPEG outputs (PLAN: a real quality estimate arrives with the codec work in M2).
-pub(crate) const JPEG_SAVE_QUALITY: u8 = 92;
 const WORKERS: usize = 3;
 const PROXY_CACHE: usize = 6;
 const RENDER_CACHE_BYTES: usize = 192 * 1024 * 1024;
@@ -260,6 +258,8 @@ pub(crate) struct Inner {
     workers: AtomicUsize,
     /// The multi-item detector (M10): the classical one of `imgproc::items` unless one is installed.
     pub(crate) detector: Mutex<Arc<dyn ItemDetector>>,
+    /// Quality, metadata policy, lossless path, verify depth, cloud downloads, pixel cap.
+    pub(crate) options: Mutex<crate::output::EngineOptions>,
     /// Output names of split saves in flight, so two scans never plan the same file (M10.22).
     pub(crate) reserved: Mutex<ReservedKeys>,
     /// Commands that touched several images at once (a split preset on 20 scans): one undo.
@@ -314,6 +314,7 @@ impl Engine {
                 queue: Mutex::new(VecDeque::new()),
                 workers: AtomicUsize::new(0),
                 detector: Mutex::new(Arc::new(ClassicalItemDetector)),
+                options: Mutex::new(crate::output::EngineOptions::default()),
                 reserved: Mutex::new(ReservedKeys::default()),
                 session: Mutex::new(auto_crop_core::SessionHistory::new()),
             }),
@@ -496,12 +497,17 @@ impl Engine {
     }
 
     fn analyse_inner(&self, path: &Path) -> Result<Analysis> {
+        let opts = self.options();
+        // A cloud placeholder is never read (that would download it): it is skipped unless the
+        // user opted in (M2.29).
+        crate::fsstate::check_readable(path, opts.hydrate_cloud_files)?;
         let (snapshot, bytes) = snapshot_of(path)?;
-        let probe = probe(&bytes).map_err(codec_err)?;
-        if u64::from(probe.width) * u64::from(probe.height) > MAX_PIXELS {
+        let limits = opts.limits();
+        let probe = auto_crop_codecs::probe_with(&bytes, &limits).map_err(codec_err)?;
+        if u64::from(probe.width) * u64::from(probe.height) > opts.max_pixels {
             return Err(ErrKind::TooLarge);
         }
-        let decoded = decode(&bytes).map_err(codec_err)?;
+        let decoded = auto_crop_codecs::decode_with(&bytes, &limits).map_err(codec_err)?;
         let raster = decoded.raster;
         crate::logging::decode_done(
             path,
@@ -786,239 +792,6 @@ impl Engine {
                 outcome
             })
             .collect()
-    }
-
-    pub(crate) fn save_one(
-        &self,
-        id: u32,
-        target: SaveTarget,
-        run_id: &str,
-        run_name: &str,
-    ) -> Result<SavedInfo> {
-        let item = self.item(id).ok_or(ErrKind::Internal)?;
-        let (path, original_path, state, fmt, snap, orig_mtime_ms, saved, icc) = {
-            let it = lock(&item);
-            if it.status != ItemStatus::Ready {
-                return Err(ErrKind::Internal);
-            }
-            let state = it
-                .history
-                .as_ref()
-                .ok_or(ErrKind::Internal)?
-                .current()
-                .clone();
-            if state.quad().is_none() {
-                return Err(ErrKind::NoCrop);
-            }
-            (
-                it.path.clone(),
-                it.original_path.clone(),
-                state,
-                it.format,
-                it.snapshot.clone(),
-                it.orig_mtime_ms,
-                it.saved.clone(),
-                it.icc.clone(),
-            )
-        };
-        let geometry = state.quad().cloned().ok_or(ErrKind::NoCrop)?;
-
-        // Writers exist for JPEG and PNG only (PLAN 3.2.3). A source in any other format that this
-        // build can open (WebP, TIFF, HEIC, AVIF) is never replaced in place: nothing can write it
-        // back without dropping content, so the source stays byte-identical. A copy is written in a
-        // format the build can write: JPEG for HEIC (the conversion target of PLAN 3.5), PNG for
-        // the rest (lossless, carries the ICC profile).
-        let (fmt, copy_ext) = if fmt.is_encodable() {
-            (fmt, None)
-        } else if target == SaveTarget::Replace {
-            // The same code as a split scan's refusal; the notice with the reason is added by
-            // the dispatcher (`not_replaceable_notice`).
-            return Err(ErrKind::NotReplaceable);
-        } else {
-            let out = if fmt == Format::Heic {
-                Format::Jpeg
-            } else {
-                Format::Png
-            };
-            (out, Some(out.extension()))
-        };
-
-        // Read the pixels' source: the file before the first save, the backup afterwards.
-        let bytes = fs::read(&original_path).map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                if saved.is_some() {
-                    ErrKind::OriginalExpired
-                } else {
-                    ErrKind::SourceChanged
-                }
-            } else {
-                ErrKind::from_io(&e)
-            }
-        })?;
-        // Reading the source file itself: it must still be what was opened.
-        if original_path == path && blake3_hex(&bytes) != snap.blake3 {
-            return Err(ErrKind::SourceChanged);
-        }
-        let decoded = decode(&bytes).map_err(codec_err)?;
-        drop(bytes);
-        let out = render_quad(&decoded.raster, &geometry, Limits::pixels(MAX_PIXELS))
-            .map_err(|_| ErrKind::NoCrop)?;
-        drop(decoded);
-        let quality = JPEG_SAVE_QUALITY;
-        let encoded =
-            encode(&out, fmt, quality, icc.as_deref().map(|v| v.as_slice())).map_err(codec_err)?;
-        let dims = (out.width, out.height);
-        drop(out);
-        let mtime = UNIX_EPOCH + Duration::from_millis(orig_mtime_ms.max(0) as u64);
-
-        match target {
-            SaveTarget::Copy => {
-                let dir = path.parent().ok_or(ErrKind::Internal)?.join("AutoCrop");
-                fs::create_dir_all(&dir).map_err(|e| ErrKind::from_io(&e))?;
-                // Saving the same item as a copy again overwrites its own copy.
-                let dest = match &saved {
-                    Some(s) if s.copy && s.output_path.exists() => s.output_path.clone(),
-                    _ => {
-                        let mut name = PathBuf::from(path.file_name().ok_or(ErrKind::Internal)?);
-                        if let Some(ext) = copy_ext {
-                            name.set_extension(ext);
-                        }
-                        free_name(&dir.join(name))
-                    }
-                };
-                let tmp = write_temp(&dir, &encoded, Some(mtime))?;
-                if let Err(e) = verify_temp(&tmp, dims, fmt).and_then(|()| swap(&tmp.path, &dest)) {
-                    tmp.discard();
-                    return Err(e);
-                }
-                let out_snap = stat_of(&dest)
-                    .map(|(size, mtime_ms)| Snapshot {
-                        size,
-                        mtime_ms,
-                        blake3: tmp.blake3.clone(),
-                    })
-                    .ok_or(ErrKind::Internal)?;
-                let mut it = lock(&item);
-                it.saved = Some(SavedRec {
-                    backup_id: saved.as_ref().and_then(|s| s.backup_id.clone()),
-                    output_path: dest.clone(),
-                    copy: true,
-                    state,
-                    out: out_snap,
-                    group: Vec::new(),
-                });
-                // The first copy leaves the source where it is; later edits still start from it.
-                Ok(SavedInfo {
-                    backup_id: it.saved.as_ref().and_then(|s| s.backup_id.clone()),
-                    output: dest
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_default(),
-                    copy: true,
-                    outputs: Vec::new(),
-                })
-            }
-            SaveTarget::Replace => {
-                let dir = path.parent().ok_or(ErrKind::Internal)?;
-                let tmp = write_temp(dir, &encoded, Some(mtime))?;
-                let fail = |tmp: &crate::commit::TempWrite, e: ErrKind| -> ErrKind {
-                    tmp.discard();
-                    e
-                };
-                verify_temp(&tmp, dims, fmt).map_err(|e| fail(&tmp, e))?;
-
-                // Back the original up (first save) or find the existing backup (re-save).
-                let retention = lock(&self.inner.settings).retention_days;
-                let mut manifest: Manifest = match saved.as_ref().and_then(|s| s.backup_id.clone())
-                {
-                    Some(bid) => self
-                        .inner
-                        .store
-                        .read(&bid)
-                        .ok_or_else(|| fail(&tmp, ErrKind::OriginalExpired))?,
-                    None => self
-                        .inner
-                        .store
-                        .create(&NewBackup {
-                            source: &path,
-                            source_blake3: &snap.blake3,
-                            source_size: snap.size,
-                            source_mtime_ms: snap.mtime_ms,
-                            format_ext: fmt.extension(),
-                            run_id,
-                            run_name,
-                            retention_days: retention,
-                            edit: Some(state.clone()),
-                        })
-                        .map_err(|e| fail(&tmp, e))?,
-                };
-
-                // Re-stat the target: if anything else touched it since we looked, stop.
-                let expected = match &saved {
-                    Some(s) if !s.copy => (s.out.size, s.out.mtime_ms),
-                    _ => (snap.size, snap.mtime_ms),
-                };
-                if stat_of(&path) != Some(expected) {
-                    return Err(fail(&tmp, ErrKind::SourceChanged));
-                }
-
-                // Record what is about to be written, so a crash after the swap still restores.
-                let expected_mtime = unix_ms(mtime);
-                manifest.outputs = vec![OutputRec::plain(
-                    path.to_string_lossy().into_owned(),
-                    tmp.blake3.clone(),
-                    tmp.size,
-                    expected_mtime,
-                )];
-                manifest.edit = Some(state.clone());
-                self.inner
-                    .store
-                    .write(&manifest)
-                    .map_err(|e| fail(&tmp, e))?;
-
-                swap(&tmp.path, &path).map_err(|e| fail(&tmp, e))?;
-                manifest.state = BackupState::Saved;
-                // The file is already replaced and the backup exists; a failed state write here is
-                // reported but cannot lose data.
-                self.inner
-                    .store
-                    .write(&manifest)
-                    .map_err(|_| ErrKind::Internal)?;
-
-                let out_snap = stat_of(&path)
-                    .map(|(size, mtime_ms)| Snapshot {
-                        size,
-                        mtime_ms,
-                        blake3: tmp.blake3.clone(),
-                    })
-                    .ok_or(ErrKind::Internal)?;
-                let backup_original = self
-                    .inner
-                    .store
-                    .original_path(&manifest)
-                    .ok_or(ErrKind::Internal)?;
-                let mut it = lock(&item);
-                it.saved = Some(SavedRec {
-                    backup_id: Some(manifest.id.clone()),
-                    output_path: path.clone(),
-                    copy: false,
-                    state,
-                    out: out_snap.clone(),
-                    group: Vec::new(),
-                });
-                it.original_path = backup_original;
-                it.snapshot = out_snap;
-                Ok(SavedInfo {
-                    backup_id: Some(manifest.id),
-                    output: path
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_default(),
-                    copy: false,
-                    outputs: Vec::new(),
-                })
-            }
-        }
     }
 
     // ------------------------------------------------------------------ backups and restore

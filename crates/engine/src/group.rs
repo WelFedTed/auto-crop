@@ -28,12 +28,24 @@
 //! the journalled hashes (as a placed file or as an intact temp), otherwise it rolls back to the
 //! scan plus its backup. It only ever deletes files whose bytes match a journalled hash.
 //!
+//! **The same protocol serves the one-file in-place save** ([`commit_single`], ROADMAP M2.83):
+//! the "set" is one output whose final name is the file being replaced. The backup holds the
+//! original (or, for a re-save, the original is already there and the previous output is kept in
+//! `superseded/`), the verified temp replaces the file by the atomic swap (`ReplaceFileW` on
+//! Windows), and the commit point is that swap. The journal, the fsync order, the hashes, the
+//! recovery rule (before `Committing` back, from then on forward) and the fault points are the
+//! same code as the group's; only what "back" means differs, because the file being replaced is
+//! also the scan: recovery puts the old bytes back from the backup when the target holds the new
+//! output or nothing, and leaves a file somebody else wrote alone.
+//!
 //! **Fault injection.** Every step calls a [`FaultHook`]. The production hook never faults; the
 //! tests fail or "crash" (return at once, leaving the disk exactly as it is) at every step and
 //! between every pair of renames, then run recovery and assert the invariant. A hook cannot skip
 //! the backup or the verification; it can only make steps fail.
 
-use crate::commit::{TempWrite, swap, verify_temp};
+use crate::commit::{
+    Expect, TempWrite, VerifyMode, retryable, swap, verify_temp_expect, write_temp_at,
+};
 use crate::error::ErrKind;
 use crate::source::hash_file;
 use crate::store::{BackupKind, BackupState, NewBackup, OutputRec, Store};
@@ -165,6 +177,10 @@ pub struct JReplace {
     pub old_blake3: String,
     /// Where its bytes were kept (empty: a copy-mode re-save, which keeps nothing).
     pub stored: String,
+    /// `stored` is the backup's own `original.<ext>` (an in-place first save): it is read to put
+    /// the old bytes back and is never deleted here; the backup entry is removed as a whole.
+    #[serde(default)]
+    pub stored_is_backup: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -270,6 +286,10 @@ pub struct Journal {
     pub retire: Vec<JRetire>,
     #[serde(default, deserialize_with = "crate::migrate::deserialize_optional")]
     pub edit: Option<EditState>,
+    /// A one-file save over the source itself ([`commit_single`]): `outputs[0].final_path` is the
+    /// file being replaced and `source` describes what is there now.
+    #[serde(default)]
+    pub in_place: bool,
 }
 
 fn path_str(p: &Path) -> Result<String, ErrKind> {
@@ -399,33 +419,13 @@ pub enum GroupError {
 
 // ------------------------------------------------------------------ small file operations
 
-fn write_temp_at(path: &Path, bytes: &[u8], mtime: SystemTime) -> Result<(), ErrKind> {
-    let write = || -> std::io::Result<()> {
-        let mut f = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(path)?;
-        f.write_all(bytes)?;
-        f.set_modified(mtime)?;
-        f.sync_all()
-    };
-    write().map_err(|e| {
-        let _ = fs::remove_file(path);
-        ErrKind::from_io(&e)
-    })
-}
-
-const RETRY_MS: [u64; 7] = [10, 20, 40, 80, 160, 320, 640];
-
-fn retryable(e: &std::io::Error) -> bool {
-    matches!(ErrKind::from_io(e), ErrKind::FileInUse | ErrKind::ReadOnly)
-        || e.kind() == std::io::ErrorKind::PermissionDenied
-}
-
 /// Removes a file, retrying sharing violations like the swap does.
 fn remove_with_retry(p: &Path) -> Result<(), ErrKind> {
     let mut last = ErrKind::Internal;
-    for (i, wait) in std::iter::once(&0u64).chain(RETRY_MS.iter()).enumerate() {
+    for (i, wait) in std::iter::once(&0u64)
+        .chain(crate::commit::RETRY_MS.iter())
+        .enumerate()
+    {
         if i > 0 {
             std::thread::sleep(Duration::from_millis(*wait));
         }
@@ -518,8 +518,132 @@ pub fn commit_group(
     produce: &mut dyn FnMut(usize) -> Result<Produced, ErrKind>,
     hook: &dyn FaultHook,
 ) -> Result<GroupSaved, GroupError> {
+    let mut wrapped = |i: usize| {
+        produce(i).map(|produced| Output {
+            produced,
+            expect: None,
+        })
+    };
+    commit_group_verified(req, &mut wrapped, VerifyMode::Full, hook)
+}
+
+/// One produced output together with what it must decode to (PLAN 2.7 step 3).
+pub struct Output {
+    pub produced: Produced,
+    /// The full expectation (ICC, pixels or luma fingerprint); `None` checks the size and the
+    /// format only.
+    pub expect: Option<Expect>,
+}
+
+/// [`commit_group`] where each output carries its [`Expect`] and the verify depth is chosen.
+pub fn commit_group_verified(
+    req: &GroupRequest<'_>,
+    produce: &mut dyn FnMut(usize) -> Result<Output, ErrKind>,
+    verify: VerifyMode,
+    hook: &dyn FaultHook,
+) -> Result<GroupSaved, GroupError> {
+    commit_impl(
+        req,
+        produce,
+        Opts {
+            in_place: false,
+            verify,
+        },
+        hook,
+    )
+}
+
+/// What one in-place save is asked to do ([`commit_single`]).
+pub struct SingleRequest<'a> {
+    pub store: &'a Store,
+    /// What sits at the target now: the original on a first save, the previous output on a re-save
+    /// (its hash is what the swap is allowed to replace).
+    pub target: SourceFingerprint,
+    /// `New` on a first save, `Existing` on a re-save. A save with no backup is not possible.
+    pub backup: BackupPlan<'a>,
+    /// Applied to the output (the original's mtime, kept by default).
+    pub mtime: SystemTime,
+    /// The edit state recorded in the manifest.
+    pub edit: Option<EditState>,
+    pub verify: VerifyMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SingleSaved {
+    pub output: OutputRec,
+    pub backup_id: String,
+    /// Something after the commit point did not finish; recovery completes the bookkeeping.
+    pub journal_pending: bool,
+}
+
+/// Replaces `target` by one verified output under the full protocol (ROADMAP M2.83, PLAN 2.7):
+/// journal, verified backup, fsynced temp beside the target, re-read and re-decode, `Committing`,
+/// re-stat and re-hash of the target, atomic swap, manifest `Saved`, journal removed. At every
+/// instant the target holds the old bytes or the verified output, and the old bytes are in the
+/// backup (or `superseded/`) before the swap.
+pub fn commit_single(
+    req: &SingleRequest<'_>,
+    produce: &mut dyn FnMut() -> Result<Output, ErrKind>,
+    hook: &dyn FaultHook,
+) -> Result<SingleSaved, GroupError> {
+    if matches!(req.backup, BackupPlan::None) {
+        return Err(GroupError::Failed(ErrKind::BackupFailed));
+    }
+    let g = GroupRequest {
+        store: req.store,
+        source: req.target.clone(),
+        unlink_source: false,
+        backup: match &req.backup {
+            BackupPlan::New(nb) => BackupPlan::New(nb.clone()),
+            BackupPlan::Existing(id) => BackupPlan::Existing(id.clone()),
+            BackupPlan::None => BackupPlan::None,
+        },
+        outputs: vec![OutSpec {
+            item_id: 0,
+            index: 1,
+            final_path: req.target.path.clone(),
+            replaces_blake3: Some(req.target.blake3.clone()),
+        }],
+        retire: Vec::new(),
+        mtime: req.mtime,
+        edit: req.edit.clone(),
+    };
+    let mut once = |_: usize| produce();
+    let saved = commit_impl(
+        &g,
+        &mut once,
+        Opts {
+            in_place: true,
+            verify: req.verify,
+        },
+        hook,
+    )?;
+    let output = saved
+        .outputs
+        .into_iter()
+        .next()
+        .ok_or(GroupError::Failed(ErrKind::Internal))?;
+    Ok(SingleSaved {
+        output,
+        backup_id: saved.backup_id.unwrap_or_default(),
+        journal_pending: saved.journal_pending,
+    })
+}
+
+#[derive(Clone, Copy)]
+struct Opts {
+    in_place: bool,
+    verify: VerifyMode,
+}
+
+fn commit_impl(
+    req: &GroupRequest<'_>,
+    produce: &mut dyn FnMut(usize) -> Result<Output, ErrKind>,
+    opts: Opts,
+    hook: &dyn FaultHook,
+) -> Result<GroupSaved, GroupError> {
     let mut state = RunState::default();
-    match run(req, produce, hook, &mut state) {
+    match run(req, produce, opts, hook, &mut state) {
         Ok(saved) => Ok(saved),
         Err(Abort::Crash) => Err(GroupError::Crashed),
         Err(Abort::Fail(kind)) => {
@@ -543,10 +667,12 @@ struct RunState {
 
 fn run(
     req: &GroupRequest<'_>,
-    produce: &mut dyn FnMut(usize) -> Result<Produced, ErrKind>,
+    produce: &mut dyn FnMut(usize) -> Result<Output, ErrKind>,
+    opts: Opts,
     hook: &dyn FaultHook,
     st: &mut RunState,
 ) -> Flow<GroupSaved> {
+    let in_place = opts.in_place;
     if req.outputs.is_empty() {
         return Err(Abort::Fail(ErrKind::NoCrop));
     }
@@ -607,17 +733,29 @@ fn run(
         outputs: Vec::new(),
         retire: Vec::new(),
         edit: req.edit.clone(),
+        in_place,
     };
     for (i, o) in req.outputs.iter().enumerate() {
         let temp = dir.join(format!(".autocrop-{}.tmp", new_id()));
-        let stored = match (&o.replaces_blake3, &backup_id) {
-            (Some(_), Some(bid)) => req
-                .store
-                .entry_path(bid)
-                .map(|d| d.join("superseded").join(format!("{jid}_{i}")))
-                .and_then(|p| path_str(&p).ok())
-                .unwrap_or_default(),
-            _ => String::new(),
+        let (stored, stored_is_backup) = match (&o.replaces_blake3, &backup_id, &req.backup) {
+            // A first in-place save: the old bytes are the backup's own `original.<ext>`.
+            (Some(_), Some(bid), BackupPlan::New(nb)) if in_place => (
+                req.store
+                    .entry_path(bid)
+                    .map(|d| d.join(format!("original.{}", nb.format_ext)))
+                    .and_then(|p| path_str(&p).ok())
+                    .unwrap_or_default(),
+                true,
+            ),
+            (Some(_), Some(bid), _) => (
+                req.store
+                    .entry_path(bid)
+                    .map(|d| d.join("superseded").join(format!("{jid}_{i}")))
+                    .and_then(|p| path_str(&p).ok())
+                    .unwrap_or_default(),
+                false,
+            ),
+            _ => (String::new(), false),
         };
         j.outputs.push(JOutput {
             item_id: o.item_id,
@@ -630,6 +768,7 @@ fn run(
             replaces: o.replaces_blake3.clone().map(|old| JReplace {
                 old_blake3: old,
                 stored,
+                stored_is_backup,
             }),
         });
     }
@@ -660,9 +799,19 @@ fn run(
 
     // 3. Encode, write and verify every temp.
     for i in 0..j.outputs.len() {
-        let p = produce(i).map_err(Abort::Fail)?;
+        let out = produce(i).map_err(Abort::Fail)?;
+        let Output {
+            produced: p,
+            expect,
+        } = out;
         let temp = PathBuf::from(&j.outputs[i].temp);
-        write_temp_at(&temp, &p.bytes, req.mtime).map_err(Abort::Fail)?;
+        // The new file takes the mode of the one it will replace (or, for a new name, of the scan).
+        let mode_from = if in_place {
+            Some(req.outputs[i].final_path.as_path())
+        } else {
+            Some(req.source.path.as_path())
+        };
+        write_temp_at(&temp, &p.bytes, Some(req.mtime), mode_from).map_err(Abort::Fail)?;
         let t = TempWrite {
             path: temp,
             blake3: crate::util::blake3_hex(&p.bytes),
@@ -673,7 +822,8 @@ fn run(
         drop(p.bytes);
         st.journal = Some(j.clone());
         fp(hook, Step::TempWritten(i))?;
-        verify_temp(&t, p.dims, p.format).map_err(Abort::Fail)?;
+        let expect = expect.unwrap_or_else(|| Expect::basic(p.dims, p.format));
+        verify_temp_expect(&t, &expect, opts.verify).map_err(Abort::Fail)?;
         fp(hook, Step::TempVerified(i))?;
     }
 
@@ -682,10 +832,15 @@ fn run(
     for o in &j.outputs {
         if let Some(r) = &o.replaces {
             if file_hash(Path::new(&o.final_path)).as_deref() != Some(r.old_blake3.as_str()) {
-                // The previous output was edited by someone: never replaced.
-                return Err(Abort::Fail(ErrKind::PlanStale));
+                // The file being replaced changed since we read it: an edit by someone else
+                // (in place), or a previous output the user edited (a group re-save).
+                return Err(Abort::Fail(if in_place {
+                    ErrKind::SourceChanged
+                } else {
+                    ErrKind::PlanStale
+                }));
             }
-            if !r.stored.is_empty() {
+            if !r.stored.is_empty() && !r.stored_is_backup {
                 preserve(
                     Path::new(&o.final_path),
                     Path::new(&r.stored),
@@ -716,7 +871,7 @@ fn run(
 
     // 6. The scan must still be what we read.
     fp(hook, Step::SourceRestat)?;
-    if req.unlink_source || matches!(req.backup, BackupPlan::None) {
+    if in_place || req.unlink_source || matches!(req.backup, BackupPlan::None) {
         let now = fs::metadata(&req.source.path)
             .ok()
             .map(|m| (m.len(), m.modified().map(unix_ms).unwrap_or(0)));
@@ -725,10 +880,10 @@ fn run(
         }
     }
 
-    // 7. N no-clobber moves.
+    // 7. N no-clobber moves (or, in place, the one atomic swap).
     for i in 0..j.outputs.len() {
         fp(hook, Step::BeforeRename(i))?;
-        place(&j.outputs[i]).map_err(Abort::Fail)?;
+        place(&j.outputs[i], in_place).map_err(Abort::Fail)?;
         fp(hook, Step::AfterRename(i))?;
     }
 
@@ -738,7 +893,7 @@ fn run(
 
 /// Puts one verified temp at its final name. Create: never replaces. Replace: only the previous
 /// output this group owns, and only while it is still unchanged.
-fn place(o: &JOutput) -> Result<(), ErrKind> {
+fn place(o: &JOutput, in_place: bool) -> Result<(), ErrKind> {
     let (temp, fin) = (Path::new(&o.temp), Path::new(&o.final_path));
     match &o.replaces {
         None => link_no_clobber(temp, fin).map_err(|e| match e {
@@ -746,8 +901,18 @@ fn place(o: &JOutput) -> Result<(), ErrKind> {
             LinkErr::Other(k) => k,
         }),
         Some(r) => {
+            // In place, a missing target (an interrupted `ReplaceFileW`, error 1176) is finished
+            // by a no-clobber move of the verified temp; a target holding anything else is
+            // somebody's edit and is never replaced.
+            if in_place && !exists(fin) {
+                return move_no_clobber(temp, fin);
+            }
             if file_hash(fin).as_deref() != Some(r.old_blake3.as_str()) {
-                return Err(ErrKind::PlanStale);
+                return Err(if in_place {
+                    ErrKind::SourceChanged
+                } else {
+                    ErrKind::PlanStale
+                });
             }
             swap(temp, fin)
         }
@@ -818,8 +983,9 @@ fn finish_forward(store: &Store, j: &Journal, hook: &dyn FaultHook) -> Flow<Grou
             blake3: o.blake3.clone(),
             size: o.size,
             mtime_ms: o.mtime_ms,
-            item_id: Some(o.item_id),
-            index: Some(o.index),
+            // An in-place save is an ordinary one-to-one output.
+            item_id: (!j.in_place).then_some(o.item_id),
+            index: (!j.in_place).then_some(o.index),
         })
         .collect();
     let mut journal_pending = false;
@@ -828,7 +994,11 @@ fn finish_forward(store: &Store, j: &Journal, hook: &dyn FaultHook) -> Flow<Grou
         let wrote = match (injected, store.read(bid)) {
             (None, Some(mut m)) => {
                 m.state = BackupState::Saved;
-                m.kind = BackupKind::OneToN;
+                m.kind = if j.in_place {
+                    BackupKind::OneToOne
+                } else {
+                    BackupKind::OneToN
+                };
                 m.outputs = outputs.clone();
                 if j.edit.is_some() {
                     m.edit = j.edit.clone();
@@ -863,6 +1033,9 @@ fn finish_forward(store: &Store, j: &Journal, hook: &dyn FaultHook) -> Flow<Grou
 /// bytes back, puts the scan back from the backup if it is missing, discards a backup this group
 /// made if the scan is intact, and removes the journal. Safe to run twice.
 fn rollback(store: &Store, j: &Journal) -> Result<(), ErrKind> {
+    if j.in_place {
+        return rollback_in_place(store, j);
+    }
     let mut failed = false;
     for o in &j.outputs {
         let _ = remove_with_retry(Path::new(&o.temp));
@@ -962,6 +1135,111 @@ fn rollback(store: &Store, j: &Journal) -> Result<(), ErrKind> {
     Ok(())
 }
 
+/// Copies `from` to `to` (which must not exist), sets the mtime, makes it durable and checks the
+/// copy against `hash`. Nothing is left at `to` on failure.
+fn copy_verified(from: &Path, to: &Path, hash: &str, mtime_ms: i64) -> Result<(), ErrKind> {
+    let copied = (|| -> std::io::Result<()> {
+        fs::copy(from, to)?;
+        let f = fs::OpenOptions::new().write(true).open(to)?;
+        f.set_modified(SystemTime::UNIX_EPOCH + Duration::from_millis(mtime_ms.max(0) as u64))?;
+        f.sync_all()
+    })();
+    let kind = match &copied {
+        Err(e) => Some(ErrKind::from_io(e)),
+        Ok(()) if file_hash(to).as_deref() != Some(hash) => Some(ErrKind::VerifyFailed),
+        Ok(()) => None,
+    };
+    match kind {
+        Some(k) => {
+            let _ = fs::remove_file(to);
+            Err(k)
+        }
+        None => Ok(()),
+    }
+}
+
+/// The in-place twin of [`rollback`]. The file being replaced is also the scan, so "back" means:
+/// the target holds the old bytes. If it already does, nothing but the temp, the unused backup and
+/// the journal go. If it holds our new output, or is missing (an interrupted swap), the old bytes
+/// come back from the backup (first save) or from `superseded/` (re-save) through a verified temp.
+/// If it holds anything else, somebody edited it after we read it: it is theirs, it is left alone,
+/// and the backup of what we read stays. If the old bytes cannot be put back the journal stays so
+/// the next start tries again; nothing is lost either way.
+fn rollback_in_place(store: &Store, j: &Journal) -> Result<(), ErrKind> {
+    let Some(o) = j.outputs.first() else {
+        let _ = fs::remove_file(journal_path(store, &j.id));
+        return Ok(());
+    };
+    let _ = remove_with_retry(Path::new(&o.temp));
+    let fin = Path::new(&o.final_path);
+    let old = j.source.blake3.as_str();
+    let replaces = o.replaces.as_ref();
+    let old_copy: Option<PathBuf> = replaces
+        .filter(|r| !r.stored.is_empty())
+        .map(|r| PathBuf::from(&r.stored));
+    let put_back = |via_swap: bool| -> bool {
+        let Some(src) = &old_copy else { return false };
+        if file_hash(src).as_deref() != Some(old) {
+            return false;
+        }
+        let tmp = fin.with_file_name(format!(".autocrop-{}.tmp", new_id()));
+        if copy_verified(src, &tmp, old, j.source.mtime_ms).is_err() {
+            return false;
+        }
+        let r = if via_swap {
+            swap(&tmp, fin)
+        } else {
+            move_no_clobber(&tmp, fin)
+        };
+        if r.is_err() {
+            let _ = fs::remove_file(&tmp);
+        }
+        r.is_ok()
+    };
+    let (mut intact, mut failed) = (false, false);
+    match file_hash(fin).as_deref() {
+        Some(h) if h == old => intact = true,
+        Some(h) if !o.blake3.is_empty() && h == o.blake3 => {
+            intact = put_back(true);
+            failed = !intact;
+        }
+        // Somebody else's file: not ours to touch. The backup of what we read stays.
+        Some(_) => {}
+        None if exists(fin) => failed = true, // present but unreadable right now: try again later
+        None => {
+            intact = put_back(false);
+            failed = !intact;
+        }
+    }
+    if failed {
+        return Err(ErrKind::GroupCommitFailed);
+    }
+    if intact {
+        if let Some(r) = replaces
+            && !r.stored_is_backup
+            && !r.stored.is_empty()
+        {
+            let _ = fs::remove_file(&r.stored);
+        }
+        if let Some(dir) = j
+            .backup_id
+            .as_ref()
+            .and_then(|id| store.entry_path(id))
+            .map(|d| d.join("superseded"))
+        {
+            let _ = fs::remove_dir(&dir); // only if now empty
+        }
+        if j.backup_created
+            && let Some(id) = &j.backup_id
+        {
+            store.remove_unused(id);
+        }
+    }
+    let _ = fs::remove_file(journal_path(store, &j.id));
+    sync_dir(&store.groups_dir());
+    Ok(())
+}
+
 /// What start-up recovery did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RecoveryReport {
@@ -1012,7 +1290,12 @@ pub fn recover(store: &Store, hook: &dyn FaultHook) -> RecoveryReport {
                 let temp_ok = file_hash(Path::new(&o.temp)).as_deref() == Some(o.blake3.as_str());
                 let target_ok = match &o.replaces {
                     None => !exists(fin),
-                    Some(r) => fin_h.as_deref() == Some(r.old_blake3.as_str()),
+                    // In place, a missing target is an interrupted swap (error 1176): the verified
+                    // temp is still there and is moved in.
+                    Some(r) => {
+                        fin_h.as_deref() == Some(r.old_blake3.as_str())
+                            || (j.in_place && !exists(fin))
+                    }
                 };
                 temp_ok && target_ok
             });
@@ -1021,7 +1304,7 @@ pub fn recover(store: &Store, hook: &dyn FaultHook) -> RecoveryReport {
                 if file_hash(Path::new(&o.final_path)).as_deref() == Some(o.blake3.as_str()) {
                     Ok(())
                 } else {
-                    place(o)
+                    place(o, j.in_place)
                 }
             });
             if placed.is_ok() {

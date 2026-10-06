@@ -11,8 +11,8 @@
 
 use crate::api::*;
 use crate::engine::{
-    Engine, Item as Image, JPEG_PREVIEW_QUALITY, JPEG_SAVE_QUALITY, RESULT_EDGE, SavedRec,
-    Snapshot, THUMB_EDGE, jpeg, lock, stat_of,
+    Engine, Item as Image, JPEG_PREVIEW_QUALITY, RESULT_EDGE, SavedRec, Snapshot, THUMB_EDGE, jpeg,
+    lock, stat_of,
 };
 use crate::error::{ErrKind, Result, codec_err};
 use crate::fsplan::{
@@ -20,13 +20,13 @@ use crate::fsplan::{
     expand_name, path_key,
 };
 use crate::group::{
-    BackupPlan, FaultHook, GroupError, GroupRequest, NoFaults, OutSpec, Produced, Retire,
-    SourceFingerprint, commit_group,
+    BackupPlan, FaultHook, GroupError, GroupRequest, NoFaults, OutSpec, Output, Retire,
+    SourceFingerprint, commit_group_verified,
 };
 use crate::source::hash_file;
 use crate::store::NewBackup;
 use crate::util::blake3_hex;
-use auto_crop_codecs::{Format, MAX_PIXELS, decode, encode};
+use auto_crop_codecs::Format;
 use auto_crop_core::{
     Band, Cut, EditState, GestureId, ItemId, ItemsError, Origin, Pt, QuadWarp, STRICT_CUTOFF,
     ScanTriage, SplitPolicy, scan_triage,
@@ -596,7 +596,7 @@ impl Engine {
     // ------------------------------------------------------------------ saving
 
     /// The ids of other open images' paths and of split saves in flight: names nobody may plan.
-    fn reserved_names(&self, except: u32) -> ReservedKeys {
+    pub(crate) fn reserved_names(&self, except: u32) -> ReservedKeys {
         let mut r = lock(&self.inner.reserved).clone();
         let items: Vec<_> = lock(&self.inner.items)
             .iter()
@@ -669,14 +669,14 @@ impl Engine {
         if group {
             return self.save_group(id, target, run_id, run_name, hook);
         }
-        match self.save_one(id, target, run_id, run_name) {
-            Ok(saved) => SaveOutcome {
+        match self.save_one(id, target, run_id, run_name, hook) {
+            Ok(done) => SaveOutcome {
                 id,
                 ok: true,
                 error: None,
-                saved: Some(saved),
-                notes: Vec::new(),
-                notices: Vec::new(),
+                saved: Some(done.info),
+                notes: done.notes,
+                notices: done.notices,
             },
             Err(e) => {
                 let mut o = SaveOutcome::failed(id, e);
@@ -806,6 +806,19 @@ impl Engine {
             }
         };
 
+        // File state first: never download a cloud placeholder, never replace a read-only file.
+        let opts = self.options();
+        if target == SaveTarget::Replace {
+            // A re-save runs after the scan was moved to the store, on purpose: nothing to check.
+            if path.exists() {
+                crate::fsstate::check_replaceable(&path, opts.hydrate_cloud_files)
+                    .map_err(plain)?;
+            }
+        } else {
+            crate::fsstate::check_readable(&original_path, opts.hydrate_cloud_files)
+                .map_err(plain)?;
+        }
+
         // The pixels: the file before the first save, the backup afterwards.
         let bytes = fs::read(&original_path).map_err(|e| {
             plain(if e.kind() == std::io::ErrorKind::NotFound {
@@ -821,7 +834,9 @@ impl Engine {
         if original_path == path && blake3_hex(&bytes) != snap.blake3 {
             return Err(plain(ErrKind::SourceChanged));
         }
-        let decoded = decode(&bytes).map_err(|e| plain(codec_err(e)))?;
+        let source_meta = crate::output::SourceMeta::read(fmt, &bytes, icc.clone());
+        let decoded = auto_crop_codecs::decode_with(&bytes, &opts.limits())
+            .map_err(|e| plain(codec_err(e)))?;
         drop(bytes);
 
         // Names: planned together, then re-checked inside the commit.
@@ -940,6 +955,14 @@ impl Engine {
             _ => BackupPlan::New(new_backup),
         };
         let first_replace = matches!(backup, BackupPlan::New(_));
+        // Twice what the save writes must be free (the N outputs together are about the scan's
+        // size; the backup copy is the scan's size again).
+        crate::space::preflight(&crate::space::Need::new(
+            &dir,
+            snap.size,
+            first_replace.then(|| (self.inner.store.dir(), snap.size)),
+        ))
+        .map_err(plain)?;
         let req = GroupRequest {
             store: &self.inner.store,
             source: SourceFingerprint {
@@ -956,28 +979,24 @@ impl Engine {
             edit: Some(state.clone()),
         };
         let raster = &decoded.raster;
-        let mut produce = |i: usize| -> Result<Produced> {
+        let mut produce = |i: usize| -> Result<Output> {
             let quad = crops[i].1.clone();
-            crate::run_isolated(std::panic::AssertUnwindSafe(|| -> Result<Produced> {
-                let out = render_quad(raster, &quad, Limits::pixels(MAX_PIXELS))
+            crate::run_isolated(std::panic::AssertUnwindSafe(|| -> Result<Output> {
+                let out = render_quad(raster, &quad, Limits::pixels(opts.max_pixels))
                     .map_err(|_| ErrKind::NoCrop)?;
-                let dims = (out.width, out.height);
-                let bytes = encode(
-                    &out,
-                    out_fmt,
-                    JPEG_SAVE_QUALITY,
-                    icc.as_deref().map(|v| v.as_slice()),
-                )
-                .map_err(codec_err)?;
-                Ok(Produced {
-                    bytes,
-                    dims,
-                    format: out_fmt,
+                let enc = crate::output::encode_raster(&out, out_fmt, &source_meta, &opts)?;
+                Ok(Output {
+                    produced: crate::group::Produced {
+                        bytes: enc.bytes,
+                        dims: (out.width, out.height),
+                        format: out_fmt,
+                    },
+                    expect: Some(enc.expect),
                 })
             }))
             .unwrap_or(Err(ErrKind::InternalPanic))
         };
-        let result = commit_group(&req, &mut produce, hook);
+        let result = commit_group_verified(&req, &mut produce, opts.verify, hook);
         drop(decoded);
         let done = match result {
             Ok(d) => d,
@@ -1087,13 +1106,13 @@ pub struct ProcessedInfo {
 }
 
 /// Names reserved for a split save in flight; released on drop.
-struct Reservation<'a> {
+pub(crate) struct Reservation<'a> {
     engine: &'a Engine,
     paths: Vec<PathBuf>,
 }
 
 impl<'a> Reservation<'a> {
-    fn take(engine: &'a Engine, paths: &[PathBuf], own: &[PathBuf]) -> Result<Self> {
+    pub(crate) fn take(engine: &'a Engine, paths: &[PathBuf], own: &[PathBuf]) -> Result<Self> {
         let mut r = lock(&engine.inner.reserved);
         let own: Vec<String> = own.iter().map(|p| path_key(p)).collect();
         if paths

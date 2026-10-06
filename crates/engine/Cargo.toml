@@ -15,6 +15,10 @@ publish.workspace = true
 # libraries of `cargo xtask build-native`). Off by default; sources in these formats are never
 # replaced in place (no writer yet), only copied as PNG or JPEG.
 heif = ["auto-crop-codecs/heif"]
+# libjpeg-turbo (>= 3.1.4, `cargo xtask build-native`): the lossless JPEG path uses its transform
+# (which also reads progressive files) and the JPEG encoder is libjpeg-turbo's. Off by default; the
+# default build uses the safe-Rust transform and `jpeg-encoder`.
+turbojpeg = ["auto-crop-codecs/turbojpeg"]
 # The analysis STAND-INs of M1.55 (docs/perf/budgets.md). All off by default: the default build has no
 # ONNX Runtime, no rten and no imageproc. `standin-ort` loads our pinned ONNX Runtime by absolute
 # path at run time (`cargo xtask fetch-ort`); `standin-rten` is pure Rust; `standin-canny` adds
@@ -41,6 +45,11 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["f
 tracing-appender = "0.2"
 sysinfo = { version = "0.37", default-features = false, features = ["system"] }
 
+# Free space of a volume (the preflight, M2.34); the Windows twin is `src/ffi/windows.rs`. Already in
+# the tree through `tempfile`; its `fs` API is safe Rust.
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", default-features = false, features = ["std", "fs"] }
+
 [dev-dependencies]
 # The generated test files (WebP, TIFF) of `tests/formats.rs`; the feature is on for tests only.
 auto-crop-codecs = { path = "../codecs", features = ["fixtures"] }
@@ -49,5 +58,8 @@ peak_alloc = "0.3"
 insta = { version = "1", features = ["json"] }
 proptest = { version = "1", default-features = false, features = ["std"] }
 
+# `deny`, not `forbid`: the only `unsafe` is the SAFETY-commented Win32 FFI of `src/ffi/` (two calls
+# std does not expose), which `#![allow(unsafe_code)]` itself; `cargo xtask ci-guards` allows that
+# nowhere else (docs/policy/ci-guards.md).
 [lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"

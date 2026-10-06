@@ -210,6 +210,7 @@ dependencies = [
  "peak_alloc",
  "proptest",
  "rayon",
+ "rustix",
  "serde",
  "serde_json",
  "sysinfo",
