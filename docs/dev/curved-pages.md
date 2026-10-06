@@ -26,8 +26,17 @@ to the EXIF-oriented image (0..1, y down), like every other quad. Corner order i
 - Between points the curve is a **centripetal Catmull-Rom spline** (alpha 0.5), evaluated per segment with
   the standard Barry-Goldman form. The first and last segments use a phantom point reflected through the end
   point (`P-1 = 2 P0 - P1`, `Pn+1 = 2 Pn - Pn-1`). With 2 points the curve is the straight segment.
-- A curve parameter `t` in [0, 1] is chosen by ARC LENGTH (computed on a 64-samples-per-segment polyline), so
-  a point at `t = 0.5` is halfway along the edge, whatever the control point spacing is.
+- Knots: the interval between neighbouring points (including the phantom ones) is `max(sqrt(distance), 1e-9)`,
+  distances measured in the normalised coordinates. With exactly 2 points the curve is the straight lerp.
+  Neighbouring points closer than 1e-9 are refused.
+- A curve parameter `t` in [0, 1] is chosen by ARC LENGTH. The polyline has 64 steps per segment
+  (`s = k / 64`, the knots themselves exact, so `64 * segments + 1` points); its cumulative length is measured
+  in a **scaled space** `(sx, sy)` (`(1, 1)` = normalised units; the engine passes `(image width, image height)`
+  so the parameter is uniform in source pixels whatever the aspect; the scale changes the parameterisation,
+  never the shape). `at(t)`: `target = t * total` (`t` clamped to 0..1); `k` = the last polyline index with
+  `cum[k] <= target`, clamped to `n - 2`; the point is the lerp of polyline points `k` and `k + 1` by
+  `(target - cum[k]) / (cum[k+1] - cum[k])` (0 if that span is 0). A curve of zero length returns its first point.
+  A point at `t = 0.5` is halfway along the edge, whatever the control point spacing is.
 - Curves may leave the 0..1 frame slightly (a page cut by the frame) but must be finite and must not
   self-intersect (validated: a coarse polyline test).
 
@@ -61,14 +70,24 @@ S(u,v) = (1-v) T(u) + v B(u) + (1-u) L(v) + u R(v)
 ```
 
 Output size: width = max(arc length of top, bottom) and height = max(arc length of left, right) measured in
-source pixels (arc length on the full-resolution image), then capped like every other output (pixel cap,
-memory budget). The output pixel `(x, y)` samples the source at `S(x / (W-1), y / (H-1))` with Lanczos3 (the
-same kernel as the homography path), strip-wise, never a full-image f32 copy. Where the grid maps outside
-the source the pixel is the paper-edge colour or transparent as the existing warp does (follow the quad
-path's behaviour). The straight-quad result must equal the existing homography result within 1 LSB when all
-four curves are straight and the quad is a rectangle in the image plane; for a perspective quad the Coons path
-is NOT a homography (it is bilinear): that is acceptable and documented, and straight quads keep using the
-homography path.
+source pixels (arc length on the full-resolution image, scale `(W_src, H_src)`), then capped like every other
+output (pixel cap, memory budget). **Pixel convention (changed from the first draft, which said
+`x / (W-1)`):** the output pixel `(x, y)` of the flat page, whose pixel CENTRES are at integer coordinates like
+the homography path, samples the source at `S((x + 0.5) / W, (y + 0.5) / H)`, i.e. the outer pixel edges map
+to the page edges. This is what makes a straight rectangle equal the homography result to within 1 LSB.
+`to_grid(cols, rows)` is different on purpose: node `(i, j)` is `S(i / (cols-1), j / (rows-1))`, the patch
+corner to corner. Resampling is Lanczos3 (the same kernel as the homography path), strip-wise, never a
+full-image f32 copy. Pixels that map outside the source are zero, exactly as the quad path does. Quarter turns
+and mirror act on the flat page (mirror first, then the clockwise turns), as for a quad. The straight-quad
+result must equal the existing homography result within 1 LSB when all four curves are straight and the quad is
+a rectangle in the image plane; for a perspective quad the Coons path is NOT a homography (it is bilinear):
+that is acceptable and documented, and straight quads keep using the homography path.
+
+Shared test vectors: `docs/dev/curved-pages-vectors.json` is produced by `crates/core/src/curve.rs`
+(`AUTOCROP_REGEN_VECTORS=1 cargo test -p auto-crop-core vectors` rewrites it; a normal run compares). It holds
+curve control points, spline values per segment (`eval`), arc-length points and lengths (`at`, `length`, for
+unit and pixel scales) and small Coons grids (`nodes`, `arcLengths`, `flatSize`). Any other implementation
+(the labeller's JavaScript) must match them to 1e-9.
 
 ## Persistence
 
