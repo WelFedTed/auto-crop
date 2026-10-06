@@ -120,6 +120,15 @@
     pointer-events: none;
   }
 
+  @media (max-width: 600px) {
+    .inset {
+      right: 8px;
+      bottom: 8px;
+      transform: scale(0.6);
+      transform-origin: right bottom;
+    }
+  }
+
   .canvas {
     position: relative;
     margin: 0 auto;

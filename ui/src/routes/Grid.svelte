@@ -300,7 +300,7 @@
           <b>{S.grid.willSave(store.saveSet.length)}</b>
           {#if filesInSet !== store.saveSet.length}{S.grid.savedFiles(filesInSet, store.saveSet.length)}.{/if}
           {S.grid.flaggedStay(counts.needs)}
-          {#if store.openOnlyAside.length > 0}{S.grid.notReplaced(store.openOnlyAside.length)}{/if}
+          {#if store.openOnlyAside.length > 0}{S.grid.openOnlyStay(store.openOnlyAside.length)}{/if}
         </div>
         {#if counts.needs > 0}
           <button type="button" class="btn" onclick={reviewFlagged}>{S.grid.reviewFlaggedFirst}</button>

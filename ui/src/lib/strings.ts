@@ -432,6 +432,7 @@ export const S = {
     openOnlyBadge: 'Open only',
     openOnlyTitle: 'This format is open-only: Save as copy.',
     notReplaced: (n: number) => `${n} open-only ${n === 1 ? 'file was' : 'files were'} not replaced. Use Save as copy.`,
+    openOnlyStay: (n: number) => `${n} open-only ${n === 1 ? 'file stays' : 'files stay'} as ${n === 1 ? 'it is' : 'they are'}: use Save as copy for ${n === 1 ? 'it' : 'them'}.`,
     willSaveCopies: (n: number) => `${n} open-only ${n === 1 ? 'file' : 'files'} will be saved as copies.`,
     noticesTitle: 'Notes',
   },

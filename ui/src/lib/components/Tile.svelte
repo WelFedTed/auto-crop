@@ -114,7 +114,7 @@
       {#if expanded}
         <ul class="subs" aria-label={S.split.subtiles}>
           {#each subs as c (c.id)}
-            <li class={c.band ?? 'check'}>
+            <li class="sub-{c.band ?? 'check'}">
               <img src={cropImageUrl('thumb', item.id, c.id, c.renderKey)} alt="" loading="lazy" draggable="false" />
               <span class="sn">{c.order}</span>
               <span class="sb">{S.tier[c.band ?? 'check']}</span>
@@ -361,15 +361,15 @@
     font-weight: 700;
   }
 
-  .subs li.good .sb {
+  .subs li.sub-good .sb {
     color: var(--good-fg);
   }
 
-  .subs li.check .sb {
+  .subs li.sub-check .sb {
     color: var(--check-fg);
   }
 
-  .subs li.failed .sb {
+  .subs li.sub-failed .sb {
     color: var(--fail-fg);
   }
 

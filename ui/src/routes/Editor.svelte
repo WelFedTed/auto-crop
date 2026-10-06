@@ -1614,7 +1614,7 @@
     }
 
     .work {
-      min-height: 62vh;
+      min-height: 0;
     }
 
     .inspector {

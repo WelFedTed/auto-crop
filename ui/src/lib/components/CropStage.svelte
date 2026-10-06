@@ -746,6 +746,14 @@
     cursor: crosshair;
   }
 
+  /* On a phone the tools and chip bar sit under the picture: it keeps a usable height of its own. */
+  @media (max-width: 900px) {
+    .stage {
+      flex: 0 0 auto;
+      min-height: 56vh;
+    }
+  }
+
   .stage:active {
     cursor: grabbing;
   }

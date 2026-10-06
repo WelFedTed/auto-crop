@@ -148,8 +148,25 @@ stub. `ItemDetector::detect` returns the accepted items with their per-item `Con
 in `reasons`) and `detect_at` finds the item at a tapped point (the classical detector does not
 implement it yet, so `add_crop(at)` falls back to a box around the point).
 
-## Not in the engine (for the UI session)
+## The shell and the UI (done)
 
-The session-level undo of a preset applied to 20 scans (`SessionHistory` in `core` is ready; the engine
-returns `historyPosition` before and after each `redetect`), the overlay, chips, grid badges and
-dialogs, the Tauri command wrappers and the TypeScript types.
+`crates/shell/src/app.rs` exposes every operation above as a Tauri command with the argument names in
+the first table (`invoke(name, { camelCaseArgs })`; ids only, no pixels, no paths):
+`set_crop_edit`, `add_crop`, `remove_crop`, `restore_crop`, `merge_crops`, `cut_crop`, `move_crop`,
+`use_reading_order`, `turn_crop`, `set_crop_angle`, `flip_crop`, `revert_crop`, `redetect`,
+`redetect_many` (returns `[{id, view, error}]`), `session_undo` and `session_redo` (return
+`{label, items} | null`), `accept_scan`, `unaccept_scan`, `restore_file_derived`, `restore_run_derived`.
+An error is the bare code string (`"ITEM_OP"`). The `acimg` scheme also serves
+`/<token>/<id>/crop/<crop>/<thumb|result>?k=<renderKey>`. `LaunchInfo` carries `inputExtensions` (what the
+picker, a drop and a folder walk accept: the codecs' own list) and `heif`; `ItemView.openOnly` is the notice
+code (`tiff.multi_page`, `format.write_unavailable`) of a source that is never replaced.
+
+The TypeScript contract is `ui/src/lib/types.ts`; the browser mock (`ui/src/lib/mock.ts` over
+`scan-model.ts`) follows the same rules as `core::items` so the UI runs without the shell (`npm run dev`,
+add `?samples` to open the sample batch). `ui/src/lib/strings.test.ts` reads `crates/core/src/error.rs`,
+`confidence.rs` and `crates/engine/src/settings.rs`, so a new error code, hold reason or setting fails the UI
+tests until it has copy or a default.
+
+Known gaps (engine side): the classical detector returns only accepted items, so "Add as item" on a rejected
+candidate (a speck of dust) only ever shows for crops the person removed; `reset_to_auto` restores the auto
+state's `next_id`, so a crop id can be reused after a reset (the render key still changes).
