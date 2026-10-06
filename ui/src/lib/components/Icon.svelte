@@ -36,6 +36,7 @@
     pin: [p('M9 4h6l-1 6 3 3H7l3-3z'), p('M12 13v7')],
     trash: [p('M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12')],
     refresh: [p('M20 11a8 8 0 10-2.3 5.7'), p('M20 4v7h-7')],
+    curve: [p('M3 17C7 5 17 5 21 17'), { t: 'circle', cx: 12, cy: 8.8, r: 1.9 }],
   } as const;
 
   export type IconName = keyof typeof ICONS;

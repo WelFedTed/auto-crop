@@ -10,13 +10,26 @@
   // Pointers: gesture.ts decides who owns a pointer. A handle drag owns its pointer and ignores everything
   // else; the first finger on the background pans; a second finger pinches and cancels a box or a line; a tap
   // that barely moved selects the item under it (the selected item wins overlaps).
-  import { untrack, type Snippet } from 'svelte';
+  import { tick, untrack, type Snippet } from 'svelte';
+  import {
+    addPointNear,
+    keyCommand,
+    moveTo,
+    nudge,
+    removeSelected,
+    start as curveStart,
+    stepFor,
+    stepSelection,
+    tabStop,
+    type StepResult,
+  } from '../curve-edit.ts';
+  import { cornersOf, curveHandles, edgeOf, handleKey as curveHandleKey, handlePos, outlinePath, sameHandle, type CurveHandle } from '../curve.ts';
   import { boxQuad, centre as polyCentre, hitCrop } from '../geometry.ts';
   import { canStartHandle, isDrag, isTap, stageStart, type DownInfo, type StageTool } from '../gesture.ts';
   import { cloneQuad, centroid, mid, moveQuad, toPercent, zoomAbout, type HandleKind, type Quad } from '../quad.ts';
   import type { CutPreview, StageCrop } from '../stage-types.ts';
   import { S } from '../strings.ts';
-  import type { Band, Pt } from '../types.ts';
+  import type { Band, CurveSet, Pt } from '../types.ts';
   import Icon from './Icon.svelte';
 
   let {
@@ -39,6 +52,11 @@
     oncutdrag,
     onpreview,
     oncommit,
+    curveSel = null,
+    oncurveselect,
+    oncurvepreview,
+    oncurvecommit,
+    onsay,
     children,
   }: {
     src: string;
@@ -67,6 +85,15 @@
     /** The live quad of the selected crop during a drag, or null when it ends or is cancelled. */
     onpreview: (q: Quad | null) => void;
     oncommit: (q: Quad, label: string, announce: string, source: 'drag' | 'key') => void;
+    /** The selected handle of the curved page (the roving tab stop), or null. */
+    curveSel?: CurveHandle | null;
+    oncurveselect?: (h: CurveHandle | null) => void;
+    /** The live curve set of the selected crop during a drag, or null when it ends or is cancelled. */
+    oncurvepreview?: (c: CurveSet | null) => void;
+    /** A curve gesture finished: a drag, a key nudge or a press (add, remove). `sel` is the handle to keep selected. */
+    oncurvecommit?: (c: CurveSet, label: string, announce: string, source: 'drag' | 'key' | 'press', sel: CurveHandle | null) => void;
+    /** A line for the live region (a refused change). */
+    onsay?: (text: string) => void;
     /** Extra overlays (the inset, banners) rendered inside the stage. */
     children?: Snippet;
   } = $props();
@@ -165,15 +192,29 @@
   const quad = $derived<Quad | null>(selected?.quad ?? null);
   const dq = $derived(dragQuad ?? quad);
   const screen = $derived(dq ? dq.map((p) => ({ x: sx(p.x), y: sy(p.y) })) : []);
-  const shown = $derived(crops.map((c) => (c.id === selectedId && dragQuad ? { ...c, quad: dragQuad } : c)));
+  // ---- a curved page: the selected crop's four edges are splines (curve.ts), with handles on the corners and points
+  let dragCurves = $state.raw<CurveSet | null>(null);
+  const curved = $derived<CurveSet | null>(selected?.curves ?? null);
+  const liveCurves = $derived<CurveSet | null>(dragCurves ?? curved);
+  const toScreenPt = (p: Pt): Pt => ({ x: sx(p.x), y: sy(p.y) });
+  const curvePathOf = (c: CurveSet): string => outlinePath(c, toScreenPt);
+  const shown = $derived(
+    crops.map((c) => {
+      if (c.id !== selectedId) return c;
+      if (dragCurves) return { ...c, quad: cornersOf(dragCurves), curves: dragCurves };
+      return dragQuad ? { ...c, quad: dragQuad } : c;
+    }),
+  );
   const includedShown = $derived(shown.filter((c) => c.include));
   const ghosts = $derived(shown.filter((c) => !c.include));
   /** One crop only: dim everything outside it (the single-item look). With several, dimming would hide the others. */
   const dimOutside = $derived(includedShown.length === 1 && !!selected && tool === 'none');
   const dim = $derived(
-    dimOutside && screen.length === 4
-      ? `M${px} ${py}H${px + bw * z}V${py + bh * z}H${px}Z M${screen.map((p) => `${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join('L')}Z`
-      : '',
+    dimOutside && liveCurves
+      ? `M${px} ${py}H${px + bw * z}V${py + bh * z}H${px}Z ${curvePathOf(liveCurves)}`
+      : dimOutside && screen.length === 4
+        ? `M${px} ${py}H${px + bw * z}V${py + bh * z}H${px}Z M${screen.map((p) => `${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join('L')}Z`
+        : '',
   );
 
   interface HandleDef {
@@ -187,7 +228,7 @@
   }
 
   const handles = $derived.by<HandleDef[]>(() => {
-    if (!dq || screen.length !== 4 || tool !== 'none') return [];
+    if (!dq || screen.length !== 4 || tool !== 'none' || curved) return [];
     const who = selected && includedShown.length > 1 ? `${S.items.itemN(selected.order)}: ` : '';
     const out: HandleDef[] = [];
     dq.forEach((p, i) => {
@@ -329,6 +370,186 @@
     oncommit(next, labelFor(kind), h.label, 'key');
   }
 
+  // ---- curve handles ----------------------------------------------------------------------------
+  interface CurveDef {
+    key: string;
+    h: CurveHandle;
+    x: number;
+    y: number;
+    label: string;
+  }
+
+  const hasPct = (v: number) => toPercent(v);
+  const cscale = $derived<[number, number]>([Math.max(1, bw), Math.max(1, bh)]);
+
+  function curveLabel(c: CurveSet, h: CurveHandle, who = ''): string {
+    const p = handlePos(c, h, cscale);
+    if (h.kind === 'corner') return who + S.editor.handleLabel(S.editor.corners[h.e], hasPct(p.x), hasPct(p.y));
+    if (h.kind === 'ghost') return who + S.curved.ghostLabel(S.editor.edges[h.e], hasPct(p.x), hasPct(p.y));
+    return who + S.curved.pointLabel(S.editor.edges[h.e], h.m + 1, edgeOf(c, h.e).length - 2, hasPct(p.x), hasPct(p.y));
+  }
+
+  const curveDefs = $derived.by<CurveDef[]>(() => {
+    if (!liveCurves || tool !== 'none') return [];
+    const who = selected && includedShown.length > 1 ? `${S.items.itemN(selected.order)}: ` : '';
+    const c = liveCurves;
+    return curveHandles(c).map((h) => {
+      const p = handlePos(c, h, cscale);
+      return { key: curveHandleKey(h), h, x: sx(p.x), y: sy(p.y), label: curveLabel(c, h, who) };
+    });
+  });
+  const stop = $derived(liveCurves ? tabStop({ curves: liveCurves, sel: curveSel }) : null);
+
+  interface CurveDrag {
+    h: CurveHandle;
+    pointerId: number;
+    pointerType: string;
+    x0: number;
+    y0: number;
+    start: CurveSet;
+    at: Pt;
+    moved: boolean;
+    /** The handle being moved: a hollow handle becomes a point once it moves. */
+    sel: CurveHandle;
+  }
+  let cdrag = $state.raw<CurveDrag | null>(null);
+  let curveBad = $state('');
+  let refocus = false;
+
+  const refusalText = (r: string): string => (r === 'max' ? S.curved.maxPoints : r === 'min' ? S.curved.minPoints : ((S.curved.problems as Record<string, string>)[r] ?? ''));
+  const labelOf = (what: StepResult['what'], h: CurveHandle | null): string =>
+    what === 'add' ? S.curved.labels.addPoint : what === 'remove' ? S.curved.labels.removePoint : h?.kind === 'corner' ? S.curved.labels.moveCorner : S.curved.labels.bendEdge;
+
+  function curveDown(e: PointerEvent, d: CurveDef): void {
+    if (!curved || e.button > 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (!canStartHandle({ handleDrag: !!drag || !!cdrag, stagePointers: pointers.size, tool })) return;
+    const el = e.currentTarget as HTMLElement;
+    capture(el, e.pointerId);
+    el.focus({ preventScroll: true });
+    oncurveselect?.(d.h);
+    cdrag = { h: d.h, pointerId: e.pointerId, pointerType: e.pointerType, x0: e.clientX, y0: e.clientY, start: curved, at: handlePos(curved, d.h, cscale), moved: false, sel: d.h };
+  }
+
+  function curveMove(e: PointerEvent): void {
+    const d = cdrag;
+    if (!d || d.pointerId !== e.pointerId) return;
+    const dxs = e.clientX - d.x0;
+    const dys = e.clientY - d.y0;
+    if (!d.moved && Math.hypot(dxs, dys) < 3) return;
+    // Every move is computed from where the drag started, so the shape is always the pointer's, never an accumulation.
+    const r = moveTo(curveStart(d.start), d.h, { x: d.at.x + dxs / (bw * z), y: d.at.y + dys / (bh * z) });
+    if (r.changed) {
+      dragCurves = r.state.curves;
+      cdrag = { ...d, moved: true, sel: r.state.sel ?? d.h };
+      curveBad = '';
+      oncurvepreview?.(r.state.curves);
+      if (d.pointerType !== 'mouse') {
+        const p = handlePos(r.state.curves, cdrag.sel, cscale);
+        loupe = { x: sx(p.x), y: sy(p.y), nx: p.x, ny: p.y };
+      }
+    } else {
+      cdrag = { ...d, moved: true };
+      curveBad = r.refused ? refusalText(r.refused) : '';
+    }
+  }
+
+  function curveUp(e: PointerEvent): void {
+    const d = cdrag;
+    if (!d || d.pointerId !== e.pointerId) return;
+    cdrag = null;
+    loupe = null;
+    const final = dragCurves;
+    curveBad = '';
+    if (d.moved && final) {
+      oncurvecommit?.(final, labelOf('move', d.sel), curveLabel(final, d.sel), 'drag', d.sel);
+      // The parent now supplies the same curves; keep the draft one frame to avoid a flicker.
+      requestAnimationFrame(() => {
+        dragCurves = null;
+        oncurvepreview?.(null);
+      });
+    } else {
+      dragCurves = null;
+      oncurvepreview?.(null);
+    }
+  }
+
+  function cancelCurveDrag(): void {
+    if (!cdrag) return;
+    cdrag = null;
+    dragCurves = null;
+    loupe = null;
+    curveBad = '';
+    oncurvepreview?.(null);
+  }
+
+  function applyStep(r: StepResult, source: 'key' | 'press'): void {
+    if (r.changed && liveCurves) {
+      oncurvecommit?.(r.state.curves, labelOf(r.what, r.state.sel), r.state.sel ? curveLabel(r.state.curves, r.state.sel) : '', source, r.state.sel);
+      refocus = true;
+    } else if (r.refused && r.refused !== 'nothing') onsay?.(refusalText(r.refused));
+  }
+
+  function curveKey(e: KeyboardEvent, d: CurveDef): void {
+    if (!liveCurves) return;
+    const cmd = keyCommand(e);
+    if (!cmd) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const st = { curves: liveCurves, sel: d.h };
+    if (cmd.kind === 'nudge') {
+      const step = stepFor(e);
+      applyStep(nudge(st, (cmd.dx * step) / (bw * z), (cmd.dy * step) / (bh * z)), 'key');
+    } else if (cmd.kind === 'step') {
+      oncurveselect?.(stepSelection(st, cmd.dir).sel);
+      refocus = true;
+    } else if (cmd.kind === 'remove') {
+      applyStep(removeSelected(st), 'press');
+    } else if (cmd.kind === 'deselect') {
+      oncurveselect?.(null);
+      (e.currentTarget as HTMLElement).blur();
+    } else if (cmd.kind === 'activate' && d.h.kind === 'ghost') {
+      // Enter on a hollow handle makes it a real point where it is: the keyboard way to start bending an edge.
+      applyStep(moveTo(st, d.h, handlePos(liveCurves, d.h, cscale)), 'press');
+    }
+  }
+
+  /** A double-click on a point removes it. */
+  function curveDouble(e: MouseEvent, d: CurveDef): void {
+    if (!liveCurves || d.h.kind !== 'point') return;
+    e.preventDefault();
+    e.stopPropagation();
+    applyStep(removeSelected({ curves: liveCurves, sel: d.h }), 'press');
+  }
+
+  /** Adds a point on the edge nearest to `p` (a double-click or a long press), within a finger's reach. */
+  function addAtPoint(p: Pt): boolean {
+    if (!curved || tool !== 'none') return false;
+    const r = addPointNear(curveStart(curved), p, [bw * z, bh * z], 28);
+    if (r.changed) {
+      applyStep(r, 'press');
+      return true;
+    }
+    if (r.refused && r.refused !== 'nothing') onsay?.(refusalText(r.refused));
+    return false;
+  }
+
+  function stageDouble(e: MouseEvent): void {
+    if ((e.target as HTMLElement).closest('.handle, .zoom, [data-nostage]')) return;
+    addAtPoint(imgPoint(e));
+  }
+
+  // The selected handle keeps focus across a commit: a hollow handle that became a point is a different button.
+  $effect(() => {
+    void curveSel;
+    void liveCurves;
+    if (!refocus || !curveSel) return;
+    refocus = false;
+    const key = curveHandleKey(curveSel);
+    void tick().then(() => document.querySelector<HTMLElement>(`[data-chandle="${key}"]`)?.focus({ preventScroll: true }));
+  });
+
   // ---- pan, pinch, tap, box and line -----------------------------------------------------------
   const pointers = new Map<number, { x: number; y: number }>();
   const downs = new Map<number, DownInfo>();
@@ -336,6 +557,10 @@
   let pinch: { d0: number; z0: number } | null = null;
   let box = $state.raw<{ a: Pt; b: Pt } | null>(null);
   let line = $state.raw<{ a: Pt; b: Pt } | null>(null);
+  // Press and hold on an edge of a curved page adds a point there (the touch way of a double-click).
+  let pressTimer: ReturnType<typeof setTimeout> | undefined;
+  let pressAt: { x: number; y: number } | null = null;
+  let pressFired = false;
 
   function stagePoint(e: { clientX: number; clientY: number }): { x: number; y: number } {
     const r = stageEl!.getBoundingClientRect();
@@ -368,11 +593,27 @@
       line = { a: imgPoint(e), b: imgPoint(e) };
     } else {
       pan = { x0: e.clientX, y0: e.clientY, px0: px, py0: py };
+      if (curved && tool === 'none') {
+        pressAt = { x: e.clientX, y: e.clientY };
+        pressFired = false;
+        clearTimeout(pressTimer);
+        pressTimer = setTimeout(() => {
+          if (!pressAt || pointers.size !== 1 || pinch) return;
+          if (addAtPoint(imgPoint({ clientX: pressAt.x, clientY: pressAt.y }))) {
+            pressFired = true;
+            pan = null;
+          }
+        }, 550);
+      }
     }
   }
 
   function stageMove(e: PointerEvent): void {
     if (!pointers.has(e.pointerId)) return;
+    if (pressAt && Math.hypot(e.clientX - pressAt.x, e.clientY - pressAt.y) > 8) {
+      clearTimeout(pressTimer);
+      pressAt = null;
+    }
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pinch && pointers.size >= 2) {
       const [a, b] = [...pointers.values()];
@@ -393,6 +634,10 @@
   function stageUp(e: PointerEvent): void {
     const down = downs.get(e.pointerId);
     const wasPinching = !!pinch;
+    clearTimeout(pressTimer);
+    pressAt = null;
+    const wasPress = pressFired;
+    pressFired = false;
     pointers.delete(e.pointerId);
     downs.delete(e.pointerId);
     pinch = null;
@@ -400,7 +645,7 @@
     if (e.type === 'pointercancel') {
       box = null;
       line = null;
-    } else if (down && !wasPinching) {
+    } else if (down && !wasPinching && !wasPress) {
       const up: DownInfo = { x: e.clientX, y: e.clientY, t: performance.now() };
       if (box) {
         const q = isDrag(down, up) ? boxQuad(box.a, box.b) : null;
@@ -445,10 +690,11 @@
   });
 
   function onWindowKey(e: KeyboardEvent): void {
-    if (e.key === 'Escape' && (drag || box || line)) {
+    if (e.key === 'Escape' && (drag || cdrag || box || line)) {
       e.preventDefault();
       e.stopPropagation();
       cancelDrag();
+      cancelCurveDrag();
       box = null;
       line = null;
     }
@@ -529,6 +775,7 @@
   onpointerup={stageUp}
   onpointercancel={stageUp}
   oncontextmenu={(e) => e.preventDefault()}
+  ondblclick={stageDouble}
   role="presentation"
   data-stage
 >
@@ -566,29 +813,46 @@
       {#each includedShown as c (c.id)}
         {#if c.id !== selectedId}
           <g data-crop={c.id}>
-            <polygon
-              points={polyPts(c.quad)}
-              fill={inMerge(c.id) ? '#3e63e6' : 'none'}
-              fill-opacity={inMerge(c.id) ? 0.28 : 0}
-              stroke="#ffffff"
-              stroke-width="2.5"
-              stroke-linejoin="round"
-            />
-            <polygon points={polyPts(c.quad)} fill="none" stroke="#15181e" stroke-width="1" stroke-dasharray="5 5" />
+            {#if c.curves}
+              <path d={curvePathOf(c.curves)} fill={inMerge(c.id) ? '#3e63e6' : 'none'} fill-opacity={inMerge(c.id) ? 0.28 : 0} stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round" />
+              <path d={curvePathOf(c.curves)} fill="none" stroke="#15181e" stroke-width="1" stroke-dasharray="5 5" />
+            {:else}
+              <polygon
+                points={polyPts(c.quad)}
+                fill={inMerge(c.id) ? '#3e63e6' : 'none'}
+                fill-opacity={inMerge(c.id) ? 0.28 : 0}
+                stroke="#ffffff"
+                stroke-width="2.5"
+                stroke-linejoin="round"
+              />
+              <polygon points={polyPts(c.quad)} fill="none" stroke="#15181e" stroke-width="1" stroke-dasharray="5 5" />
+            {/if}
           </g>
         {/if}
       {/each}
       {#if selected}
-        <g data-crop={selected.id} data-selected>
-          <polygon
-            points={polyPts(shown.find((c) => c.id === selected.id)!.quad)}
-            fill={inMerge(selected.id) ? '#3e63e6' : 'none'}
-            fill-opacity={inMerge(selected.id) ? 0.28 : 0}
-            stroke="#ffffff"
-            stroke-width="3.5"
-            stroke-linejoin="round"
-          />
-          <polygon points={polyPts(shown.find((c) => c.id === selected.id)!.quad)} fill="none" stroke="#2b4fd8" stroke-width="1.5" stroke-dasharray="6 5" />
+        <g data-crop={selected.id} data-selected data-curved={liveCurves ? '' : undefined}>
+          {#if liveCurves}
+            <path
+              d={curvePathOf(liveCurves)}
+              fill={inMerge(selected.id) ? '#3e63e6' : 'none'}
+              fill-opacity={inMerge(selected.id) ? 0.28 : 0}
+              stroke={curveBad ? '#ff6b5e' : '#ffffff'}
+              stroke-width="3.5"
+              stroke-linejoin="round"
+            />
+            <path d={curvePathOf(liveCurves)} fill="none" stroke={curveBad ? '#7a1008' : '#2b4fd8'} stroke-width="1.5" stroke-dasharray="6 5" />
+          {:else}
+            <polygon
+              points={polyPts(shown.find((c) => c.id === selected.id)!.quad)}
+              fill={inMerge(selected.id) ? '#3e63e6' : 'none'}
+              fill-opacity={inMerge(selected.id) ? 0.28 : 0}
+              stroke="#ffffff"
+              stroke-width="3.5"
+              stroke-linejoin="round"
+            />
+            <polygon points={polyPts(shown.find((c) => c.id === selected.id)!.quad)} fill="none" stroke="#2b4fd8" stroke-width="1.5" stroke-dasharray="6 5" />
+          {/if}
         </g>
       {/if}
       {#if mergePreview}
@@ -666,6 +930,43 @@
       {/each}
     </div>
 
+    {#if curveDefs.length > 0}
+      <div class="handles" role="group" aria-label={S.curved.group} data-curve-handles>
+        {#each curveDefs as d (d.key)}
+          {@const dragging = !!cdrag && cdrag.moved && sameHandle(cdrag.sel, d.h)}
+          <button
+            type="button"
+            class="handle chandle {d.h.kind}"
+            class:active={dragging}
+            class:selected={sameHandle(curveSel, d.h)}
+            class:bad={dragging && !!curveBad}
+            data-handle
+            data-chandle={d.key}
+            tabindex={stop && sameHandle(stop, d.h) ? 0 : -1}
+            aria-roledescription={S.curved.handleRole}
+            aria-label={d.label}
+            aria-current={sameHandle(curveSel, d.h) ? 'true' : undefined}
+            style:left="{d.x - HIT / 2}px"
+            style:top="{d.y - HIT / 2}px"
+            onpointerdown={(e) => curveDown(e, d)}
+            onpointermove={curveMove}
+            onpointerup={curveUp}
+            onpointercancel={cancelCurveDrag}
+            onlostpointercapture={() => {
+              if (cdrag && !cdrag.moved) cancelCurveDrag();
+            }}
+            onfocus={() => {
+              if (!sameHandle(curveSel, d.h)) oncurveselect?.(d.h);
+            }}
+            onkeydown={(e) => curveKey(e, d)}
+            ondblclick={(e) => curveDouble(e, d)}
+          >
+            <span class="dot" class:hollow={d.h.kind === 'ghost'}></span>
+          </button>
+        {/each}
+      </div>
+    {/if}
+
     <div class="handles" role="group" aria-label={S.editor.cropGroup}>
       {#each handles as h (h.key)}
         {#if !h.hidden}
@@ -698,7 +999,9 @@
     </div>
   {/if}
 
-  {#if toolHint}
+  {#if curveBad}
+    <div class="hint warn" role="status" data-nostage>{curveBad}</div>
+  {:else if toolHint}
     <div class="hint" role="status" data-nostage>{toolHint}</div>
   {/if}
 
@@ -930,6 +1233,41 @@
     outline: 3px solid #ffffff;
     outline-offset: -3px;
     box-shadow: 0 0 0 5px rgba(21, 24, 30, 0.9);
+  }
+
+  /* A curve handle: a filled dot for a point or corner, a hollow ring for an edge that is not bent yet. */
+  .chandle.point .dot,
+  .chandle.ghost .dot {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+  }
+
+  .dot.hollow {
+    background: rgba(255, 255, 255, 0.18);
+    border: 2.5px solid #ffffff;
+    box-shadow: 0 0 0 2px #15181e;
+  }
+
+  .chandle.selected .dot {
+    background: #2b4fd8;
+    border-color: #ffffff;
+    box-shadow: 0 0 0 2px #15181e;
+  }
+
+  .chandle.selected .dot.hollow {
+    background: rgba(43, 79, 216, 0.55);
+  }
+
+  .chandle.bad .dot {
+    background: #ff6b5e;
+    border-color: #ffffff;
+    box-shadow: 0 0 0 2px #7a1008;
+  }
+
+  .hint.warn {
+    background: #7a1008;
+    border-color: #ffb4ab;
   }
 
   .dot {

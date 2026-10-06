@@ -2,9 +2,11 @@
 <!-- SPDX-FileCopyrightText: 2026 Auto Crop contributors -->
 <script lang="ts">
   import { onMount, tick, untrack } from 'svelte';
-  import { api, cropImageUrl, imageUrl } from '../lib/backend.ts';
+  import { api, cropImageUrl, curvePreviewUrl, imageUrl } from '../lib/backend.ts';
   import ChipBar from '../lib/components/ChipBar.svelte';
   import CropStage from '../lib/components/CropStage.svelte';
+  import CurveBar from '../lib/components/CurveBar.svelte';
+  import FlatInset from '../lib/components/FlatInset.svelte';
   import FirstSplitSheet from '../lib/components/FirstSplitSheet.svelte';
   import FirstWriteSheet from '../lib/components/FirstWriteSheet.svelte';
   import Icon from '../lib/components/Icon.svelte';
@@ -14,6 +16,18 @@
   import Ruler from '../lib/components/Ruler.svelte';
   import ScanBanner from '../lib/components/ScanBanner.svelte';
   import TierBadge from '../lib/components/TierBadge.svelte';
+  import {
+    addPointOnSelectedEdge,
+    canAdd as curveCanAdd,
+    canRemove as curveCanRemove,
+    moveTo as curveMoveTo,
+    removeSelected as curveRemoveSelected,
+    resetAll as curveResetAll,
+    straightenSelected as curveStraightenSelected,
+    type CurveEditState,
+    type StepResult,
+  } from '../lib/curve-edit.ts';
+  import { cloneCurves, cornersOf, edgeIsStraight, edgeOf, isStraightPage, resetCurves, type CurveHandle } from '../lib/curve.ts';
   import { cutFromDrag, cutPieces, cutProblem as cutProblemOf, cutLine, halvesCut, mergedQuad } from '../lib/geometry.ts';
   import type { StageTool } from '../lib/gesture.ts';
   import {
@@ -22,6 +36,8 @@
     collisionNotice,
     hasItemLayer,
     includedCrops,
+    isCurvedScan,
+    isHeldScan,
     isSplitScan,
     moveTarget,
     nameSummary,
@@ -37,7 +53,7 @@
   import type { CutPreview, MenuEntry, StageCrop } from '../lib/stage-types.ts';
   import { codeOf, store, type ScanSave } from '../lib/store.svelte.ts';
   import { FALLBACK_HOLD, S, errorMessage, holdAction, holdCause, holdTitle, noticeText } from '../lib/strings.ts';
-  import type { Band, CropView, Cut, Edit, ItemView, Pt, SplitPolicy, SplitProfile } from '../lib/types.ts';
+  import type { Band, CropView, CurveSet, Cut, Edit, ItemView, Pt, SplitPolicy, SplitProfile } from '../lib/types.ts';
 
   let { id }: { id: number } = $props();
 
@@ -107,6 +123,23 @@
   let sayTimer: ReturnType<typeof setTimeout> | undefined;
   const gestures = new GestureClock(500);
 
+  // A curved page: its curves and the optimistic copy of a commit in flight, the selected handle, the live drag.
+  let curveDraft = $state.raw<{ crop: number; curves: CurveSet } | null>(null);
+  let curveSel = $state.raw<CurveHandle | null>(null);
+  /** The curve set under the pointer while a handle is dragged (null when none is). */
+  let liveCurves = $state.raw<CurveSet | null>(null);
+  /** The same, thinned to a few updates a second: what the flattened preview is asked for. */
+  let throttled = $state.raw<CurveSet | null>(null);
+  let liveTimer: ReturnType<typeof setTimeout> | undefined;
+  let liveLast = 0;
+  let curveView = $state<'flattened' | 'straight'>('flattened');
+  let dragSeq = 0;
+  const DRAG_GESTURE = 1_000_000;
+
+  const curves = $derived<CurveSet | null>(curveDraft && curveDraft.crop === selectedId ? curveDraft.curves : (sel?.curves ?? null));
+  const curved = $derived(!!curves);
+  const curveState = $derived<CurveEditState | null>(curves ? { curves, sel: curveSel } : null);
+
   const edit = $derived<Edit | null>(draft && draft.crop === selectedId ? draft.edit : (sel?.edit ?? null));
   const shownEdit = $derived<Edit | null>(
     edit ? { quad: previewQuad ?? edit.quad, quarterTurns: edit.quarterTurns, fineDeg: liveAngle ?? edit.fineDeg } : null,
@@ -118,8 +151,9 @@
     sayTimer = setTimeout(() => store.announce(text), 150);
   }
 
-  function enqueue(work: () => Promise<ItemView | void>, optimistic: { crop: number; edit: Edit } | null): void {
+  function enqueue(work: () => Promise<ItemView | void>, optimistic: { crop: number; edit: Edit } | null, curveOpt: { crop: number; curves: CurveSet } | null = null): void {
     if (optimistic) draft = { crop: optimistic.crop, edit: cloneEdit(optimistic.edit) };
+    if (curveOpt) curveDraft = curveOpt;
     inflight++;
     chain = chain.then(async () => {
       try {
@@ -128,10 +162,15 @@
       } catch (e) {
         console.error(e);
         const code = codeOf(e);
-        store.toast(code ? errorMessage(code) : S.editor.editFailed, 'error');
+        // A refused quad operation on a curved page is explained, not just reported.
+        const onCurved = !!store.byId.get(id) && isCurvedScan(store.byId.get(id)!);
+        store.toast(code === 'ITEM_OP' && onCurved ? S.curved.itemOp : code ? errorMessage(code) : S.editor.editFailed, 'error');
       } finally {
         inflight--;
-        if (inflight === 0) draft = null;
+        if (inflight === 0) {
+          draft = null;
+          curveDraft = null;
+        }
       }
     });
   }
@@ -160,7 +199,7 @@
   }
 
   function commitAngle(deg: number, label = S.editor.labels.rotate, source: 'drag' | 'key' = 'drag'): void {
-    if (!edit || !sel) return;
+    if (!edit || !sel || sel.curves) return;
     const v = normaliseAngle(deg);
     const cropId = sel.id;
     const gesture = source === 'key' ? gestures.next(`${id}:${cropId}:angle`, performance.now()) : null;
@@ -186,8 +225,138 @@
     if (!edit) return;
     const v = parsePercent(text);
     if (v === null) return;
+    if (curveState) {
+      // A curved page moves a corner through its curves: the two edges that meet there follow it.
+      const at = cornersOf(curveState.curves)[i];
+      const p = { ...at, [axis]: Math.min(100, Math.max(0, v)) / 100 };
+      applyCurveStep(curveMoveTo(curveState, { kind: 'corner', e: i as 0 | 1 | 2 | 3, m: -1 }, p), 'press');
+      return;
+    }
     commitEdit({ ...cloneEdit(edit), quad: setCornerPercent(edit.quad, i, axis, v) }, S.editor.labels.editCorner, `${S.editor.corners[i]} ${axis} ${v.toFixed(1)}%`);
   }
+
+  // ---- curved edges ---------------------------------------------------------------------------------------
+  function curveSay(r: StepResult): string {
+    const h = r.state.sel;
+    const edge = h ? S.editor.edges[h.e] : '';
+    if (r.what === 'add' && h?.kind === 'point') return S.curved.pointAdded(edge, h.m + 1);
+    if (r.what === 'remove') return S.curved.pointRemoved(h ? edge : '');
+    if (r.what === 'straighten') return S.curved.edgeStraightened(edge);
+    if (r.what === 'reset') return S.curved.allStraight;
+    return '';
+  }
+
+  function curveLabelOf(what: StepResult['what'], h: CurveHandle | null): string {
+    const L = S.curved.labels;
+    return what === 'add' ? L.addPoint : what === 'remove' ? L.removePoint : what === 'straighten' ? L.straightenEdge : what === 'reset' ? L.resetCurves : h?.kind === 'corner' ? L.moveCorner : L.bendEdge;
+  }
+
+  /** Sends a curve set to the engine: ONE undo step per drag (a gesture id) and per burst of nudges. */
+  function commitCurves(next: CurveSet, label: string, announce: string, source: 'drag' | 'key' | 'press', selAfter: CurveHandle | null): void {
+    if (!sel) return;
+    const cropId = sel.id;
+    const gesture = source === 'key' ? gestures.next(`${id}:${cropId}:curve`, performance.now()) : source === 'drag' ? DRAG_GESTURE + ++dragSeq : null;
+    const c = cloneCurves(next);
+    curveSel = selAfter;
+    enqueue(() => api.setCurves(id, cropId, c, 'end', label, gesture), null, { crop: cropId, curves: c });
+    if (announce) say(announce);
+  }
+
+  function refusalLine(r: StepResult): string {
+    if (r.refused === 'max') return S.curved.maxPoints;
+    if (r.refused === 'min') return S.curved.minPoints;
+    return r.refused && r.refused !== 'nothing' ? S.curved.problems[r.refused] : '';
+  }
+
+  function applyCurveStep(r: StepResult, source: 'drag' | 'key' | 'press'): void {
+    if (r.changed) commitCurves(r.state.curves, curveLabelOf(r.what, r.state.sel), curveSay(r), source, r.state.sel);
+    else {
+      const line = refusalLine(r);
+      if (line) store.announce(line);
+    }
+  }
+
+  function enterCurved(): void {
+    if (!sel || sel.curves) return;
+    const cropId = sel.id;
+    curveView = 'flattened';
+    runOp(
+      () => api.curveFromQuad(id, cropId),
+      () => say(S.curved.entered),
+    );
+  }
+
+  function leaveCurved(): void {
+    if (!sel?.curves) return;
+    const cropId = sel.id;
+    runOp(
+      () => api.clearCurves(id, cropId),
+      () => {
+        curveSel = null;
+        say(S.curved.left);
+        store.toast(S.curved.left, 'info', { label: S.editor.undo, run: doUndo });
+      },
+    );
+  }
+
+  /** Throttles what the flattened preview is asked for while a handle is dragged (a request every ~90 ms). */
+  function onCurvePreview(c: CurveSet | null): void {
+    liveCurves = c;
+    clearTimeout(liveTimer);
+    if (!c) return; // the last picture stays up until the committed one has loaded
+    const wait = Math.max(0, 90 - (performance.now() - liveLast));
+    liveTimer = setTimeout(() => {
+      liveLast = performance.now();
+      throttled = liveCurves;
+    }, wait);
+  }
+
+  $effect(() => {
+    // Once the commit has landed and nothing is being dragged, the committed picture takes over from the live one.
+    if (inflight === 0 && liveCurves === null) throttled = null;
+  });
+  $effect(() => {
+    void selectedId;
+    curveSel = null;
+    throttled = null;
+  });
+  $effect(() => {
+    if (!curved) curveSel = null;
+  });
+
+  const curveScale = $derived<[number, number]>([Math.max(1, item?.width ?? 1), Math.max(1, item?.height ?? 1)]);
+  const selectedText = $derived.by(() => {
+    if (!curveState || !curveSel) return S.curved.noSelection;
+    const h = curveSel;
+    const edge = S.editor.edges[h.e];
+    if (h.kind === 'corner') return S.curved.selected(S.editor.corners[h.e]);
+    const n = edgeOf(curveState.curves, h.e).length - 2;
+    return S.curved.selected(h.kind === 'ghost' ? `${edge}, middle` : `${edge}, point ${h.m + 1} of ${n}`);
+  });
+
+  function curveAdd(): void {
+    if (curveState) applyCurveStep(addPointOnSelectedEdge(curveState, curveScale), 'press');
+  }
+  function curveRemove(): void {
+    if (curveState) applyCurveStep(curveRemoveSelected(curveState), 'press');
+  }
+  function curveStraighten(): void {
+    if (curveState) applyCurveStep(curveStraightenSelected(curveState), 'press');
+  }
+  function curveReset(): void {
+    if (curveState) applyCurveStep(curveResetAll(curveState), 'press');
+  }
+  function setPointPercent(axis: 'x' | 'y', text: string): void {
+    if (!curveState || !curveSel || curveSel.kind === 'ghost') return;
+    const v = parsePercent(text);
+    if (v === null) return;
+    const at = curveSel.kind === 'corner' ? cornersOf(curveState.curves)[curveSel.e] : edgeOf(curveState.curves, curveSel.e)[curveSel.m + 1];
+    applyCurveStep(curveMoveTo(curveState, curveSel, { ...at, [axis]: Math.min(100, Math.max(0, v)) / 100 }), 'press');
+  }
+  const selectedPoint = $derived.by<Pt | null>(() => {
+    if (!curveState || !curveSel || curveSel.kind === 'ghost') return null;
+    return curveSel.kind === 'corner' ? cornersOf(curveState.curves)[curveSel.e] : (edgeOf(curveState.curves, curveSel.e)[curveSel.m + 1] ?? null);
+  });
 
   function doUndo(): void {
     if (!item?.canUndo) return;
@@ -368,6 +537,10 @@
 
   function startMerge(ids?: number[]): void {
     const first = ids ?? (sel ? [sel.id] : []);
+    if (first.some((m) => crops.find((c) => c.id === m)?.curves) || (!ids && included.some((c) => c.curves))) {
+      store.toast(S.curved.mergeCutLocked, 'info');
+      return;
+    }
     cancelTool();
     tool = 'merge';
     mergeIds = first;
@@ -404,6 +577,10 @@
 
   function startCut(): void {
     if (!sel?.edit) return;
+    if (sel.curves) {
+      store.toast(S.curved.mergeCutLocked, 'info');
+      return;
+    }
     const q = sel.edit.quad;
     const wide = Math.hypot(q[1].x - q[0].x, q[1].y - q[0].y) * (item?.width ?? 1) >= Math.hypot(q[3].x - q[0].x, q[3].y - q[0].y) * (item?.height ?? 1);
     cancelTool();
@@ -453,8 +630,8 @@
       { key: 'revert', label: S.items.revertSession, run: () => revertCropSession(c.id) },
       { key: 'earlier', label: S.items.moveEarlier, disabled: moveTarget(item, c.id, -1) === null ? S.items.moveEarlier + ': first' : false, run: () => moveCrop(c.id, -1) },
       { key: 'later', label: S.items.moveLater, disabled: moveTarget(item, c.id, 1) === null ? S.items.moveLater + ': last' : false, run: () => moveCrop(c.id, 1) },
-      { key: 'merge', label: S.items.mergeWithNext, disabled: next ? false : S.items.mergeWithNext + ': no next item', run: () => startMerge(next ? [c.id, next.id] : [c.id]) },
-      { key: 'cut', label: S.items.cut, run: () => { selectedId = c.id; void tick().then(startCut); } },
+      { key: 'merge', label: S.items.mergeWithNext, disabled: c.curves || next?.curves ? S.curved.mergeCutLocked : next ? false : S.items.mergeWithNext + ': no next item', run: () => startMerge(next ? [c.id, next.id] : [c.id]) },
+      { key: 'cut', label: S.items.cut, disabled: c.curves ? S.curved.mergeCutLocked : false, run: () => { selectedId = c.id; void tick().then(startCut); } },
       { key: 'left', label: S.items.turnLeft, run: () => { selectedId = c.id; void tick().then(() => turn(-1)); } },
       { key: 'right', label: S.items.turnRight, run: () => { selectedId = c.id; void tick().then(() => turn(1)); } },
       { key: 'flip', label: S.items.flip, run: () => { selectedId = c.id; void tick().then(flip); } },
@@ -494,12 +671,19 @@
 
   // ---- decisions ------------------------------------------------------------------------------------------
   const split = $derived(item ? isSplitScan(item) : false);
+  /** The scan waits for the person's OK through the engine: several files, or a page flattened from curves. */
+  const held = $derived(item ? isHeldScan(item) : false);
+  const curvedPage = $derived(item ? isCurvedScan(item) && !split : false);
   const banner = $derived(item ? bannerState(item, store.settings) : ({ kind: 'none' } as const));
 
   async function acceptSplit(): Promise<boolean> {
-    const ok = await store.acceptScan(id);
+    const ok = await store.acceptScan(id, curvedPage ? S.curved.acceptedAnnounce : undefined);
     if (ok) store.decide([id], 'accepted');
     return ok;
+  }
+
+  function withdraw(): void {
+    void store.unacceptScan(id, curvedPage ? S.curved.withdrawnAnnounce : undefined);
   }
 
   function accept(): boolean {
@@ -508,7 +692,7 @@
       store.toast(S.editor.cannotAcceptFailed);
       return false;
     }
-    if (split) {
+    if (held) {
       void acceptSplit();
       return true;
     }
@@ -517,8 +701,8 @@
   }
 
   function toggleAccepted(): void {
-    if (split) {
-      if (item?.split?.accepted) void store.unacceptScan(id);
+    if (held) {
+      if (item?.split?.accepted) withdraw();
       else void acceptSplit();
       return;
     }
@@ -528,7 +712,7 @@
 
   async function acceptAndNext(): Promise<void> {
     if (!item) return;
-    if (split) {
+    if (held) {
       if (item.split?.accepted || (await acceptSplit())) goNextToReview();
       return;
     }
@@ -655,6 +839,10 @@
         cancelTool();
         return;
       }
+      if (curveSel) {
+        curveSel = null;
+        return;
+      }
       leave();
       return;
     }
@@ -714,13 +902,19 @@
       .map((c) => ({
         id: c.id,
         order: c.order,
-        quad: (draft && draft.crop === c.id ? draft.edit.quad : c.edit!.quad) as Quad,
+        quad: (curveDraft && curveDraft.crop === c.id ? cornersOf(curveDraft.curves) : draft && draft.crop === c.id ? draft.edit.quad : c.edit!.quad) as Quad,
         include: c.include,
         band: c.band,
+        curves: curveDraft && curveDraft.crop === c.id ? curveDraft.curves : c.curves,
       })),
   );
   const savedNames = $derived(item?.saved ? (item.saved.outputs.length ? item.saved.outputs : [item.saved.output]) : []);
-  const accepted = $derived(split ? !!item?.split?.accepted : decision === 'accepted');
+  const accepted = $derived(held ? !!item?.split?.accepted : decision === 'accepted');
+  const flatUrl = $derived.by(() => {
+    if (!curves || !sel) return '';
+    if (curveView === 'straight') return curvePreviewUrl(throttled ? 'thumb' : 'result', id, sel.id, resetCurves(throttled ?? curves));
+    return throttled ? curvePreviewUrl('thumb', id, sel.id, throttled) : resultUrl;
+  });
   const canSave = $derived(!!item && item.status === 'ready' && gate.replace !== 'no-crop' && !store.saving && inflight === 0);
 </script>
 
@@ -795,10 +989,12 @@
           state={banner}
           onaccept={() => void acceptSplit()}
           onreview={reviewItems}
-          onwithdraw={() => void store.unacceptScan(id)}
+          onwithdraw={withdraw}
           ondraw={() => startAdd('draw')}
           ontreatasone={() => setPolicy('never')}
           onskip={skip}
+          onstraight={leaveCurved}
+          busy={inflight > 0}
         />
       </div>
     {/if}
@@ -839,6 +1035,11 @@
             oncutdrag={cutDrag}
             onpreview={(q) => (previewQuad = q)}
             oncommit={commitQuad}
+            {curveSel}
+            oncurveselect={(h) => (curveSel = h)}
+            oncurvepreview={onCurvePreview}
+            oncurvecommit={commitCurves}
+            onsay={(t) => store.announce(t)}
           >
             {#if prevId !== null}
               <button type="button" class="navbtn left" data-nostage aria-label={S.editor.previous} onclick={() => goTo(prevId!)}><Icon name="back" size={22} stroke={2} /></button>
@@ -852,7 +1053,11 @@
             {/if}
 
             {#if canEdit && shownEdit}
-              <ResultInset {srcUrl} {resultUrl} edit={shownEdit} {busy} {compare} name={item.name} />
+              {#if curved && !compare}
+                <FlatInset url={flatUrl} straight={curveView === 'straight'} live={!!throttled} name={item.name} />
+              {:else}
+                <ResultInset {srcUrl} {resultUrl} edit={shownEdit} {busy} {compare} name={item.name} />
+              {/if}
             {/if}
 
             {#if failedBanner}
@@ -873,6 +1078,25 @@
             {/if}
           </CropStage>
 
+          {#if canEdit && tool === 'none'}
+            <CurveBar
+              {curved}
+              busy={inflight > 0}
+              view={curveView}
+              canAdd={!!curveState && curveCanAdd(curveState)}
+              canRemove={!!curveState && curveCanRemove(curveState)}
+              canStraighten={!!curveState && !!curveSel && !edgeIsStraight(edgeOf(curveState.curves, curveSel.e))}
+              canReset={!!curveState && !isStraightPage(curveState.curves)}
+              selectedLabel={selectedText}
+              onmode={(on) => (on ? enterCurved() : leaveCurved())}
+              onview={(v) => (curveView = v)}
+              onadd={curveAdd}
+              onremove={curveRemove}
+              onstraighten={curveStraighten}
+              onreset={curveReset}
+            />
+          {/if}
+
           {#if showLayer || noItems}
             <ItemDock
               {tool}
@@ -881,8 +1105,9 @@
               canMoveEarlier={!!sel && !!item && moveTarget(item, sel.id, -1) !== null}
               canMoveLater={!!sel && !!item && moveTarget(item, sel.id, 1) !== null}
               canRemove={!!sel}
-              canCut={!!sel}
-              canMerge={included.length >= 2}
+              canCut={!!sel && !curved}
+              cutNote={curved ? S.curved.mergeCutLocked : ''}
+              canMerge={included.length >= 2 && !included.some((c) => c.curves)}
               manualOrder={item.split?.orderMode === 'manual'}
               mergeCount={mergeIds.length}
               {cut}
@@ -918,11 +1143,17 @@
 
           <div class="rulerbar">
             <button type="button" class="cbtn" aria-label={S.editor.rotateLeft90} disabled={!canEdit} onclick={() => turn(-1)}><Icon name="rotateLeft" /> {S.editor.left90}</button>
-            <button type="button" class="cbtn sq" aria-label={S.editor.nudgeLeft} disabled={!canEdit} onclick={() => edit && commitAngle(edit.fineDeg - 0.1, S.editor.labels.rotate, 'key')}>−0.1</button>
-            <Ruler value={edit?.fineDeg ?? 0} auto={sel?.autoEdit?.fineDeg ?? null} disabled={!canEdit} oncommit={(v) => commitAngle(v)} onlive={(v) => (liveAngle = v)} />
-            <button type="button" class="cbtn sq" aria-label={S.editor.nudgeRight} disabled={!canEdit} onclick={() => edit && commitAngle(edit.fineDeg + 0.1, S.editor.labels.rotate, 'key')}>+0.1</button>
+            {#if curved}
+              <span class="lock grow" role="note" data-angle-locked>{S.curved.angleLocked}</span>
+            {:else}
+              <button type="button" class="cbtn sq" aria-label={S.editor.nudgeLeft} disabled={!canEdit} onclick={() => edit && commitAngle(edit.fineDeg - 0.1, S.editor.labels.rotate, 'key')}>−0.1</button>
+              <Ruler value={edit?.fineDeg ?? 0} auto={sel?.autoEdit?.fineDeg ?? null} disabled={!canEdit} oncommit={(v) => commitAngle(v)} onlive={(v) => (liveAngle = v)} />
+              <button type="button" class="cbtn sq" aria-label={S.editor.nudgeRight} disabled={!canEdit} onclick={() => edit && commitAngle(edit.fineDeg + 0.1, S.editor.labels.rotate, 'key')}>+0.1</button>
+            {/if}
             <button type="button" class="cbtn" aria-label={S.editor.rotateRight90} disabled={!canEdit} onclick={() => turn(1)}>{S.editor.right90} <Icon name="rotateRight" /></button>
-            <button type="button" class="cbtn auto" title={S.editor.autoAngle} disabled={!canEdit} onclick={() => commitAngle(sel?.autoEdit?.fineDeg ?? 0, S.editor.labels.autoAngle)}>{S.editor.auto}</button>
+            {#if !curved}
+              <button type="button" class="cbtn auto" title={S.editor.autoAngle} disabled={!canEdit} onclick={() => commitAngle(sel?.autoEdit?.fineDeg ?? 0, S.editor.labels.autoAngle)}>{S.editor.auto}</button>
+            {/if}
           </div>
         {/if}
       </div>
@@ -937,7 +1168,7 @@
             <div class="corners">
               <span class="cg-title">{S.editor.cornerPositions}</span>
               <div class="grid">
-                {#each edit.quad as p, i (i)}
+                {#each (curves ? cornersOf(curves) : edit.quad) as p, i (i)}
                   <span class="cn">{S.editor.cornersShort[i]}</span>
                   <input
                     class="input mono"
@@ -947,7 +1178,7 @@
                     max="100"
                     disabled={!canEdit}
                     aria-label={S.editor.cornerInput(S.editor.corners[i], 'x')}
-                    value={toPercent(previewQuad?.[i].x ?? p.x)}
+                    value={toPercent(liveCurves ? cornersOf(liveCurves)[i].x : (previewQuad?.[i].x ?? p.x))}
                     onchange={(e) => setCorner(i, 'x', e.currentTarget.value)}
                   />
                   <input
@@ -958,7 +1189,7 @@
                     max="100"
                     disabled={!canEdit}
                     aria-label={S.editor.cornerInput(S.editor.corners[i], 'y')}
-                    value={toPercent(previewQuad?.[i].y ?? p.y)}
+                    value={toPercent(liveCurves ? cornersOf(liveCurves)[i].y : (previewQuad?.[i].y ?? p.y))}
                     onchange={(e) => setCorner(i, 'y', e.currentTarget.value)}
                   />
                 {/each}
@@ -978,9 +1209,48 @@
           </div>
         </section>
 
+        {#if canEdit}
+          <section data-curved-section>
+            <h2>{curved ? S.curved.toolbarLabel.toUpperCase() : S.curved.modeLabel.toUpperCase()}</h2>
+            {#if curved}
+              <p class="plain">{S.curved.help}</p>
+              <p class="plain small">{S.curved.cornersNote}</p>
+              {#if selectedPoint && curveSel && curveSel.kind === 'point'}
+                <div class="corners">
+                  <span class="cg-title">{S.curved.selectedPoint}</span>
+                  <div class="grid pt">
+                    <span class="cn">{curveSel.kind === 'point' ? `${curveSel.m + 1}` : ''}</span>
+                    <input class="input mono" type="number" step="0.1" min="0" max="100" aria-label={`${selectedText}: x`} value={toPercent(selectedPoint.x)} onchange={(e) => setPointPercent('x', e.currentTarget.value)} />
+                    <input class="input mono" type="number" step="0.1" min="0" max="100" aria-label={`${selectedText}: y`} value={toPercent(selectedPoint.y)} onchange={(e) => setPointPercent('y', e.currentTarget.value)} />
+                  </div>
+                </div>
+              {/if}
+              <p class="plain small">{S.curved.keysHelp}</p>
+              <div class="btn-row">
+                <button type="button" class="btn" disabled={inflight > 0} title={S.curved.backToStraightHint} onclick={leaveCurved} data-back-to-straight>{S.curved.backToStraight}</button>
+              </div>
+            {:else}
+              <p class="plain">{S.curved.curvedHint}</p>
+              <div class="btn-row">
+                <button type="button" class="btn" disabled={inflight > 0} onclick={enterCurved} data-bend-edges><Icon name="curve" size={16} stroke={2} /> {S.curved.curved}</button>
+              </div>
+            {/if}
+            <p class="plain small" data-curved-limits>{S.curved.limits} {curved ? S.curved.limitsMore : ''}</p>
+          </section>
+        {/if}
+
         <section>
           <h2>{multi && sel ? S.items.why(sel.order) : S.editor.whyHeading}</h2>
-          {#if reasons.length > 0}
+          {#if curved && !accepted}
+            <ul class="why">
+              <li>
+                <div class="why-title">{S.curved.whyTitle}</div>
+                <div class="why-cause">{S.curved.whyCause}</div>
+                <div class="why-action">{S.curved.whyAction}</div>
+              </li>
+            </ul>
+          {/if}
+          {#if reasons.length > 0 && !curved}
             <ul class="why">
               {#each reasons as r, i (i)}
                 <li>
@@ -1029,9 +1299,21 @@
             {/if}
             <div class="btn-row">
               <button type="button" class="btn" disabled={!canSave} onclick={() => requestSave('copy')} data-save-copy>{S.save.saveAsCopy}</button>
-              <button type="button" class="btn btn-primary" disabled={!canSave || gate.replace !== 'ok'} onclick={() => requestSave('replace')} data-save-replace>{S.save.replace}</button>
+              <button
+                type="button"
+                class="btn btn-primary"
+                disabled={!canSave || gate.replace !== 'ok'}
+                title={gate.replace === 'accept-curved' ? S.save.acceptFirstCurved : undefined}
+                onclick={() => requestSave('replace')}
+                data-save-replace>{S.save.replace}</button
+              >
             </div>
-            {#if gate.replace === 'accept-first'}
+            {#if gate.replace === 'accept-curved'}
+              <div class="gate" data-gate="accept-curved">
+                {S.save.acceptFirstCurved}
+                <button type="button" class="btn btn-sm" onclick={() => void acceptSplit()}>{S.curved.accept}</button>
+              </div>
+            {:else if gate.replace === 'accept-first'}
               <div class="gate" data-gate="accept-first">
                 {S.save.acceptFirst}
                 <button type="button" class="btn btn-sm" onclick={() => void acceptSplit()}>{S.split.accept}</button>
@@ -1052,7 +1334,7 @@
                   {#each o.notices as n (n)}<div>{noticeText(n)}</div>{/each}
                 {:else}
                   <div class="rt"><b>{o.error === 'HELD_FOR_REVIEW' ? S.save.held : S.save.failed('')}</b></div>
-                  <div>{errorMessage(o.error)}</div>
+                  {#if !(o.error === 'HELD_FOR_REVIEW' && o.notices.includes('curved.held'))}<div>{errorMessage(o.error)}</div>{/if}
                   {#each o.notices as n (n)}<div>{noticeText(n)}</div>{/each}
                 {/if}
               </div>
@@ -1312,6 +1594,22 @@
   .banner-note {
     font-size: 12px;
     color: var(--check-text-strong);
+  }
+
+  .lock {
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--canvas-text-2);
+  }
+
+  .plain.small {
+    font-size: 12px;
+    color: var(--text-3);
+    line-height: 1.4;
+  }
+
+  .grid.pt {
+    grid-template-columns: 34px repeat(2, minmax(0, 1fr));
   }
 
   .kbd {

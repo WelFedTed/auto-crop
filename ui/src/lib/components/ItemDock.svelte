@@ -21,6 +21,7 @@
     canMoveLater,
     canRemove,
     canCut,
+    cutNote = '',
     canMerge,
     manualOrder,
     mergeCount,
@@ -46,6 +47,8 @@
     canMoveLater: boolean;
     canRemove: boolean;
     canCut: boolean;
+    /** Why Cut is off, when it is (a curved page cannot be cut). */
+    cutNote?: string;
     canMerge: boolean;
     manualOrder: boolean;
     mergeCount: number;
@@ -100,7 +103,7 @@
       <Icon name="plus" size={16} stroke={2} /> {S.items.addItem} <Icon name="down" size={14} />
     </button>
     <button type="button" class="cbtn" aria-keyshortcuts="M" title={`${S.items.merge} (M)`} disabled={busy || !canMerge} onclick={onmerge}>{S.items.merge}</button>
-    <button type="button" class="cbtn" aria-keyshortcuts="K" title={`${S.items.cut} (K)`} disabled={busy || !canCut} onclick={oncut}>{S.items.cut}</button>
+    <button type="button" class="cbtn" aria-keyshortcuts="K" title={cutNote || `${S.items.cut} (K)`} disabled={busy || !canCut} onclick={oncut}>{S.items.cut}</button>
     <span class="sep" aria-hidden="true"></span>
     <span class="sel">{selectedOrder ? S.items.itemN(selectedOrder) : S.items.selectedNone}</span>
     <button type="button" class="cbtn" aria-label={S.items.moveEarlier} title={S.items.moveEarlier} disabled={busy || !canMoveEarlier} onclick={() => onmove(-1)}><Icon name="back" size={16} stroke={2} /> {S.items.earlier}</button>

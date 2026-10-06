@@ -18,6 +18,7 @@
     ondraw,
     ontreatasone,
     onskip,
+    onstraight,
   }: {
     state: BannerState;
     compact?: boolean;
@@ -28,11 +29,19 @@
     ondraw?: () => void;
     ontreatasone?: () => void;
     onskip?: () => void;
+    /** "Back to straight" on a curved page. */
+    onstraight?: () => void;
   } = $props();
 
-  const tone = $derived(state.kind === 'held' ? 'check' : state.kind === 'noItems' ? 'failed' : state.kind === 'accepted' ? 'good' : 'info');
+  const tone = $derived(
+    state.kind === 'held' || state.kind === 'curved' ? 'check' : state.kind === 'noItems' ? 'failed' : state.kind === 'accepted' || state.kind === 'curvedAccepted' ? 'good' : 'info',
+  );
   const title = $derived(
-    state.kind === 'held'
+    state.kind === 'curved'
+      ? S.curved.held
+      : state.kind === 'curvedAccepted'
+        ? S.curved.accepted
+        : state.kind === 'held'
       ? S.split.held(state.items)
       : state.kind === 'ready'
         ? S.split.ready(state.items)
@@ -45,7 +54,11 @@
               : '',
   );
   const note = $derived(
-    state.kind === 'held'
+    state.kind === 'curved'
+      ? S.curved.heldNote
+      : state.kind === 'curvedAccepted'
+        ? S.curved.acceptedNote
+        : state.kind === 'held'
       ? `${S.split.heldNeed(state.need)} ${S.split.heldNote}`
       : state.kind === 'ready'
         ? S.split.readyNote
@@ -68,7 +81,12 @@
       {#if !compact}<div class="note">{note}</div>{/if}
     </div>
     <div class="actions">
-      {#if state.kind === 'held' || state.kind === 'ready'}
+      {#if state.kind === 'curved'}
+        <button type="button" class="btn btn-primary" class:btn-sm={compact} disabled={busy} onclick={onaccept}>{S.curved.accept}</button>
+        {#if onstraight}<button type="button" class="btn" class:btn-sm={compact} disabled={busy} onclick={onstraight}>{S.curved.backToStraight}</button>{/if}
+      {:else if state.kind === 'curvedAccepted'}
+        <button type="button" class="btn" class:btn-sm={compact} disabled={busy} onclick={onwithdraw}>{S.curved.withdraw}</button>
+      {:else if state.kind === 'held' || state.kind === 'ready'}
         <button type="button" class="btn btn-primary" class:btn-sm={compact} disabled={busy} onclick={onaccept}>{S.split.accept}</button>
         <button type="button" class="btn" class:btn-sm={compact} onclick={onreview}>{S.split.review}</button>
       {:else if state.kind === 'accepted'}

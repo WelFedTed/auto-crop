@@ -2,7 +2,7 @@
 <!-- SPDX-FileCopyrightText: 2026 Auto Crop contributors -->
 <script lang="ts">
   import { cropImageUrl, imageUrl } from '../backend.ts';
-  import { bannerState, includedCrops, isSplitScan } from '../items.ts';
+  import { bannerState, includedCrops, isCurvedScan, isSplitScan } from '../items.ts';
   import { needsDrawCrop, reasonLine, tileLabel, type Classified, type Strictness } from '../review.ts';
   import { href } from '../router.svelte.ts';
   import { S, noticeText } from '../strings.ts';
@@ -34,7 +34,9 @@
 
   const item = $derived(x.item);
   const split = $derived(isSplitScan(item));
-  const banner = $derived(split ? bannerState(item, { autoSaveSplits }) : ({ kind: 'none' } as const));
+  // A curved page is one file but waits for the person's OK like a split: it gets the same compact banner.
+  const curvedOnly = $derived(!split && isCurvedScan(item));
+  const banner = $derived(split || curvedOnly ? bannerState(item, { autoSaveSplits }) : ({ kind: 'none' } as const));
   const subs = $derived(split ? includedCrops(item) : []);
   let expanded = $state(false);
   const label = $derived(tileLabel(x));
@@ -105,13 +107,15 @@
       {/if}
     {/if}
   </div>
-  {#if split && banner.kind !== 'none'}
+  {#if (split || curvedOnly) && banner.kind !== 'none'}
     <div class="splitbar">
       <ScanBanner state={banner} compact onaccept={() => onaccept?.(item.id)} onreview={() => onreview?.(item.id)} />
+      {#if split}
       <button type="button" class="btn-link expand" aria-expanded={expanded} onclick={() => (expanded = !expanded)}>
         {expanded ? S.split.collapse : S.split.expand}
       </button>
-      {#if expanded}
+      {/if}
+      {#if split && expanded}
         <ul class="subs" aria-label={S.split.subtiles}>
           {#each subs as c (c.id)}
             <li class="sub-{c.band ?? 'check'}">

@@ -6,7 +6,7 @@
   import FirstWriteSheet from '../lib/components/FirstWriteSheet.svelte';
   import Icon from '../lib/components/Icon.svelte';
   import Tile from '../lib/components/Tile.svelte';
-  import { isSplitScan, plannedNames } from '../lib/items.ts';
+  import { isHeldScan, isSplitScan, plannedNames } from '../lib/items.ts';
   import {
     canAccept,
     isItemFlaggedFirstQueue,
@@ -116,7 +116,7 @@
   // A scan with several items is accepted by the ENGINE (Accept split); the rest are UI decisions.
   const acceptable = $derived(
     selectedList.filter((x) =>
-      isSplitScan(x.item) ? !x.item.split?.accepted && x.item.status === 'ready' : x.tier === 'check' && canAccept(x.item, store.strictness) && x.decision !== 'accepted',
+      isHeldScan(x.item) ? !x.item.split?.accepted && x.item.status === 'ready' : x.tier === 'check' && canAccept(x.item, store.strictness) && x.decision !== 'accepted',
     ),
   );
   const unreviewed = $derived(acceptable.filter((x) => x.needs));
@@ -135,7 +135,7 @@
 
   async function doAccept(): Promise<void> {
     const ids = acceptable.map((x) => x.item.id);
-    const splits = acceptable.filter((x) => isSplitScan(x.item)).map((x) => x.item.id);
+    const splits = acceptable.filter((x) => isHeldScan(x.item)).map((x) => x.item.id);
     store.decide(
       ids.filter((i) => !splits.includes(i)),
       'accepted',
