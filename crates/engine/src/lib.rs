@@ -6,6 +6,7 @@
 pub mod api;
 pub mod commit;
 pub mod convert;
+pub mod curved;
 mod engine;
 pub mod enumerate;
 pub mod error;
@@ -36,6 +37,7 @@ pub mod util;
 
 pub use api::*;
 pub use auto_crop_core::{Cut, CutAxis, Pt};
+pub use curved::{PageShape, curved_job_weight};
 pub use engine::{Engine, Housekeeping, Notify, RunOptions};
 pub use error::ErrKind;
 pub use items_detect::{

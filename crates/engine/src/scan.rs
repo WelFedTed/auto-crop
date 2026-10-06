@@ -10,6 +10,7 @@
 //! the stable `ItemId`s of the edit state.
 
 use crate::api::*;
+use crate::curved::PageShape;
 use crate::engine::{
     Engine, Item as Image, JPEG_PREVIEW_QUALITY, RESULT_EDGE, SavedRec, Snapshot, THUMB_EDGE, jpeg,
     lock, stat_of,
@@ -31,7 +32,8 @@ use auto_crop_core::{
     Band, Cut, EditState, GestureId, ItemId, ItemsError, Origin, Pt, QuadWarp, STRICT_CUTOFF,
     ScanTriage, SplitPolicy, scan_triage,
 };
-use auto_crop_imgproc::render::{Limits, render_quad};
+use auto_crop_imgproc::cancel::{Cancel, NeverCancel};
+use auto_crop_imgproc::render::Limits;
 use auto_crop_imgproc::scale::resize_to_fit;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -72,7 +74,7 @@ fn crop_origin(o: &Origin) -> CropOrigin {
 pub(crate) fn crop_views(img: &Image, st: &EditState) -> (Vec<CropView>, Option<SplitView>) {
     let total = st
         .included()
-        .filter(|i| i.geometry.quad().is_some())
+        .filter(|i| i.geometry.outline_quad().is_some())
         .count();
     let stem = img
         .path
@@ -84,11 +86,18 @@ pub(crate) fn crop_views(img: &Image, st: &EditState) -> (Vec<CropView>, Option<
         .items
         .iter()
         .map(|it| {
-            let quad = it.geometry.quad();
+            let quad = it.geometry.outline_quad();
             let order = st.output_rank(it.id).unwrap_or(0) as u32;
             let baseline = img.auto.as_ref().and_then(|a| a.item(it.id));
             let reviewed = !matches!(it.origin, Origin::Auto { .. });
-            let band = if reviewed {
+            let band = if it.geometry.is_curved() {
+                // Held until the user accepts this exact state (the render hash binds it).
+                Some(if img.accepted == Some(st.render_hash()) {
+                    Band::Good
+                } else {
+                    Band::Check
+                })
+            } else if reviewed {
                 Some(Band::Good)
             } else {
                 it.confidence.as_ref().map(|c| c.band(STRICT_CUTOFF))
@@ -107,9 +116,13 @@ pub(crate) fn crop_views(img: &Image, st: &EditState) -> (Vec<CropView>, Option<
                 id: it.id.0,
                 order,
                 include: it.include,
-                edit: quad.map(Edit::from),
-                auto_edit: baseline.and_then(|b| b.geometry.quad()).map(Edit::from),
-                mirror: quad.is_some_and(|q| q.mirror),
+                edit: quad.as_ref().map(Edit::from),
+                auto_edit: baseline
+                    .and_then(|b| b.geometry.outline_quad())
+                    .as_ref()
+                    .map(Edit::from),
+                mirror: quad.as_ref().is_some_and(|q| q.mirror),
+                curves: it.geometry.curves().cloned(),
                 origin: crop_origin(&it.origin),
                 confidence: it.confidence.clone(),
                 band,
@@ -132,6 +145,14 @@ pub(crate) fn crop_views(img: &Image, st: &EditState) -> (Vec<CropView>, Option<
     (crops, Some(split))
 }
 
+/// Long edge and JPEG quality of a crop preview of `kind`.
+pub(crate) fn preview_edge(kind: CropImage) -> (u32, u8) {
+    match kind {
+        CropImage::Result => (RESULT_EDGE, JPEG_PREVIEW_QUALITY),
+        CropImage::Thumb => (THUMB_EDGE * 2, 80),
+    }
+}
+
 /// The cache key of one crop's pixels (M10.28): what decides them (`item_render_hash`) mixed with
 /// the crop's id, so the key changes when this crop is edited and only then.
 fn crop_key(st: &EditState, id: ItemId) -> Option<u64> {
@@ -142,7 +163,7 @@ fn crop_key(st: &EditState, id: ItemId) -> Option<u64> {
 /// "Move corner (item 2)": the history label names the item (M10.19). The number is the item's
 /// output rank, or its place in the list while it is excluded; a single-crop image keeps the
 /// plain label.
-fn labelled(label: &str, st: &EditState, crop: ItemId) -> String {
+pub(crate) fn labelled(label: &str, st: &EditState, crop: ItemId) -> String {
     let multi = st.items.len() > 1;
     // The output rank while included; the place in the list while excluded.
     let who = match (st.output_rank(crop), st.item_index(crop)) {
@@ -161,7 +182,7 @@ fn labelled(label: &str, st: &EditState, crop: ItemId) -> String {
 impl Engine {
     /// Applies `f` to a copy of the current state and commits the result as one undo step
     /// (`gesture` coalesces a drag). A refused operation changes nothing and says why.
-    fn crop_op(
+    pub(crate) fn crop_op(
         &self,
         id: u32,
         label: impl FnOnce(&EditState) -> String,
@@ -545,6 +566,19 @@ impl Engine {
         crop: u32,
         kind: CropImage,
     ) -> Result<(Arc<Vec<u8>>, &'static str)> {
+        self.crop_image_bytes_cancellable(id, crop, kind, &NeverCancel)
+    }
+
+    /// [`Engine::crop_image_bytes`] that stops at the next 64-row band with `Cancelled` once
+    /// `cancel` fires (a curved page is resampled at preview resolution; nothing partial is
+    /// cached).
+    pub fn crop_image_bytes_cancellable(
+        &self,
+        id: u32,
+        crop: u32,
+        kind: CropImage,
+        cancel: &dyn Cancel,
+    ) -> Result<(Arc<Vec<u8>>, &'static str)> {
         let item = self.item(id).ok_or(ErrKind::Internal)?;
         let (state, ready) = {
             let it = lock(&item);
@@ -555,10 +589,9 @@ impl Engine {
         };
         let state = state.filter(|_| ready).ok_or(ErrKind::Internal)?;
         let c = ItemId(crop);
-        let quad = state
+        let shape = state
             .item(c)
-            .and_then(|i| i.geometry.quad())
-            .cloned()
+            .and_then(|i| PageShape::of(&i.geometry))
             .ok_or(ErrKind::NoCrop)?;
         let hash = crop_key(&state, c).ok_or(ErrKind::NoCrop)?;
         let key = (id, 0x40 | kind as u8, hash);
@@ -566,20 +599,16 @@ impl Engine {
             return Ok((b, "image/jpeg"));
         }
         let proxy = self.proxy(id)?;
-        let (edge, quality) = match kind {
-            CropImage::Result => (RESULT_EDGE, JPEG_PREVIEW_QUALITY),
-            CropImage::Thumb => (THUMB_EDGE * 2, 80),
-        };
+        let (edge, quality) = preview_edge(kind);
         let bytes = crate::run_isolated(std::panic::AssertUnwindSafe(|| -> Result<Vec<u8>> {
-            let out = render_quad(
+            let out = shape.render_cancellable(
                 &proxy,
-                &quad,
                 Limits {
                     max_pixels: u64::MAX,
                     max_edge: edge,
                 },
-            )
-            .map_err(|_| ErrKind::NoCrop)?;
+                cancel,
+            )?;
             let out = if kind == CropImage::Thumb {
                 resize_to_fit(&out, THUMB_EDGE)
             } else {
@@ -698,6 +727,9 @@ impl Engine {
             },
             Err(e) => {
                 let mut o = SaveOutcome::failed(id, e);
+                if e == ErrKind::HeldForReview {
+                    o.notices = vec!["curved.held".to_owned()];
+                }
                 if e == ErrKind::NotReplaceable {
                     // The same code and the same notice vocabulary as a split scan's refusal.
                     let (format, frames, notices) =
@@ -794,9 +826,9 @@ impl Engine {
                 it.notices.clone(),
             )
         };
-        let crops: Vec<(ItemId, QuadWarp)> = state
+        let crops: Vec<(ItemId, PageShape)> = state
             .included()
-            .filter_map(|i| i.geometry.quad().map(|q| (i.id, q.clone())))
+            .filter_map(|i| PageShape::of(&i.geometry).map(|s| (i.id, s)))
             .collect();
         if crops.is_empty() {
             return Err(plain(ErrKind::NoCrop));
@@ -1014,9 +1046,10 @@ impl Engine {
         };
         let raster = &decoded.raster;
         let mut produce = |i: usize| -> Result<Output> {
-            let quad = crops[i].1.clone();
+            let shape = crops[i].1.clone();
             crate::run_isolated(std::panic::AssertUnwindSafe(|| -> Result<Output> {
-                let out = render_quad(raster, &quad, Limits::pixels(opts.max_pixels))
+                let out = shape
+                    .render(raster, Limits::pixels(opts.max_pixels))
                     .map_err(|_| ErrKind::NoCrop)?;
                 let enc = crate::output::encode_raster(&out, out_fmt, &source_meta, &opts)?;
                 Ok(Output {

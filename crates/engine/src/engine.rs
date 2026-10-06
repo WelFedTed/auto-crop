@@ -7,6 +7,7 @@
 
 use crate::api::*;
 use crate::commit::{free_name, swap};
+use crate::curved::PageShape;
 use crate::enumerate;
 use crate::error::{ErrKind, Result, codec_err};
 use crate::fsplan::ReservedKeys;
@@ -22,7 +23,7 @@ use auto_crop_core::{
 };
 use auto_crop_imgproc::Raster;
 use auto_crop_imgproc::detect::detect;
-use auto_crop_imgproc::render::{Limits, render_quad};
+use auto_crop_imgproc::render::Limits;
 use auto_crop_imgproc::scale::resize_to_fit;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fs;
@@ -104,7 +105,13 @@ pub(crate) struct Item {
 
 impl Item {
     pub(crate) fn view(&self) -> ItemView {
-        let current = self.history.as_ref().map(|h| h.current());
+        self.view_of(None)
+    }
+
+    /// The view of this image as it would be if its current state were `state` (a live edit that
+    /// is not committed); `None` is the committed state.
+    pub(crate) fn view_of(&self, state: Option<&EditState>) -> ItemView {
+        let current = state.or_else(|| self.history.as_ref().map(|h| h.current()));
         let edited = match (current, &self.auto) {
             (Some(c), Some(a)) => c != a,
             _ => false,
@@ -164,10 +171,13 @@ impl Item {
         }
     }
 
-    fn geometry(&self) -> Option<QuadWarp> {
-        self.history
-            .as_ref()
-            .and_then(|h| h.current().quad().cloned())
+    /// What the first included crop is cut with: a quad or a curved page.
+    fn shape(&self) -> Option<PageShape> {
+        self.history.as_ref().and_then(|h| {
+            h.current()
+                .included()
+                .find_map(|i| PageShape::of(&i.geometry))
+        })
     }
 
     /// The current state differs from what the detector proposed.
@@ -183,7 +193,7 @@ impl Item {
         self.history.as_ref().is_some_and(|h| {
             h.current()
                 .included()
-                .filter(|i| i.geometry.quad().is_some())
+                .filter(|i| i.geometry.outline_quad().is_some())
                 .count()
                 >= 2
         })
@@ -693,6 +703,11 @@ impl Engine {
             // The edit is for the first included crop; every other crop, the order and the split
             // settings stay as they are. An image with no crop yet gets a fresh single crop.
             let current = it.history.as_ref().expect("checked").current().clone();
+            // A curved page is edited through its curves (`set_curves`): a plain quad edit would
+            // replace it and silently drop the curves.
+            if current.has_curved() {
+                return Err(ErrKind::ItemOp);
+            }
             let state = match current
                 .included()
                 .find_map(|c| c.geometry.quad().map(|q| (c.id, q)))
@@ -712,14 +727,14 @@ impl Engine {
             if live {
                 let mut v = it.view();
                 v.edit = edit_of(&state);
-                return v;
+                return Ok(v);
             }
             let h = it.history.as_mut().expect("checked");
             if h.commit(label.chars().take(60).collect::<String>(), state) {
                 it.generation += 1;
             }
-            it.view()
-        })
+            Ok(it.view())
+        })?
     }
 
     pub fn undo(&self, id: u32) -> Result<ItemView> {
@@ -834,7 +849,7 @@ impl Engine {
                 if kind == ImageKind::Thumb && it.is_split() {
                     None
                 } else {
-                    it.geometry()
+                    it.shape()
                 },
                 failed && !it.is_edited(),
                 it.thumb_src.clone(),
@@ -853,15 +868,15 @@ impl Engine {
             ImageKind::Result => {
                 let q = geometry.ok_or(ErrKind::NoCrop)?;
                 let proxy = self.proxy(id)?;
-                let out = render_quad(
-                    &proxy,
-                    &q,
-                    Limits {
-                        max_pixels: u64::MAX,
-                        max_edge: RESULT_EDGE,
-                    },
-                )
-                .map_err(|_| ErrKind::NoCrop)?;
+                let out = q
+                    .render(
+                        &proxy,
+                        Limits {
+                            max_pixels: u64::MAX,
+                            max_edge: RESULT_EDGE,
+                        },
+                    )
+                    .map_err(|_| ErrKind::NoCrop)?;
                 jpeg(&out, JPEG_PREVIEW_QUALITY)?
             }
             ImageKind::Thumb => {
@@ -870,15 +885,15 @@ impl Engine {
                     (Some(q), false) => {
                         // Render a little larger, then area-average down: much cleaner than
                         // point-sampling a large reduction.
-                        let big = render_quad(
-                            &src,
-                            q,
-                            Limits {
-                                max_pixels: u64::MAX,
-                                max_edge: THUMB_EDGE * 2,
-                            },
-                        )
-                        .map_err(|_| ErrKind::NoCrop)?;
+                        let big = q
+                            .render(
+                                &src,
+                                Limits {
+                                    max_pixels: u64::MAX,
+                                    max_edge: THUMB_EDGE * 2,
+                                },
+                            )
+                            .map_err(|_| ErrKind::NoCrop)?;
                         resize_to_fit(&big, THUMB_EDGE)
                     }
                     _ => resize_to_fit(&src, THUMB_EDGE),

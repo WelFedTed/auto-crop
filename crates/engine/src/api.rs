@@ -8,7 +8,8 @@
 use crate::error::ErrKind;
 use crate::store::BackupKind;
 use auto_crop_core::{
-    Band, Confidence, EditState, OrderMode, Pt, QuadWarp, ScanTriage, SplitPolicy, SplitProfile,
+    Band, Confidence, CurveWarp, EditState, OrderMode, Pt, QuadWarp, ScanTriage, SplitPolicy,
+    SplitProfile,
 };
 use serde::{Deserialize, Serialize};
 
@@ -46,8 +47,10 @@ impl Edit {
     }
 }
 
+/// The edit the single-image UI shows: the first included crop's quad; for a curved crop, the
+/// straight outline through its corners (its curves are in `CropView::curves`).
 pub fn edit_of(state: &EditState) -> Option<Edit> {
-    state.quad().map(Edit::from)
+    state.outline_quad().as_ref().map(Edit::from)
 }
 
 impl Edit {
@@ -153,10 +156,15 @@ pub struct CropView {
     /// The detector's proposal for this crop, if it has one (a crop added by hand has none).
     pub auto_edit: Option<Edit>,
     pub mirror: bool,
+    /// The four boundary curves of a curved page (`docs/dev/curved-pages.md`); `None` for a plain
+    /// quad. `edit` then holds the straight outline through the curves' corners. A curved crop is
+    /// held (band Check, scan triage `heldForReview`) until the scan is accepted.
+    #[serde(default)]
+    pub curves: Option<CurveWarp>,
     pub origin: CropOrigin,
     pub confidence: Option<Confidence>,
     /// Band at the Strict cutoff (icon plus word in the UI); a crop the user placed or edited
-    /// counts as reviewed (Good).
+    /// counts as reviewed (Good), except a curved page, which is Check until the scan is accepted.
     pub band: Option<Band>,
     /// Differs from the detector's proposal (or was added by hand).
     pub edited: bool,

@@ -19,6 +19,7 @@
 
 use crate::api::*;
 use crate::commit::Expect;
+use crate::curved::PageShape;
 use crate::engine::{Engine, SavedRec, Snapshot, lock, stat_of};
 use crate::error::{ErrKind, Result, codec_err};
 use crate::fsplan::{OnCollision, PlanInput, ReservedKeys, path_key};
@@ -34,7 +35,7 @@ use crate::space::{Need, preflight};
 use crate::store::NewBackup;
 use crate::util::blake3_hex;
 use auto_crop_codecs::{Format, decode_with};
-use auto_crop_imgproc::render::{Limits, render_quad};
+use auto_crop_imgproc::render::Limits;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
@@ -70,7 +71,7 @@ impl Engine {
         hook: &dyn FaultHook,
     ) -> Result<Done> {
         let item = self.item(id).ok_or(ErrKind::Internal)?;
-        let (path, original_path, state, src_format, snap, orig_mtime_ms, saved, icc) = {
+        let (path, original_path, state, src_format, snap, orig_mtime_ms, saved, icc, accepted) = {
             let it = lock(&item);
             if it.status != ItemStatus::Ready {
                 return Err(ErrKind::Internal);
@@ -81,9 +82,6 @@ impl Engine {
                 .ok_or(ErrKind::Internal)?
                 .current()
                 .clone();
-            if state.quad().is_none() {
-                return Err(ErrKind::NoCrop);
-            }
             (
                 it.path.clone(),
                 it.original_path.clone(),
@@ -93,11 +91,21 @@ impl Engine {
                 it.orig_mtime_ms,
                 it.saved.clone(),
                 it.icc.clone(),
+                it.accepted,
             )
         };
-        let geometry = state.quad().cloned().ok_or(ErrKind::NoCrop)?;
+        // The first included crop that renders: a quad, or a curved page.
+        let shape = state
+            .included()
+            .find_map(|i| PageShape::of(&i.geometry))
+            .ok_or(ErrKind::NoCrop)?;
         let opts = self.options();
         let copy = target == SaveTarget::Copy;
+        // A curved page is held for review: replacing the original needs the user's acceptance of
+        // this exact state (`Engine::accept_scan`). A copy overwrites nothing and needs none.
+        if shape.is_curved() && !copy && accepted != Some(state.render_hash()) {
+            return Err(ErrKind::HeldForReview);
+        }
 
         // Writers exist for JPEG and PNG only (PLAN 3.2.3). A source in any other format that this
         // build can open (WebP, TIFF, HEIC, AVIF) is never replaced in place: nothing can write it
@@ -168,8 +176,13 @@ impl Engine {
         // decodes, renders once and encodes through the codecs crate.
         let meta = SourceMeta::read(src_format, &bytes, icc.clone());
         let mut notices: Vec<String> = Vec::new();
+        // Never for a curved page: the lossless path moves whole MCU blocks and cannot flatten.
         let lossless = (src_format == Format::Jpeg && fmt == Format::Jpeg)
-            .then(|| try_lossless(&mut Backend::new(), &bytes, &geometry, &meta, &opts))
+            .then(|| {
+                shape
+                    .as_quad()
+                    .and_then(|q| try_lossless(&mut Backend::new(), &bytes, q, &meta, &opts))
+            })
             .flatten();
         let (out_bytes, dims, expect) = match lossless {
             Some(l) => {
@@ -188,7 +201,8 @@ impl Engine {
             None => {
                 let decoded = decode_with(&bytes, &opts.limits()).map_err(codec_err)?;
                 drop(bytes);
-                let out = render_quad(&decoded.raster, &geometry, Limits::pixels(opts.max_pixels))
+                let out = shape
+                    .render(&decoded.raster, Limits::pixels(opts.max_pixels))
                     .map_err(|_| ErrKind::NoCrop)?;
                 drop(decoded);
                 let enc = encode_raster(&out, fmt, &meta, &opts)?;
