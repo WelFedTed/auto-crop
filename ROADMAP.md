@@ -34,12 +34,12 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | M9 | Linux preview | v0.8.0 | Linux x86_64 (Ubuntu 22.04+, Fedora; arm64 best-effort) | XL | 0 / 92 (0%) |
 | M10 | Multi-item splitting | v0.9.0 | Windows 10/11 x64, macOS arm64, Linux x64 | XL | 12 / 89 (13%) |
 | M11 | Output formats, PDF and metadata policy | v0.10.0 | Windows 10/11 x64, macOS 12+ arm64, Linux x86_64 | XL | 0 / 91 (0%) |
-| M12 | Curved-page dewarp | v0.11.0 | Windows 10/11 x64, macOS 12+ arm64, Linux x86_64 | XL | 0 / 88 (0%) |
+| M12 | Curved-page dewarp | v0.11.0 | Windows 10/11 x64, macOS 12+ arm64, Linux x86_64 | XL | 1 / 88 (1%) |
 | M13 | Hardening, accessibility, i18n, docs, legal and 1.0 release | v1.0.0 | Windows 10/11 x64, macOS 12+ arm64, Linux x86_64 | XL | 0 / 93 (0%) |
 | X | Continuous and cross-cutting | - | - | - | 0 / 42 (0%) |
 | X | Post-1.0 backlog (1.x) | - | - | - | 0 / 43 (0%) |
 | X | Spikes and open decisions | - | - | - | 0 / 28 (0%) |
-| **Total** | | | | | **136 / 1408 (9%)** |
+| **Total** | | | | | **137 / 1408 (9%)** |
 <!-- progress:end -->
 
 ## Why this order
@@ -1650,7 +1650,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [ ] **M12.36 History: undo and redo** - Entries `Flatten`, `Unflatten`, `Strength` (coalesced per gesture, M3.12), re-flatten after an outline change; committed only when the grid is ready. Undo restores the prior `Geometry::Quad` and keeps the cached grid for instant redo.
 - [ ] **M12.37 Outline edits on Grid items** - A corner drag previews with the homography; on release the grid is re-expressed in the new outline. A move > 1.5% of the diagonal or aspect change > 5% (PROVISIONAL) marks it `stale` and queues a cancellable re-inference ('Keep previous flattening').
 - [ ] **M12.38 Batch integration and memory admission** - Dewarp is a bounded stage in `Analysing`: one inference at a time, shared session, per-job timeout, admission weighted by measured memory (M12.64) on the M6.45 budget; `Save all` never waits on it.
-- [ ] **M12.39 Save path and lossless-JPEG bypass** - Grid items always take the full render, encode and verify path (never the lossless JPEG path); verify checks decoded size against `out_size`. Re-editing a saved dewarped file renders from the backup original, never dewarping twice.
+- [x] **M12.39 Save path and lossless-JPEG bypass** - Grid items always take the full render, encode and verify path (never the lossless JPEG path); verify checks decoded size against `out_size`. Re-editing a saved dewarped file renders from the backup original, never dewarping twice. Verified for the weight-free boundary-curve model (`crates/engine/tests/curved.rs`: EXIF once, crash recovery at every step, byte-identical restore, re-save from the backup; never the lossless path). Docs: `docs/dev/curved-pages.md`.
 
 ### Enhancement
 - [ ] **M12.40 Dewarp before flatten** - Flatten and tone run on the dewarped raster: stage keys include the grid hash (M7.02), the validity mask feeds M7.03 (B&W fills outside white), `dpi_eq` (M7.05) uses it.
