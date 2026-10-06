@@ -94,6 +94,9 @@ pub(crate) struct Item {
     pub(crate) frames: u32,
     /// The EXIF orientation the source declared (1 = none), applied to the pixels at decode.
     pub(crate) exif_orientation: u8,
+    /// What the decode lost or converted (`depth.reduced_to_8`, `alpha.dropped`, ...): a source with
+    /// such a notice is never replaced (`fsplan::replace_refusal`).
+    pub(crate) notices: Vec<&'static str>,
     /// The `render_hash` of the state the user accepted for saving (M10.29): a held split scan is
     /// written only while its current state still has this hash.
     pub(crate) accepted: Option<u64>,
@@ -155,7 +158,7 @@ impl Item {
             history_position: self.history.as_ref().map_or(0, |h| h.position()),
             // The one replaceability gate (`fsplan::replace_refusal`) names the reason.
             open_only: (self.status == ItemStatus::Ready)
-                .then(|| crate::fsplan::replace_refusal(self.format, self.frames))
+                .then(|| crate::fsplan::replace_refusal(self.format, self.frames, &self.notices))
                 .flatten()
                 .map(str::to_owned),
         }
@@ -495,6 +498,7 @@ impl Engine {
                 saved: None,
                 frames: 1,
                 exif_orientation: 1,
+                notices: Vec::new(),
                 accepted: None,
             };
             lock(&self.inner.items).insert(id, Arc::new(Mutex::new(item)));
@@ -565,6 +569,7 @@ impl Engine {
                     it.dims = a.raster_dims;
                     it.frames = a.frames;
                     it.exif_orientation = a.exif_orientation;
+                    it.notices = a.notices;
                     it.accepted = None;
                     it.thumb_src = Some(Arc::new(a.thumb_src));
                     it.icc = a.icc.map(Arc::new);
@@ -666,6 +671,7 @@ impl Engine {
             state,
             frames: decoded.frames.max(1),
             exif_orientation: decoded.exif_orientation,
+            notices: decoded.notices.clone(),
         })
     }
 
@@ -1227,4 +1233,5 @@ struct Analysis {
     state: EditState,
     frames: u32,
     exif_orientation: u8,
+    notices: Vec<&'static str>,
 }

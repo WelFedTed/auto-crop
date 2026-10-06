@@ -106,7 +106,18 @@ impl Engine {
     ) -> std::result::Result<SaveOutcome, (ErrKind, Vec<String>)> {
         let plain = |e: ErrKind| (e, Vec::new());
         let item = self.item(id).ok_or(plain(ErrKind::Internal))?;
-        let (path, original_path, state, src_format, snap, orig_mtime_ms, saved, icc, frames) = {
+        let (
+            path,
+            original_path,
+            state,
+            src_format,
+            snap,
+            orig_mtime_ms,
+            saved,
+            icc,
+            frames,
+            notices,
+        ) = {
             let it = lock(&item);
             if it.status != ItemStatus::Ready {
                 return Err(plain(ErrKind::Internal));
@@ -127,16 +138,17 @@ impl Engine {
                 it.saved.clone(),
                 it.icc.clone(),
                 it.frames,
+                it.notices.clone(),
             )
         };
         // One rule for what may be replaced (D3): a multi-frame source is never converted either.
         let Some(target) = conversion_target(src_format, frames) else {
             let notice = if frames > 1 {
-                crate::fsplan::replace_refusal(src_format, frames)
+                crate::fsplan::replace_refusal(src_format, frames, &notices)
             } else if src_format.is_encodable() {
                 Some(NOTICE_SAME_FORMAT)
             } else {
-                crate::fsplan::replace_refusal(src_format, frames)
+                crate::fsplan::replace_refusal(src_format, frames, &notices)
             };
             let kind = if src_format.is_encodable() && frames <= 1 {
                 ErrKind::UnsupportedOutput
@@ -145,6 +157,13 @@ impl Engine {
             };
             return Err((kind, notice.map(|n| vec![n.to_owned()]).unwrap_or_default()));
         };
+        if let Some(n) = crate::fsplan::LOSSY_DECODE_NOTICES
+            .iter()
+            .find(|n| notices.contains(n))
+        {
+            // The target cannot hold the whole picture (alpha, depth): the source stays as it is.
+            return Err((ErrKind::NotReplaceable, vec![(*n).to_owned()]));
+        }
         if saved.is_some() {
             // Already converted in this session: its source is in the store, not at `path`.
             return Err(plain(ErrKind::NotReplaceable));

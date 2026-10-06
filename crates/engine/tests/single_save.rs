@@ -593,3 +593,40 @@ fn eight_orientations_by_three_paths_all_come_out_upright() {
         }
     }
 }
+
+/// A source whose decode drops content (16 bits, translucent pixels) is never replaced: the 8-bit
+/// RGB raster cannot hold it whole. The file stays byte-identical; a copy is still possible.
+#[test]
+fn a_source_the_raster_cannot_hold_whole_is_never_replaced() {
+    for (name, bytes, notice) in [
+        (
+            "deep.png",
+            auto_crop_codecs::fixtures::png_rgb16(48, 32),
+            "depth.reduced_to_8",
+        ),
+        (
+            "alpha.png",
+            auto_crop_codecs::fixtures::png_rgba(48, 32),
+            "alpha.dropped",
+        ),
+    ] {
+        let e = env();
+        let v = open(&e, name, &bytes);
+        assert_eq!(
+            v.open_only.as_deref(),
+            Some(notice),
+            "{name}: the view says why"
+        );
+        let v = crop(&e, &v, [0.1, 0.1, 0.9, 0.9], 0, 0.0);
+        let out = e.engine.save_items(&[v.id], SaveTarget::Replace, "r", &nop);
+        assert_eq!(out[0].error, Some(ErrKind::NotReplaceable), "{name}");
+        assert_eq!(out[0].notices, [notice], "{name}");
+        assert_eq!(fs::read(e.dir.join(name)).unwrap(), bytes, "{name}");
+        assert!(e.engine.list_backups().runs.is_empty(), "{name}");
+        assert_eq!(strays(&e.dir), 0, "{name}");
+        // A copy destroys nothing and is allowed.
+        let out = e.engine.save_items(&[v.id], SaveTarget::Copy, "r", &nop);
+        assert!(out[0].ok, "{name}: {:?}", out[0]);
+        assert_eq!(fs::read(e.dir.join(name)).unwrap(), bytes, "{name}");
+    }
+}

@@ -37,8 +37,12 @@ pub const DEFAULT_TEMPLATE_1: &str = "{name}";
 /// dropping content. Every path (the single-item save, the multi-item group, the CLI) asks here;
 /// nothing else decides. `None`: replaceable. `Some(notice)`: the source stays byte-identical and
 /// the notice code says why (`tiff.multi_page`, `anim.first_frame_only`, `heic.multi_image`,
-/// `format.write_unavailable`).
-pub fn replace_refusal(format: Format, frames: u32) -> Option<&'static str> {
+/// `format.write_unavailable`, or one of [`LOSSY_DECODE_NOTICES`]).
+///
+/// `notices` are the codes the decode reported: the engine's raster is 8-bit RGB, so a source whose
+/// depth was reduced, whose alpha would be dropped or whose CMYK would be converted naively cannot
+/// be written back without losing content. It stays untouched; a copy is still possible.
+pub fn replace_refusal(format: Format, frames: u32, notices: &[&str]) -> Option<&'static str> {
     if frames > 1 {
         return Some(match format {
             Format::Png | Format::Webp | Format::Gif => "anim.first_frame_only",
@@ -46,8 +50,22 @@ pub fn replace_refusal(format: Format, frames: u32) -> Option<&'static str> {
             _ => "tiff.multi_page",
         });
     }
-    (!format.is_encodable()).then_some("format.write_unavailable")
+    if !format.is_encodable() {
+        return Some("format.write_unavailable");
+    }
+    LOSSY_DECODE_NOTICES
+        .iter()
+        .find(|n| notices.contains(n))
+        .copied()
 }
+
+/// Decode notices that mean writing the decoded raster back would drop content (the raster is 8-bit
+/// RGB until 16-bit and alpha rasters exist): a 16-bit source, translucent pixels, CMYK.
+pub const LOSSY_DECODE_NOTICES: [&str; 3] = [
+    "depth.reduced_to_8",
+    "alpha.dropped",
+    "cmyk.naive_conversion",
+];
 
 /// Longest `{name}` substituted, in characters (a source name is never trusted to be short).
 const MAX_NAME_CHARS: usize = 100;
@@ -605,19 +623,34 @@ mod tests {
 
     #[test]
     fn the_replaceability_gate_is_one_rule() {
-        assert_eq!(replace_refusal(Format::Jpeg, 1), None);
-        assert_eq!(replace_refusal(Format::Png, 1), None);
+        assert_eq!(replace_refusal(Format::Jpeg, 1, &[]), None);
+        assert_eq!(replace_refusal(Format::Png, 1, &[]), None);
         // Animated PNG, animated WebP and GIF, multi-page TIFF, multi-image HEIC: never replaced.
         assert_eq!(
-            replace_refusal(Format::Png, 3),
+            replace_refusal(Format::Png, 3, &[]),
             Some("anim.first_frame_only")
         );
         assert_eq!(
-            replace_refusal(Format::Webp, 2),
+            replace_refusal(Format::Webp, 2, &[]),
             Some("anim.first_frame_only")
         );
-        assert_eq!(replace_refusal(Format::Tiff, 4), Some("tiff.multi_page"));
-        assert_eq!(replace_refusal(Format::Heic, 2), Some("heic.multi_image"));
+        assert_eq!(
+            replace_refusal(Format::Tiff, 4, &[]),
+            Some("tiff.multi_page")
+        );
+        assert_eq!(
+            replace_refusal(Format::Heic, 2, &[]),
+            Some("heic.multi_image")
+        );
+        // A source the 8-bit RGB raster cannot hold whole: sixteen bits, alpha, CMYK.
+        for n in LOSSY_DECODE_NOTICES {
+            assert_eq!(replace_refusal(Format::Png, 1, &[n]), Some(n));
+            assert_eq!(
+                replace_refusal(Format::Jpeg, 1, &["icc.invalid", n]),
+                Some(n)
+            );
+        }
+        assert_eq!(replace_refusal(Format::Png, 1, &["icc.invalid"]), None);
         // No writer in this build.
         for f in [
             Format::Tiff,
@@ -628,7 +661,7 @@ mod tests {
             Format::Gif,
         ] {
             assert_eq!(
-                replace_refusal(f, 1),
+                replace_refusal(f, 1, &[]),
                 Some("format.write_unavailable"),
                 "{f:?}"
             );

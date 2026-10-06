@@ -104,11 +104,14 @@ impl Engine {
         // back without dropping content, so the source stays byte-identical. A copy is written in a
         // format the build can write: JPEG for HEIC (the conversion target of PLAN 3.5), PNG for
         // the rest (lossless, carries the ICC profile).
-        let frames = lock(&item).frames;
+        let (frames, decode_notices) = {
+            let it = lock(&item);
+            (it.frames, it.notices.clone())
+        };
         let (fmt, copy_ext) = if !copy {
             // The one gate (`fsplan::replace_refusal`): the same code and notice as a split
             // scan's refusal; the dispatcher adds the notice.
-            if crate::fsplan::replace_refusal(src_format, frames).is_some() {
+            if crate::fsplan::replace_refusal(src_format, frames, &decode_notices).is_some() {
                 return Err(ErrKind::NotReplaceable);
             }
             (src_format, None)

@@ -700,11 +700,12 @@ impl Engine {
                 let mut o = SaveOutcome::failed(id, e);
                 if e == ErrKind::NotReplaceable {
                     // The same code and the same notice vocabulary as a split scan's refusal.
-                    let (format, frames) = self.item(id).map_or((Format::Jpeg, 1), |i| {
-                        let it = lock(&i);
-                        (it.format, it.frames)
-                    });
-                    o.notices = crate::fsplan::replace_refusal(format, frames)
+                    let (format, frames, notices) =
+                        self.item(id).map_or((Format::Jpeg, 1, Vec::new()), |i| {
+                            let it = lock(&i);
+                            (it.format, it.frames, it.notices.clone())
+                        });
+                    o.notices = crate::fsplan::replace_refusal(format, frames, &notices)
                         .map(|n| vec![n.to_owned()])
                         .unwrap_or_default();
                 }
@@ -756,7 +757,19 @@ impl Engine {
     ) -> std::result::Result<SaveOutcome, (ErrKind, Vec<String>)> {
         let plain = |e: ErrKind| (e, Vec::new());
         let item = self.item(id).ok_or(plain(ErrKind::Internal))?;
-        let (path, original_path, state, fmt, snap, orig_mtime_ms, saved, icc, frames, accepted) = {
+        let (
+            path,
+            original_path,
+            state,
+            fmt,
+            snap,
+            orig_mtime_ms,
+            saved,
+            icc,
+            frames,
+            accepted,
+            decode_notices,
+        ) = {
             let it = lock(&item);
             if it.status != crate::api::ItemStatus::Ready {
                 return Err(plain(ErrKind::Internal));
@@ -778,6 +791,7 @@ impl Engine {
                 it.icc.clone(),
                 it.frames,
                 it.accepted,
+                it.notices.clone(),
             )
         };
         let crops: Vec<(ItemId, QuadWarp)> = state
@@ -808,7 +822,7 @@ impl Engine {
         // What may be replaced (PLAN 2.7): single-frame sources this build can write back.
         let out_fmt = match target {
             SaveTarget::Replace => {
-                if let Some(notice) = crate::fsplan::replace_refusal(fmt, frames) {
+                if let Some(notice) = crate::fsplan::replace_refusal(fmt, frames, &decode_notices) {
                     return Err((ErrKind::NotReplaceable, vec![notice.to_owned()]));
                 }
                 fmt
