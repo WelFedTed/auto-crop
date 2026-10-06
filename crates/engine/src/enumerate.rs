@@ -11,6 +11,12 @@ use std::path::{Path, PathBuf};
 pub const MAX_DEPTH: usize = 12;
 pub const MAX_FILES: usize = 20_000;
 
+/// The extensions this build opens (lower case, without the dot): for the file picker and for
+/// listing the formats truthfully in the UI. The same list [`is_candidate`] matches against.
+pub fn input_extensions() -> &'static [&'static str] {
+    auto_crop_codecs::supported_input_extensions()
+}
+
 /// File extensions this build opens (matched case-insensitively; the content is sniffed later).
 /// The list is the codecs' own: only formats this build can decode (JPEG, PNG, TIFF and WebP, and
 /// with the `heif` feature HEIC, HEIF and AVIF). Opening a format is not the same as being able to
@@ -20,7 +26,7 @@ pub fn is_candidate(path: &Path) -> bool {
         .extension()
         .map(|e| e.to_string_lossy().to_ascii_lowercase())
         .unwrap_or_default();
-    auto_crop_codecs::supported_input_extensions().contains(&ext.as_str())
+    input_extensions().contains(&ext.as_str())
         && !path
             .file_name()
             .is_some_and(|n| n.to_string_lossy().starts_with(".autocrop-"))

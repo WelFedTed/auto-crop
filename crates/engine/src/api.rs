@@ -115,6 +115,20 @@ pub struct ItemView {
     /// Stable position in the undo history, for `revert_crop(Step)`.
     #[serde(default)]
     pub history_position: usize,
+    /// The notice code of the reason this source is never replaced in place (`tiff.multi_page`
+    /// or `format.write_unavailable`); `None` for a source that can be replaced, and while the
+    /// image is still being analysed. Saving such a source writes copies only.
+    #[serde(default)]
+    pub open_only: Option<String>,
+}
+
+/// One step of the session history (a multi-image command): its label and the new view of every
+/// image it touched.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionStep {
+    pub label: String,
+    pub items: Vec<ItemView>,
 }
 
 /// Where a crop came from.
@@ -408,6 +422,47 @@ mod tests {
         let patch: SplitPatch = serde_json::from_str(r#"{"policy":"never"}"#).unwrap();
         assert_eq!(patch.policy, Some(SplitPolicy::Never));
         assert_eq!(patch.profile, None);
+
+        let step = serde_json::to_value(SessionStep {
+            label: "Split into items (2 images)".into(),
+            items: Vec::new(),
+        })
+        .unwrap();
+        assert_eq!(step["label"], "Split into items (2 images)");
+        assert!(step["items"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn open_only_is_a_camel_case_optional_field_that_old_json_lacks() {
+        let view = ItemView {
+            id: 1,
+            name: "a.tif".into(),
+            width: 10,
+            height: 10,
+            status: ItemStatus::Ready,
+            error: None,
+            edit: None,
+            auto_edit: None,
+            confidence: None,
+            generation: 1,
+            edited: false,
+            saved: None,
+            dirty_since_save: false,
+            can_undo: false,
+            can_redo: false,
+            undo_label: None,
+            redo_label: None,
+            crops: Vec::new(),
+            split: None,
+            history_position: 0,
+            open_only: Some("tiff.multi_page".into()),
+        };
+        let mut v = serde_json::to_value(&view).unwrap();
+        assert_eq!(v["openOnly"], "tiff.multi_page");
+        // A view from before this field existed still parses, as `None`.
+        v.as_object_mut().unwrap().remove("openOnly");
+        let old: ItemView = serde_json::from_value(v).unwrap();
+        assert_eq!(old.open_only, None);
     }
 
     #[test]

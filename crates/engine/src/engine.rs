@@ -151,6 +151,9 @@ impl Item {
             crops,
             split,
             history_position: self.history.as_ref().map_or(0, |h| h.position()),
+            open_only: (self.status == ItemStatus::Ready
+                && (self.frames > 1 || !self.format.is_encodable()))
+            .then(|| crate::scan::not_replaceable_notice(self.frames).to_owned()),
         }
     }
 
@@ -711,13 +714,26 @@ impl Engine {
         })
     }
 
-    /// For items with no crop: an editable quad inset about 5% from the frame.
+    /// For items with no crop: an editable quad inset about 5% from the frame. An image that
+    /// already has crops (all of them removed, say) gets one more, so nothing it holds is lost.
     pub fn draw_crop(&self, id: u32) -> Result<ItemView> {
         self.with_history(id, |it| {
-            let split = it.history.as_ref().expect("checked").current().split;
-            let state = EditState {
-                split,
-                ..EditState::single(QuadWarp::inset_frame(0.05))
+            let current = it.history.as_ref().expect("checked").current().clone();
+            let state = if current.items.is_empty() {
+                EditState {
+                    split: current.split,
+                    ..EditState::single(QuadWarp::inset_frame(0.05))
+                }
+            } else {
+                let mut st = current;
+                match st.add_item(
+                    QuadWarp::inset_frame(0.05),
+                    auto_crop_core::Origin::Manual,
+                    it.dims,
+                ) {
+                    Ok(_) => st,
+                    Err(e) => return Err(e.kind()),
+                }
             };
             if it
                 .history
@@ -727,8 +743,8 @@ impl Engine {
             {
                 it.generation += 1;
             }
-            it.view()
-        })
+            Ok(it.view())
+        })?
     }
 
     // ------------------------------------------------------------------ pixels for the UI

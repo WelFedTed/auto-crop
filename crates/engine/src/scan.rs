@@ -1101,7 +1101,7 @@ impl Engine {
 
 /// The reason a source is never replaced in place, as a notice (one vocabulary for the split and
 /// the single-item path; the code is `NOT_REPLACEABLE` for both).
-fn not_replaceable_notice(frames: u32) -> &'static str {
+pub(crate) fn not_replaceable_notice(frames: u32) -> &'static str {
     if frames > 1 {
         "tiff.multi_page"
     } else {

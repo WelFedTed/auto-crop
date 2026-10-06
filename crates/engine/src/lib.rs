@@ -34,6 +34,7 @@ pub mod store;
 pub mod util;
 
 pub use api::*;
+pub use auto_crop_core::{Cut, CutAxis, Pt};
 pub use engine::{Engine, Housekeeping, Notify, RunOptions};
 pub use error::ErrKind;
 pub use items_detect::{

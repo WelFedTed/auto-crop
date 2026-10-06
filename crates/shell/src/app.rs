@@ -4,8 +4,9 @@
 //! The Tauri side: commands, the `acimg` scheme, pickers and drag-and-drop.
 
 use auto_crop_engine::{
-    AppPaths, Edit, Engine, ErrKind, ItemView, Notify, OpenSummary, RestoreMode, RestoreOutcome,
-    SaveOutcome, SaveTarget, Settings,
+    AppPaths, Cut, DerivedAction, Edit, Engine, ErrKind, ItemView, Notify, OpenSummary, Pt,
+    RestoreMode, RestoreOutcome, RevertTo, SaveOutcome, SaveTarget, SessionStep, Settings,
+    SplitPatch,
 };
 use serde::Serialize;
 use std::path::PathBuf;
@@ -54,6 +55,11 @@ struct LaunchInfo {
     version: &'static str,
     platform: &'static str,
     backups_location: String,
+    /// The file extensions this build opens (lower case, no dot), so the UI lists the formats
+    /// truthfully.
+    input_extensions: Vec<String>,
+    /// HEIC, HEIF and AVIF input is compiled in.
+    heif: bool,
 }
 
 #[tauri::command]
@@ -74,15 +80,21 @@ fn launch_info(shared: State<'_, Shared>) -> LaunchInfo {
             .backups_dir()
             .to_string_lossy()
             .into_owned(),
+        input_extensions: auto_crop_engine::enumerate::input_extensions()
+            .iter()
+            .map(|e| (*e).to_owned())
+            .collect(),
+        heif: cfg!(feature = "heif"),
     }
 }
 
 #[tauri::command]
 async fn pick_files(app: AppHandle, shared: State<'_, Shared>) -> Cmd<OpenSummary> {
+    // The picker offers exactly the formats the engine opens in this build.
     let picked = app
         .dialog()
         .file()
-        .add_filter("Images", &["jpg", "jpeg", "png"])
+        .add_filter("Images", auto_crop_engine::enumerate::input_extensions())
         .blocking_pick_files();
     let paths: Vec<PathBuf> = picked
         .unwrap_or_default()
@@ -153,6 +165,175 @@ fn reset_to_auto(shared: State<'_, Shared>, id: u32) -> Cmd<ItemView> {
 #[tauri::command]
 fn draw_crop(shared: State<'_, Shared>, id: u32) -> Cmd<ItemView> {
     shared.engine.draw_crop(id)
+}
+
+/// Runs engine work that may decode or detect off the main thread.
+async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Cmd<T> {
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .map_err(|_| ErrKind::Internal)
+}
+
+// ---------------------------------------------------------------- crops (ids only, M10)
+
+#[tauri::command]
+fn set_crop_edit(
+    shared: State<'_, Shared>,
+    id: u32,
+    crop: u32,
+    edit: Edit,
+    phase: String,
+    label: String,
+    gesture: Option<u64>,
+) -> Cmd<ItemView> {
+    shared
+        .engine
+        .set_crop_edit(id, crop, &edit, phase == "live", &label, gesture)
+}
+
+/// May run the detector (`at`), so it leaves the main thread.
+#[tauri::command]
+async fn add_crop(
+    shared: State<'_, Shared>,
+    id: u32,
+    quad: Option<[Pt; 4]>,
+    at: Option<Pt>,
+) -> Cmd<ItemView> {
+    let engine = shared.engine.clone();
+    blocking(move || engine.add_crop(id, quad, at)).await?
+}
+
+#[tauri::command]
+fn remove_crop(shared: State<'_, Shared>, id: u32, crop: u32) -> Cmd<ItemView> {
+    shared.engine.remove_crop(id, crop)
+}
+
+#[tauri::command]
+fn restore_crop(shared: State<'_, Shared>, id: u32, crop: u32) -> Cmd<ItemView> {
+    shared.engine.restore_crop(id, crop)
+}
+
+#[tauri::command]
+fn merge_crops(shared: State<'_, Shared>, id: u32, crops: Vec<u32>) -> Cmd<ItemView> {
+    shared.engine.merge_crops(id, &crops)
+}
+
+#[tauri::command]
+fn cut_crop(shared: State<'_, Shared>, id: u32, crop: u32, cut: Cut) -> Cmd<ItemView> {
+    shared.engine.cut_crop(id, crop, cut)
+}
+
+#[tauri::command]
+fn move_crop(shared: State<'_, Shared>, id: u32, crop: u32, to_index: usize) -> Cmd<ItemView> {
+    shared.engine.move_crop(id, crop, to_index)
+}
+
+#[tauri::command]
+fn use_reading_order(shared: State<'_, Shared>, id: u32) -> Cmd<ItemView> {
+    shared.engine.use_reading_order(id)
+}
+
+#[tauri::command]
+fn turn_crop(shared: State<'_, Shared>, id: u32, crop: u32, clockwise: bool) -> Cmd<ItemView> {
+    shared.engine.turn_crop(id, crop, clockwise)
+}
+
+#[tauri::command]
+fn set_crop_angle(
+    shared: State<'_, Shared>,
+    id: u32,
+    crop: u32,
+    deg: f32,
+    gesture: Option<u64>,
+) -> Cmd<ItemView> {
+    shared.engine.set_crop_angle(id, crop, deg, gesture)
+}
+
+#[tauri::command]
+fn flip_crop(shared: State<'_, Shared>, id: u32, crop: u32) -> Cmd<ItemView> {
+    shared.engine.flip_crop(id, crop)
+}
+
+#[tauri::command]
+fn revert_crop(shared: State<'_, Shared>, id: u32, crop: u32, to: RevertTo) -> Cmd<ItemView> {
+    shared.engine.revert_crop(id, crop, to)
+}
+
+/// Runs the detector again, so it leaves the main thread.
+#[tauri::command]
+async fn redetect(shared: State<'_, Shared>, id: u32, patch: SplitPatch) -> Cmd<ItemView> {
+    let engine = shared.engine.clone();
+    blocking(move || engine.redetect(id, patch)).await?
+}
+
+/// The outcome for one image of [`redetect_many`].
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RedetectResult {
+    id: u32,
+    view: Option<ItemView>,
+    error: Option<ErrKind>,
+}
+
+/// One session undo step for all of them; every changed image is also announced as
+/// `item-updated`.
+#[tauri::command]
+async fn redetect_many(
+    app: AppHandle,
+    shared: State<'_, Shared>,
+    ids: Vec<u32>,
+    patch: SplitPatch,
+) -> Cmd<Vec<RedetectResult>> {
+    let engine = shared.engine.clone();
+    let results = blocking(move || engine.redetect_many(&ids, patch)).await?;
+    let notify = notifier(&app);
+    Ok(results
+        .into_iter()
+        .map(|(id, r)| match r {
+            Ok(view) => {
+                notify(view.clone());
+                RedetectResult {
+                    id,
+                    view: Some(view),
+                    error: None,
+                }
+            }
+            Err(e) => RedetectResult {
+                id,
+                view: None,
+                error: Some(e),
+            },
+        })
+        .collect())
+}
+
+fn session_step(app: &AppHandle, step: Option<(String, Vec<ItemView>)>) -> Option<SessionStep> {
+    let (label, items) = step?;
+    let notify = notifier(app);
+    for v in &items {
+        notify(v.clone());
+    }
+    Some(SessionStep { label, items })
+}
+
+#[tauri::command]
+fn session_undo(app: AppHandle, shared: State<'_, Shared>) -> Option<SessionStep> {
+    session_step(&app, shared.engine.session_undo())
+}
+
+#[tauri::command]
+fn session_redo(app: AppHandle, shared: State<'_, Shared>) -> Option<SessionStep> {
+    session_step(&app, shared.engine.session_redo())
+}
+
+#[tauri::command]
+fn accept_scan(shared: State<'_, Shared>, id: u32) -> Cmd<ItemView> {
+    shared.engine.accept_scan(id)
+}
+
+#[tauri::command]
+fn unaccept_scan(shared: State<'_, Shared>, id: u32) -> Cmd<ItemView> {
+    shared.engine.unaccept_scan(id)
 }
 
 #[tauri::command]
@@ -231,6 +412,39 @@ async fn restore_run(
 }
 
 #[tauri::command]
+async fn restore_file_derived(
+    app: AppHandle,
+    shared: State<'_, Shared>,
+    file_id: String,
+    mode: RestoreMode,
+    derived: DerivedAction,
+) -> Cmd<RestoreOutcome> {
+    let engine = shared.engine.clone();
+    blocking(move || {
+        engine.restore_file_derived(&file_id, mode, derived, &|v| {
+            let _ = app.emit("item-updated", v);
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+async fn restore_run_derived(
+    app: AppHandle,
+    shared: State<'_, Shared>,
+    run_id: String,
+    derived: DerivedAction,
+) -> Cmd<Vec<RestoreOutcome>> {
+    let engine = shared.engine.clone();
+    blocking(move || {
+        engine.restore_run_derived(&run_id, derived, &|v| {
+            let _ = app.emit("item-updated", v);
+        })
+    })
+    .await
+}
+
+#[tauri::command]
 fn pin_run(shared: State<'_, Shared>, run_id: String, pinned: bool) {
     shared.engine.pin_run(&run_id, pinned);
 }
@@ -269,6 +483,27 @@ fn image_response(status: StatusCode, mime: &str, body: Vec<u8>) -> Response<Vec
         .expect("static response parts are valid")
 }
 
+/// Answers one `acimg` request: the whole image or one crop of it, or a bare 404 for anything
+/// that is not exactly one of those.
+fn serve_image(shared: &Shared, path: &str) -> Response<Vec<u8>> {
+    let empty = |status| image_response(status, "text/plain", Vec::new());
+    let Some(image) = crate::parse_image_path(path, &shared.token) else {
+        return empty(StatusCode::NOT_FOUND);
+    };
+    let result = match image {
+        crate::ImagePath::Whole(id, kind) => shared.engine.image_bytes(id, kind),
+        crate::ImagePath::Crop(id, crop, kind) => shared.engine.crop_image_bytes(id, crop, kind),
+    };
+    match result {
+        Ok((bytes, mime)) if bytes.len() <= MAX_BODY => {
+            image_response(StatusCode::OK, mime, bytes.as_ref().clone())
+        }
+        Ok(_) => empty(StatusCode::PAYLOAD_TOO_LARGE),
+        Err(ErrKind::NoCrop) => empty(StatusCode::NOT_FOUND),
+        Err(_) => empty(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
 pub fn run() {
     // Packaged builds keep the HEIC plugin folder beside the executable; set before any decode.
     auto_crop_engine::packaged::configure_heif_from_exe();
@@ -296,25 +531,7 @@ pub fn run() {
             let path = request.uri().path().to_owned();
             // Rendering can take tens of milliseconds; never block the webview's thread.
             std::thread::spawn(move || {
-                let response = match crate::parse_image_path(&path, &shared.token) {
-                    None => image_response(StatusCode::NOT_FOUND, "text/plain", Vec::new()),
-                    Some((id, kind)) => match shared.engine.image_bytes(id, kind) {
-                        Ok((bytes, mime)) if bytes.len() <= MAX_BODY => {
-                            image_response(StatusCode::OK, mime, bytes.as_ref().clone())
-                        }
-                        Ok(_) => {
-                            image_response(StatusCode::PAYLOAD_TOO_LARGE, "text/plain", Vec::new())
-                        }
-                        Err(ErrKind::NoCrop) => {
-                            image_response(StatusCode::NOT_FOUND, "text/plain", Vec::new())
-                        }
-                        Err(_) => image_response(
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            "text/plain",
-                            Vec::new(),
-                        ),
-                    },
-                };
+                let response = serve_image(&shared, &path);
                 responder.respond(response);
             });
         })
@@ -336,6 +553,26 @@ pub fn run() {
             list_backups,
             restore_file,
             restore_run,
+            set_crop_edit,
+            add_crop,
+            remove_crop,
+            restore_crop,
+            merge_crops,
+            cut_crop,
+            move_crop,
+            use_reading_order,
+            turn_crop,
+            set_crop_angle,
+            flip_crop,
+            revert_crop,
+            redetect,
+            redetect_many,
+            session_undo,
+            session_redo,
+            accept_scan,
+            unaccept_scan,
+            restore_file_derived,
+            restore_run_derived,
             pin_run,
             purge_now,
             open_backups_folder,
