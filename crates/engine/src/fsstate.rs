@@ -131,21 +131,25 @@ mod tests {
 
     #[test]
     fn sync_roots_are_recognised_by_folder_name() {
-        for yes in [
-            r"C:\Users\a\OneDrive\Pictures\a.jpg",
-            r"C:\Users\a\OneDrive - Contoso\a.jpg",
+        let mut yes = vec![
             "/home/a/Dropbox/scans/a.jpg",
             "/Users/a/Library/Mobile Documents/com~apple~CloudDocs/a.jpg",
-            r"G:\Google Drive\a.jpg",
-        ] {
-            assert!(in_sync_root(Path::new(yes)), "{yes}");
+        ];
+        let mut no = vec!["/home/a/photos/a.jpg", "/mnt/onedrivefake/a.jpg"];
+        // A backslash separates components only on Windows.
+        if cfg!(windows) {
+            yes.extend([
+                r"C:\Users\a\OneDrive\Pictures\a.jpg",
+                r"C:\Users\a\OneDrive - Contoso\a.jpg",
+                r"G:\Google Drive\a.jpg",
+            ]);
+            no.push(r"C:\Users\a\Pictures\a.jpg");
         }
-        for no in [
-            "/home/a/photos/a.jpg",
-            r"C:\Users\a\Pictures\a.jpg",
-            "/mnt/onedrivefake/a.jpg",
-        ] {
-            assert!(!in_sync_root(Path::new(no)), "{no}");
+        for p in yes {
+            assert!(in_sync_root(Path::new(p)), "{p}");
+        }
+        for p in no {
+            assert!(!in_sync_root(Path::new(p)), "{p}");
         }
     }
 
