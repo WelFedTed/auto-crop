@@ -193,10 +193,18 @@ input[type=text]{width:100%;min-height:36px;border:1px solid var(--line);border-
     out.push(pts[n - 1].slice()); seg.push(Math.max(0, n - 2));
     return { pts: out, seg: seg };
   }
-  // The point at arc-length fraction t (0..1), measured on the 64-samples-per-segment polyline.
-  function arcPoint(pts, t) {
-    const poly = curvePolyline(pts, ARC_SAMPLES).pts, cum = [0];
-    for (let i = 1; i < poly.length; i++) cum.push(cum[i - 1] + pdist(poly[i - 1], poly[i]));
+  // Arc length is measured on the 64-samples-per-segment polyline in `scale` space ([width, height] of the image in
+  // pixels, so a fraction is uniform in pixels whatever the aspect ratio; the default [1, 1] is normalised space).
+  // The scale changes the parameterisation only, never the shape.
+  function cumulativeLengths(poly, scale) {
+    const sx = scale ? scale[0] : 1, sy = scale ? scale[1] : 1, cum = [0];
+    for (let i = 1; i < poly.length; i++) cum.push(cum[i - 1] + Math.hypot((poly[i][0] - poly[i - 1][0]) * sx, (poly[i][1] - poly[i - 1][1]) * sy));
+    return cum;
+  }
+  function curveLength(pts, scale) { const c = cumulativeLengths(curvePolyline(pts, ARC_SAMPLES).pts, scale); return c[c.length - 1]; }
+  // The point at arc-length fraction t (0..1).
+  function arcPoint(pts, t, scale) {
+    const poly = curvePolyline(pts, ARC_SAMPLES).pts, cum = cumulativeLengths(poly, scale);
     const total = cum[cum.length - 1];
     if (!(total > 0)) return poly[0].slice();
     const target = Math.min(1, Math.max(0, t)) * total;
@@ -417,7 +425,7 @@ input[type=text]{width:100%;min-height:36px;border:1px solid var(--line);border-
         let mx = (pts[0][0] + pts[1][0]) / 2, my = (pts[0][1] + pts[1][1]) / 2;
         if (curved) {
           el('path', { class: 'top', d: pathOf(edgePoly(it, 0, 16).pts) });
-          const m = toPx(arcPoint(edgeCtrl(it, 0).map(toNorm), 0.5)); mx = m[0]; my = m[1];
+          const m = toPx(arcPoint(edgeCtrl(it, 0).map(toNorm), 0.5, [S.W, S.H])); mx = m[0]; my = m[1] - 16 / s;
         } else el('line', { class: 'top', x1: pts[0][0], y1: pts[0][1], x2: pts[1][0], y2: pts[1][1] });
         const t = el('text', { class: 'tl', x: mx, y: my, 'font-size': 13 / s, 'text-anchor': 'middle' });
         t.textContent = 'TOP';
@@ -439,7 +447,7 @@ input[type=text]{width:100%;min-height:36px;border:1px solid var(--line);border-
   function drawCurveHandles(it, k, s) {
     for (let e = 0; e < 4; e++) {
       const inner = it.curves[e];
-      const spots = inner.length ? inner.map((p, m) => ({ p: p, m: m })) : [{ p: toPx(arcPoint(edgeCtrl(it, e).map(toNorm), 0.5)), m: -1 }];
+      const spots = inner.length ? inner.map((p, m) => ({ p: p, m: m })) : [{ p: toPx(arcPoint(edgeCtrl(it, e).map(toNorm), 0.5, [S.W, S.H])), m: -1 }];
       spots.forEach((h) => {
         const picked = S.selC && S.selC.e === e && S.selC.m === h.m;
         el('circle', { class: h.m < 0 ? 'cghost' : 'cdot' + (picked ? ' sel' : ''), cx: h.p[0], cy: h.p[1], r: DOT / s });
@@ -491,7 +499,7 @@ input[type=text]{width:100%;min-height:36px;border:1px solid var(--line);border-
     let hint = '';
     if (S.slices.has('negative')) hint = 'Marked: no document in this image.';
     else if (placing()) { const n = it ? it.pts.length : 0; hint = 'Click corner ' + (n + 1) + ' of 4' + (n === 0 ? ': the TOP-LEFT of the upright item, then clockwise' : '') + '.'; }
-    else if (S.curveMode) hint = 'Curved edges: drag a round handle to bend its edge. Double-click or long-press a curve to add a point; double-click a point or press Delete to remove it. C leaves this mode.';
+    else if (S.curveMode) hint = 'Bend an edge: drag its round handle. Double-click a curve to add a point (details in the panel).';
     else hint = 'Drag a handle, or select one and use the arrow keys. N adds another item. C bends the edges.';
     $('hint').textContent = hint; $('hint2').textContent = '';
     renderCurvePanel();
@@ -586,7 +594,7 @@ input[type=text]{width:100%;min-height:36px;border:1px solid var(--line);border-
     const step = (big ? 10 : fine ? 0.2 : 1) / S.view.s;
     if (S.curveMode && S.selC && it.pts.length === 4) {
       let m = S.selC.m; const e = S.selC.e;
-      if (m < 0) { m = insertCurvePoint(it, e, 0, toPx(arcPoint(edgeCtrl(it, e).map(toNorm), 0.5))); if (m < 0) return; S.selC.m = m; }
+      if (m < 0) { m = insertCurvePoint(it, e, 0, toPx(arcPoint(edgeCtrl(it, e).map(toNorm), 0.5, [S.W, S.H]))); if (m < 0) return; S.selC.m = m; }
       const q = it.curves[e][m];
       it.curves[e][m] = [q[0] + dx * step, q[1] + dy * step];
       changed(); return;
@@ -697,7 +705,7 @@ input[type=text]{width:100%;min-height:36px;border:1px solid var(--line);border-
       let m = +ch.dataset.m;
       const it = S.items[i];
       S.cur = i; S.sel = -1;
-      if (m < 0) { m = insertCurvePoint(it, ce, 0, toPx(arcPoint(edgeCtrl(it, ce).map(toNorm), 0.5))); if (m < 0) return; }
+      if (m < 0) { m = insertCurvePoint(it, ce, 0, toPx(arcPoint(edgeCtrl(it, ce).map(toNorm), 0.5, [S.W, S.H]))); if (m < 0) return; }
       S.selC = { e: ce, m: m };
       const p = toImage(e.clientX, e.clientY), q = it.curves[ce][m];
       drag = { type: 'chandle', i, e: ce, m, ox: q[0] - p[0], oy: q[1] - p[1], moved: false };
