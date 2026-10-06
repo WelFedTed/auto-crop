@@ -21,6 +21,19 @@ Click **Try sample images** to get synthetic receipts and documents with a sprea
 
 Known limits of this slice: JPEG and PNG only (no HEIC yet), EXIF other than orientation is dropped on save, the confidence score is an uncalibrated heuristic, no enhancement, no multi-item splitting, Windows is the only tested platform. The detector is a simple baseline; expect to adjust some crops by hand.
 
+## Try the early command line
+
+The same engine is available headless, for scripts and batch jobs (build from source: `cargo build --release -p auto-crop-cli`, the binary is `auto-crop`; it is not in a release package yet). Commands: `process` (crop, straighten and write), `analyze` (report the detection and its confidence, write nothing), `render` (write one crop to a file you choose), `restore`, `backups list | show | purge` and `doctor`.
+
+```sh
+auto-crop process --dry-run receipts/        # the plan, nothing written
+auto-crop process --suffix _cropped receipts/ # copies beside the originals
+auto-crop process receipts/*.jpg             # replaces the originals after a verified backup...
+auto-crop restore receipts/a.jpg             # ...and puts one back byte for byte
+```
+
+With no output option `process` **overwrites your files**, after saving a verified backup of each one; `--output`, `--suffix` and `--copy` write new files instead, and `--dry-run` writes nothing. Results the detector is not sure about (its confidence is an uncalibrated heuristic) are held: not written, and the run exits 4. A scan with several photos is held unless you pass `--accept-splits` (copies of it are written). It never connects to a network. Known limits: JPEG and PNG only in the standard build (WebP and TIFF open but are never replaced in place), no HEIC unless built with the `heif` feature, no enhancement, and the numbers behind the defaults are provisional. See [docs/cli.md](docs/cli.md) for the reference, what happens to your originals, the exit codes and the JSON run manifest.
+
 ## Planned features
 
 - **Auto crop, rotate, deskew and perspective correction** for phone photos of documents and receipts, flatbed scans, multi-photo scans (split into separate files) and ordinary photos; curved-page dewarping.
@@ -29,7 +42,7 @@ Known limits of this slice: JPEG and PNG only (no HEIC yet), EXIF other than ori
 - **Preview and manual adjustment:** draggable corner handles with a magnifier, rotation dial, before/after, undo and redo, designed for touch screens as well as mouse and keyboard.
 - **Safe overwrite by default:** originals are replaced only after a verified automatic backup, and "Restore original" works even after saving or restarting.
 - **Format conversion**, especially HEIC/HEIF to JPG, and exports to JPEG, PNG, WebP, AVIF, TIFF (including 1-bit CCITT G4), PDF and JPEG XL.
-- **Headless command-line tool** that shares the same engine, for scripting and batch jobs.
+- **Headless command-line tool** that shares the same engine, for scripting and batch jobs (an early version exists, see above).
 - **Fast:** speed and accuracy targets are measured by a benchmark harness before any claim is made.
 
 "All image formats" means a documented support matrix (all common formats plus a long tail), not a literal promise.
@@ -41,6 +54,7 @@ Known limits of this slice: JPEG and PNG only (no HEIC yet), EXIF other than ori
 | [PLAN.md](PLAN.md) | The plan in about ten minutes: scope, decisions, architecture, milestones, risks |
 | [ROADMAP.md](ROADMAP.md) | The living checklist: every task, grouped by milestone and release |
 | [docs/plan/](docs/plan/) | Decision log and eight design documents |
+| [docs/cli.md](docs/cli.md) | The command-line tool: quickstart, reference, what happens to your originals, exit codes, run manifest |
 | [docs/research/](docs/research/README.md) | Research and fact-check snapshots behind the decisions |
 
 ## Install

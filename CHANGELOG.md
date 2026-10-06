@@ -3,6 +3,17 @@
 ## Unreleased
 
 - The package README no longer calls itself a private build once it is published as a pre-release.
+- **The `auto-crop` command line** (not in a release package yet; build it from source). `process` crops and
+  straightens images and, with no output option, replaces the originals after a verified backup; `--output`,
+  `--suffix` and `--copy` write new files instead, `--dry-run` writes nothing, `--manifest` and `--json` give a
+  versioned JSON run manifest. Results below the cut-off (`--triage strict|balanced|aggressive`, default strict),
+  failed detections and scans with several items that were not accepted (`--accept-splits`) are held: not written,
+  exit code 4. `analyze` reports the detection and the confidence without writing, `render` writes one crop to a
+  file without touching the source, `restore` (by file, backup id or run) and `backups list | show | purge`
+  work on the same backup store as the app, and `doctor` checks the machine (AVX2 floor, memory, decoders, the
+  store). Ctrl+C stops cleanly (exit 130). See [docs/cli.md](docs/cli.md). The engine gains a few small additive
+  calls for it (explicit settings that are never persisted, an engine without start-up housekeeping, saves
+  grouped into a named run, a JPEG quality and a crop margin per run, removing one backup).
 
 ## 0.0.2 (2026-10-05), pre-release, Windows only
 
