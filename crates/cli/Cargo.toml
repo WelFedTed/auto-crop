@@ -9,10 +9,11 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
+build = "build.rs"
 
 [features]
 # HEIC, HEIF and AVIF input (libheif, dav1d and the libde265 plugin; see docs/testing/heif-native.md).
-heif = ["auto-crop-engine/heif"]
+heif = ["auto-crop-engine/heif", "auto-crop-codecs/heif"]
 # The analysis STAND-INs of M1.55 (`--analyse standin-net|standin-canny`); off by default so the
 # default binary has no ONNX Runtime, rten or imageproc code.
 standin-ort = ["auto-crop-engine/standin-ort"]
@@ -22,12 +23,21 @@ standin-canny = ["auto-crop-engine/standin-canny"]
 [dependencies]
 auto-crop-engine = { path = "../engine" }
 auto-crop-core = { path = "../core" }
-serde_json.workspace = true
-
-[dev-dependencies]
+# The output modes that write copies (`--output`, `--suffix`, `--copy`, `render`) decode, render and
+# encode through the same functions the engine's own save path uses.
 auto-crop-codecs = { path = "../codecs" }
 auto-crop-imgproc = { path = "../imgproc" }
+serde.workspace = true
+serde_json.workspace = true
+# Ctrl+C and termination signals set the batch cancel token (M2.49). MIT OR Apache-2.0, no network.
+ctrlc = { version = "3", features = ["termination"] }
+# Same version and features as the engine: RAM and CPU for `doctor`, nothing more.
+sysinfo = { version = "0.37", default-features = false, features = ["system"] }
+
+[dev-dependencies]
 tempfile = "3"
+# The generated WebP and TIFF files of the "never replaced" tests; the feature is on for tests only.
+auto-crop-codecs = { path = "../codecs", features = ["fixtures"] }
 
 [[bin]]
 name = "auto-crop"

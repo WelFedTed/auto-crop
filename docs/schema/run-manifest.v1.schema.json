@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "run-manifest.v1.schema.json",
+  "title": "auto-crop run manifest, version 1",
+  "description": "What `auto-crop process --json` prints and `--manifest FILE` writes (docs/cli.md). Within version 1 fields are only ever added, so a reader must ignore fields it does not know.",
+  "type": "object",
+  "required": ["schema", "v", "tool", "run", "summary", "items", "warnings"],
+  "properties": {
+    "schema": { "const": "auto-crop/run-manifest" },
+    "v": { "const": 1 },
+    "tool": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "auto-crop" },
+        "version": { "type": "string" }
+      }
+    },
+    "run": {
+      "type": "object",
+      "required": ["id", "started", "finished", "dry_run", "cancelled", "exit_code", "exit_name", "options"],
+      "properties": {
+        "id": { "type": "string", "description": "Also the id of the backup run: `auto-crop restore --run ID`." },
+        "started": { "type": "string", "description": "UTC, RFC 3339." },
+        "finished": { "type": "string" },
+        "dry_run": { "type": "boolean" },
+        "cancelled": { "type": "boolean" },
+        "exit_code": { "enum": [0, 1, 2, 3, 4, 5, 6, 130] },
+        "exit_name": { "enum": ["ok", "internal", "usage", "failed", "held", "no_input", "precondition", "cancelled"] },
+        "options": {
+          "type": "object",
+          "required": ["mode", "triage", "cutoff", "split", "profile", "margin_percent", "format", "quality", "accept_splits", "reprocess", "recursive", "jobs"],
+          "properties": {
+            "mode": { "enum": ["in_place", "output", "suffix", "copy"] },
+            "triage": { "enum": ["strict", "balanced", "aggressive"] },
+            "cutoff": { "type": "number", "description": "The effective cut-off on the uncalibrated score." },
+            "split": { "enum": ["auto", "always", "never"] },
+            "profile": { "enum": ["photos", "receipts"] },
+            "margin_percent": { "type": "number" },
+            "format": { "enum": ["keep", "jpg", "png"] },
+            "quality": { "type": ["integer", "null"] },
+            "accept_splits": { "type": "boolean" },
+            "reprocess": { "type": "boolean" },
+            "recursive": { "type": "boolean" },
+            "jobs": { "type": "integer" }
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["items", "saved", "held", "failed", "skipped", "files_written", "ignored_non_image", "links_skipped", "hidden_skipped", "filtered_out", "truncated"],
+      "properties": {
+        "items": { "type": "integer" },
+        "saved": { "type": "integer" },
+        "held": { "type": "integer" },
+        "failed": { "type": "integer" },
+        "skipped": { "type": "integer" },
+        "files_written": { "type": "integer", "description": "Files written, or planned in a dry run." },
+        "ignored_non_image": { "type": "integer" },
+        "links_skipped": { "type": "integer" },
+        "hidden_skipped": { "type": "integer" },
+        "filtered_out": { "type": "integer" },
+        "truncated": { "type": "boolean" }
+      }
+    },
+    "items": { "type": "array", "items": { "$ref": "#/$defs/item" } },
+    "warnings": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "item": {
+      "type": "object",
+      "required": ["index", "input", "status", "code", "reasons", "detail", "confidence", "crops", "split", "written", "outputs", "backup_id", "ms"],
+      "properties": {
+        "index": { "type": "integer", "description": "Position of the input in the run, stable whatever --jobs is." },
+        "input": { "type": "string" },
+        "status": { "enum": ["saved", "held", "failed", "skipped"] },
+        "code": { "type": ["string", "null"], "description": "One registry code for held, failed and skipped items: an engine error name (CORRUPT, DISK_FULL...) or one of the CLI's (LOW_CONFIDENCE, DETECTION_FAILED, SPLIT_HELD, ALREADY_PROCESSED, NOT_REPLACEABLE, UNSUPPORTED_FORMAT, CANCELLED, EXISTS, NOT_FOUND, NO_MATCH, LINK)." },
+        "reasons": { "type": "array", "items": { "type": "string" }, "description": "The detector's hold reasons (PARTIAL_FRAME...) and notices (tiff.multi_page...). Never hold anything by themselves." },
+        "detail": { "type": ["string", "null"], "description": "Text for people; not stable." },
+        "confidence": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["score", "band", "reasons"],
+              "properties": {
+                "score": { "type": "number", "description": "Uncalibrated v0 heuristic, 0 to 1." },
+                "band": { "enum": ["good", "check", "failed"] },
+                "reasons": { "type": "array", "items": { "type": "string" } }
+              }
+            }
+          ]
+        },
+        "crops": { "type": ["integer", "null"], "description": "How many files this image becomes." },
+        "split": { "type": "boolean" },
+        "written": { "type": "boolean", "description": "Files were written (false in a dry run, and for held, failed and skipped items)." },
+        "outputs": { "type": "array", "items": { "$ref": "#/$defs/output" } },
+        "backup_id": { "type": ["string", "null"] },
+        "ms": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["read", "analyse", "write", "total"],
+              "properties": {
+                "read": { "type": "number" },
+                "analyse": { "type": "number" },
+                "write": { "type": "number" },
+                "total": { "type": "number" }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "required": ["path", "bytes", "width", "height", "format"],
+      "properties": {
+        "path": { "type": "string" },
+        "bytes": { "type": ["integer", "null"] },
+        "width": { "type": ["integer", "null"] },
+        "height": { "type": ["integer", "null"] },
+        "format": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

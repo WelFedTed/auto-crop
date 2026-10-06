@@ -1,319 +1,162 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // SPDX-FileCopyrightText: 2026 Auto Crop contributors
 
-//! Headless command-line tool. Pre-alpha: the only command is the developer pipeline of
-//! ROADMAP M1.54.
+//! `auto-crop`: the headless command-line tool (ROADMAP M2.39-M2.49, M2.81). A thin shell over
+//! the engine: it parses the command line, drives `auto-crop-engine`, and reports; detection,
+//! rendering and every write of an original are the engine's. See `docs/cli.md`.
+//!
+//! No network: this binary links no HTTP, TLS or socket crate (`cargo xtask ci-guards`).
 
-use auto_crop_engine::ErrKind;
-use auto_crop_engine::skeleton::standin;
-use auto_crop_engine::skeleton::{self, Analyse, Enhance, Input, Options};
-use std::path::PathBuf;
+mod analyze;
+mod args;
+mod backups;
+mod devpipeline;
+mod doctor;
+mod env;
+mod exit;
+mod glob;
+mod inputs;
+mod manifest;
+mod pipeline;
+mod pool;
+mod process;
+mod render;
+mod report;
+mod restore;
+mod writer;
+
+use args::Command;
+use auto_crop_core::CancelToken;
 use std::process::ExitCode;
 
-fn banner() -> String {
-    format!(
-        "auto-crop {} (pre-alpha, one developer command: dev-pipeline)",
-        env!("CARGO_PKG_VERSION")
-    )
-}
-
-const USAGE: &str = "\
-usage: auto-crop dev-pipeline <file> [options]
-
-Runs one image through the benchmark skeleton (read_probe, decode, proxy, analyse, rectify,
-enhance, encode) and reports per-stage timings. Developer tool: the analyse stage is a STAND-IN
-(classical detector, a random-weight net or Canny + contours) and enhance a PROTOTYPE (grey +
-threshold); output is not a product result.
-
-options:
-  --timings            print the per-stage table with the PROVISIONAL Table A budgets
-  --json               print the report as one JSON line instead of the table
-  --trace              also print `stage_done` tracing events to stderr
-  --out <file>         write the encoded JPEG there (default: nothing is written)
-  --threads <n>        run the parallel kernels on exactly n threads (default: all cores)
-  --enhance <mode>     off | otsu | sauvola (default otsu)
-  --quality <1-100>    JPEG quality (default 90)
-  --analyse <mode>     classical | standin-net | standin-canny (default classical). The two
-                       stand-ins (M1.55) need a build with the cargo features `standin-ort` or
-                       `standin-rten` (net) and `standin-canny`; the net is random-weight, so its
-                       corners are noise and the full frame is rectified: only its timing counts
-  --net-backend <b>    ort | rten (default: ort when built in, else rten). ort loads the pinned
-                       ONNX Runtime from the absolute path in AUTOCROP_ORT_DYLIB or next to the
-                       executable (`cargo xtask fetch-ort` prints it); it is never searched for
-  --net-threads <n>    intra-op threads of the net (default 4)
-  --net <file.onnx>    the stand-in net (default target/standin/quadnet.onnx, made by
-                       `cargo xtask make-standin-net`, checked against its .sha256 sidecar)
-";
-
-#[derive(Debug, PartialEq)]
-struct Args {
-    file: PathBuf,
-    timings: bool,
-    json: bool,
-    trace: bool,
-    out: Option<PathBuf>,
-    threads: Option<usize>,
-    enhance: Enhance,
-    quality: u8,
-    analyse: AnalyseArg,
-    net_backend: Option<String>,
-    net_threads: usize,
-    net: PathBuf,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AnalyseArg {
-    Classical,
-    Net,
-    Canny,
-}
-
-fn parse(args: &[String]) -> Result<Args, String> {
-    let mut it = args.iter();
-    let mut a = Args {
-        file: PathBuf::new(),
-        timings: false,
-        json: false,
-        trace: false,
-        out: None,
-        threads: None,
-        enhance: Enhance::default(),
-        quality: skeleton::BENCH_JPEG_QUALITY,
-        analyse: AnalyseArg::Classical,
-        net_backend: None,
-        net_threads: 4,
-        net: PathBuf::from("target/standin/quadnet.onnx"),
-    };
-    let mut file = None;
-    let value = |it: &mut std::slice::Iter<'_, String>, flag: &str| {
-        it.next()
-            .cloned()
-            .ok_or_else(|| format!("{flag} needs a value"))
-    };
-    while let Some(arg) = it.next() {
-        match arg.as_str() {
-            "--timings" => a.timings = true,
-            "--json" => a.json = true,
-            "--trace" => a.trace = true,
-            "--out" => a.out = Some(PathBuf::from(value(&mut it, "--out")?)),
-            "--threads" => {
-                let n: usize = value(&mut it, "--threads")?
-                    .parse()
-                    .map_err(|_| "--threads needs a whole number".to_owned())?;
-                if n == 0 {
-                    return Err("--threads must be at least 1".to_owned());
-                }
-                a.threads = Some(n);
-            }
-            "--enhance" => {
-                a.enhance = match value(&mut it, "--enhance")?.as_str() {
-                    "off" => Enhance::Off,
-                    "otsu" => Enhance::Otsu,
-                    "sauvola" => Enhance::Sauvola,
-                    other => return Err(format!("unknown --enhance mode `{other}`")),
-                }
-            }
-            "--analyse" => {
-                a.analyse = match value(&mut it, "--analyse")?.as_str() {
-                    "classical" => AnalyseArg::Classical,
-                    "standin-net" => AnalyseArg::Net,
-                    "standin-canny" => AnalyseArg::Canny,
-                    other => {
-                        return Err(format!(
-                            "unknown --analyse mode `{other}` ({})",
-                            Analyse::NAMES
-                        ));
-                    }
-                }
-            }
-            "--net-backend" => {
-                a.net_backend = match value(&mut it, "--net-backend")?.as_str() {
-                    b @ ("ort" | "rten") => Some(b.to_owned()),
-                    other => return Err(format!("unknown --net-backend `{other}` (ort | rten)")),
-                }
-            }
-            "--net-threads" => {
-                a.net_threads = value(&mut it, "--net-threads")?
-                    .parse()
-                    .ok()
-                    .filter(|n| *n >= 1)
-                    .ok_or_else(|| "--net-threads needs a whole number of at least 1".to_owned())?;
-            }
-            "--net" => a.net = PathBuf::from(value(&mut it, "--net")?),
-            "--quality" => {
-                a.quality = value(&mut it, "--quality")?
-                    .parse()
-                    .ok()
-                    .filter(|q| (1..=100).contains(q))
-                    .ok_or_else(|| "--quality needs a number from 1 to 100".to_owned())?;
-            }
-            flag if flag.starts_with("--") => return Err(format!("unknown option `{flag}`")),
-            path => {
-                if file.replace(PathBuf::from(path)).is_some() {
-                    return Err("only one input file is accepted".to_owned());
-                }
-            }
+fn execute(cli: args::Cli) -> u8 {
+    let args::Cli { global, command } = cli;
+    match command {
+        Command::Help(topic) => {
+            print!("{}", args::help(topic));
+            return exit::OK;
         }
+        Command::Version => {
+            print!("{}", doctor::version_text());
+            return exit::OK;
+        }
+        Command::DevPipeline(a) => return devpipeline::run(&a),
+        _ => {}
     }
-    a.file = file.ok_or_else(|| "no input file given".to_owned())?;
-    Ok(a)
-}
-
-fn dev_pipeline(args: &[String]) -> Result<(), String> {
-    let a = parse(args)?;
-    let _trace = a.trace.then(skeleton::trace_to_stderr);
-    let pool = match a.threads {
-        Some(n) => Some(skeleton::thread_pool(n).map_err(|e| e.to_string())?),
-        None => None,
-    };
-    let analyse = match a.analyse {
-        AnalyseArg::Classical => Analyse::Classical,
-        AnalyseArg::Canny => Analyse::StandinCanny,
-        AnalyseArg::Net => {
-            let backend = match &a.net_backend {
-                Some(b) => b.as_str(),
-                None => standin::default_backend().ok_or_else(|| {
-                    "this build has no inference backend: rebuild with --features standin-ort or standin-rten".to_owned()
-                })?,
-            };
-            Analyse::StandinNet(standin::load_net(&a.net, backend, a.net_threads)?)
+    let paths = match env::app_paths(&global) {
+        Ok(p) => p,
+        Err(m) => {
+            eprintln!("error: {m}");
+            return exit::PRECONDITION;
         }
     };
-    let opts = Options {
-        quality: a.quality,
-        enhance: a.enhance,
-        analyse,
-        pool,
-        ..Options::default()
-    };
-    let token = auto_crop_core::CancelToken::never();
-    let out = skeleton::run(Input::Path(&a.file), &opts, &token).map_err(|f| {
-        let done: Vec<_> = f.done.iter().map(|s| s.stage.name()).collect();
-        let hint = if f.kind == ErrKind::Unreadable {
-            " (is the path right?)"
-        } else {
-            ""
-        };
-        format!(
-            "{f} [{:?}]{hint}; finished before it: {}",
-            f.kind,
-            if done.is_empty() {
-                "nothing".to_owned()
+    // Ctrl+C and termination: stop taking new work, finish the file in progress (its commit is
+    // never abandoned half way), report, exit 130.
+    let cancel = CancelToken::new_batch();
+    {
+        let c = cancel.clone();
+        let _ = ctrlc::set_handler(move || {
+            if c.is_cancelled() {
+                eprintln!("\nstill finishing the file in progress; it will stop right after it");
             } else {
-                done.join(", ")
+                c.cancel();
+                eprintln!("\ninterrupted: finishing the file in progress, then stopping");
             }
-        )
-    })?;
-    if let Some(path) = &a.out {
-        std::fs::write(path, &out.bytes)
-            .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+        });
     }
-    if a.json {
-        println!(
-            "{}",
-            serde_json::to_string(&out.report).map_err(|e| e.to_string())?
-        );
-    } else if a.timings {
-        println!("{}", skeleton::format_timings(&out.report));
-    } else {
-        println!(
-            "{}x{} -> {}x{}, {} bytes, {:.0} ms",
-            out.report.source.0,
-            out.report.source.1,
-            out.report.output.0,
-            out.report.output.1,
-            out.report.output_bytes,
-            out.report.total_ms
-        );
+    let env = env::Env {
+        paths,
+        global,
+        cancel,
+    };
+    match command {
+        Command::Process(a) => process::run(*a, &env),
+        Command::Analyze(a) => analyze::run(*a, &env),
+        Command::Render(a) => render::run(*a, &env),
+        Command::Restore(a) => restore::run(a, &env),
+        Command::Backups(c) => backups::run(c, &env),
+        Command::Doctor => doctor::run(&env),
+        Command::Help(_) | Command::Version | Command::DevPipeline(_) => exit::INTERNAL,
     }
-    Ok(())
 }
 
 fn main() -> ExitCode {
     // A packaged build keeps the HEIC plugin folder beside the executable (no-op otherwise).
     auto_crop_engine::packaged::configure_heif_from_exe();
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    match args.first().map(String::as_str) {
-        Some("dev-pipeline") => match dev_pipeline(&args[1..]) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(e) => {
-                eprintln!("error: {e}\n\n{USAGE}");
-                ExitCode::FAILURE
-            }
-        },
-        Some("--help" | "-h" | "help") => {
-            println!("{}\n\n{USAGE}", banner());
-            ExitCode::SUCCESS
+    // Lossy for the rare argument that is not valid Unicode, instead of a panic.
+    let argv: Vec<String> = std::env::args_os()
+        .skip(1)
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    if argv.is_empty() {
+        eprint!("{}", args::help(None));
+        return ExitCode::from(exit::USAGE);
+    }
+    let cli = match args::parse_cli(&argv) {
+        Ok(c) => c,
+        Err(u) => {
+            eprintln!("error: {u}\n\ntry `auto-crop --help`");
+            return ExitCode::from(exit::USAGE);
         }
-        _ => {
-            println!("{}", banner());
-            ExitCode::SUCCESS
+    };
+    match auto_crop_engine::run_isolated(std::panic::AssertUnwindSafe(|| execute(cli))) {
+        Ok(code) => ExitCode::from(code),
+        Err(msg) => {
+            eprintln!("internal error: {msg}");
+            ExitCode::from(exit::INTERNAL)
         }
     }
 }
 
+/// `docs/cli.md` cannot drift from the tool: every option, exit code and code the tool has is in it.
 #[cfg(test)]
-mod tests {
+mod docs {
     use super::*;
 
-    fn v(a: &[&str]) -> Vec<String> {
-        a.iter().map(|s| (*s).to_owned()).collect()
+    const DOC: &str = include_str!("../../../docs/cli.md");
+
+    #[test]
+    fn every_option_of_every_command_is_documented() {
+        for (cmd, _) in args::COMMANDS {
+            for f in args::flags_for(cmd).unwrap() {
+                assert!(
+                    DOC.contains(&format!("--{}", f.name)),
+                    "`--{}` of `{cmd}` is not in docs/cli.md",
+                    f.name
+                );
+                if let Some(c) = f.short {
+                    assert!(
+                        DOC.contains(&format!("-{c}")),
+                        "`-{c}` of `{cmd}` is not in docs/cli.md"
+                    );
+                }
+            }
+            assert!(
+                DOC.contains(&format!("auto-crop {cmd}")),
+                "{cmd} has no usage line"
+            );
+        }
     }
 
     #[test]
-    fn banner_names_the_tool() {
-        assert!(super::banner().starts_with("auto-crop "));
+    fn every_exit_code_and_registry_code_is_documented() {
+        for (code, _) in exit::TABLE {
+            assert!(
+                DOC.contains(&format!("| {code} |")),
+                "exit code {code} is not in the table of docs/cli.md"
+            );
+        }
+        for c in manifest::CODES {
+            assert!(DOC.contains(c), "{c} is not in docs/cli.md");
+        }
     }
 
     #[test]
-    fn options_parse() {
-        let a = parse(&v(&[
-            "p.jpg",
-            "--timings",
-            "--threads",
-            "8",
-            "--enhance",
-            "sauvola",
-            "--out",
-            "o.jpg",
-            "--quality",
-            "75",
-            "--analyse",
-            "standin-net",
-            "--net-backend",
-            "rten",
-            "--net-threads",
-            "2",
-        ]))
-        .unwrap();
-        assert_eq!(a.analyse, AnalyseArg::Net);
-        assert_eq!(a.net_backend.as_deref(), Some("rten"));
-        assert_eq!(a.net_threads, 2);
-        assert_eq!(a.file, PathBuf::from("p.jpg"));
-        assert!(a.timings && !a.json);
-        assert_eq!(a.threads, Some(8));
-        assert_eq!(a.enhance, Enhance::Sauvola);
-        assert_eq!(a.out, Some(PathBuf::from("o.jpg")));
-        assert_eq!(a.quality, 75);
-    }
-
-    #[test]
-    fn bad_options_are_refused() {
-        for bad in [
-            &["--timings"][..],
-            &["a.jpg", "b.jpg"],
-            &["a.jpg", "--threads", "0"],
-            &["a.jpg", "--threads", "x"],
-            &["a.jpg", "--quality", "0"],
-            &["a.jpg", "--quality", "101"],
-            &["a.jpg", "--enhance", "magic"],
-            &["a.jpg", "--out"],
-            &["a.jpg", "--analyse", "magic"],
-            &["a.jpg", "--net-backend", "tract"],
-            &["a.jpg", "--net-threads", "0"],
-            &["a.jpg", "--nope"],
-        ] {
-            assert!(parse(&v(bad)).is_err(), "{bad:?}");
+    fn the_schema_file_names_the_same_exit_codes() {
+        let schema = include_str!("../../../docs/schema/run-manifest.v1.schema.json");
+        for (code, _) in exit::TABLE {
+            assert!(schema.contains(&code.to_string()), "{code}");
+            assert!(schema.contains(exit::name(code)), "{}", exit::name(code));
         }
     }
 }
