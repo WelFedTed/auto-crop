@@ -26,7 +26,7 @@ use serde_json::{Value, json};
 pub type Step = fn(Value) -> Result<Value, ErrKind>;
 
 /// The real migration chain. `STEPS[n - 1]` upgrades version `n` to `n + 1`.
-pub const STEPS: &[Step] = &[v1_to_v2];
+pub const STEPS: &[Step] = &[v1_to_v2, v2_to_v3];
 
 /// `v1 -> v2` (M10.17): adds the `split` block (policy `never`, which is what a single-item state
 /// written before M10 means, profile `photos`, reading order, and `nextId` above every id in
@@ -62,6 +62,16 @@ pub fn v1_to_v2(mut doc: Value) -> Result<Value, ErrKind> {
         );
     }
     obj.insert("version".to_owned(), json!(2));
+    Ok(doc)
+}
+
+/// `v2 -> v3` (curved pages): the schema gains the geometry variant `curved`; nothing a v2
+/// document can say changes meaning, so only the version is raised and the migration is lossless.
+/// The bump exists so that an older build, which has no `curved`, refuses a document that holds
+/// curves (`SchemaTooNew`) instead of half-reading it.
+pub fn v2_to_v3(mut doc: Value) -> Result<Value, ErrKind> {
+    let obj = doc.as_object_mut().ok_or(ErrKind::Corrupt)?;
+    obj.insert("version".to_owned(), json!(3));
     Ok(doc)
 }
 
@@ -232,13 +242,15 @@ mod tests {
             "v1_single_quad",
             "v2_split_three_items",
             "v2_split_manual_order",
+            "v3_curved_receipt",
+            "v3_curved_and_quad",
         ] {
             assert!(names.iter().any(|n| n == want), "missing fixture {want}");
         }
         assert!(
             names
                 .iter()
-                .all(|n| n.starts_with("v1_") || n.starts_with("v2_")),
+                .all(|n| n.starts_with("v1_") || n.starts_with("v2_") || n.starts_with("v3_")),
             "{names:?}"
         );
     }
@@ -252,7 +264,7 @@ mod tests {
             let json = serde_json::to_value(&state).unwrap();
             assert_eq!(migrate_ref(&json).unwrap(), state, "{name}");
             // Canonical current-version documents reserialise byte for byte.
-            if name.starts_with("v2_") {
+            if name.starts_with("v3_") {
                 assert_eq!(json, doc, "{name} is not in canonical form");
             }
             // And the text path agrees.
@@ -310,7 +322,70 @@ mod tests {
         assert!(n >= 2, "fixtures were checked");
         // A document with no version at all (every field optional) is version 1.
         let bare = migrate(json!({})).unwrap();
-        assert_eq!((bare.version, bare.items.len()), (2, 0));
+        assert_eq!((bare.version, bare.items.len()), (EDIT_STATE_VERSION, 0));
+    }
+
+    /// Curved pages: a v2 document migrates to v3 changing nothing but its version, a v3 document
+    /// with curves loads and round-trips, and no curve is lost on the way.
+    #[test]
+    fn v2_documents_migrate_losslessly_to_v3_and_curves_survive() {
+        let mut n = 0;
+        for (name, doc) in fixtures() {
+            if !name.starts_with("v2_") {
+                continue;
+            }
+            n += 1;
+            let migrated = serde_json::to_value(migrate_ref(&doc).unwrap()).unwrap();
+            let mut got = migrated.as_object().unwrap().clone();
+            let mut want = doc.as_object().unwrap().clone();
+            assert_eq!(got.remove("version"), Some(json!(3)), "{name}");
+            want.remove("version");
+            assert_eq!(Value::Object(got), Value::Object(want), "{name}");
+        }
+        assert!(n >= 2);
+        // The step on its own: only the version changes.
+        let v2 = json!({"version": 2, "items": [], "split": {"nextId": 4}});
+        let v3 = v2_to_v3(v2.clone()).unwrap();
+        assert_eq!(
+            v3,
+            json!({"version": 3, "items": [], "split": {"nextId": 4}})
+        );
+        assert_eq!(v2_to_v3(json!(5)), Err(ErrKind::Corrupt));
+
+        for name in ["v3_curved_receipt", "v3_curved_and_quad"] {
+            let doc = fixtures().into_iter().find(|f| f.0 == name).unwrap().1;
+            let s = migrate_ref(&doc).unwrap();
+            assert!(s.has_curved(), "{name}");
+            let c = s.items[0].geometry.curves().expect("curves");
+            assert_eq!(c.validate(), Ok(()), "{name}");
+            assert!(c.top.points().len() >= 3, "{name}: interior points kept");
+        }
+    }
+
+    #[test]
+    fn a_curved_document_with_a_bad_curve_is_corrupt_not_half_read() {
+        let mut doc = fixtures()
+            .into_iter()
+            .find(|f| f.0 == "v3_curved_receipt")
+            .unwrap()
+            .1;
+        // One point in a curve: the 2-point minimum is enforced at load.
+        doc["items"][0]["geometry"]["top"] = json!([{"x": 0.2, "y": 0.05}]);
+        assert_eq!(migrate_ref(&doc), Err(ErrKind::Corrupt));
+        // More than 32 points: the cap.
+        let many: Vec<Value> = (0..33)
+            .map(|i| json!({"x": f64::from(i) / 40.0, "y": 0.0}))
+            .collect();
+        let mut doc = fixtures()
+            .into_iter()
+            .find(|f| f.0 == "v3_curved_receipt")
+            .unwrap()
+            .1;
+        doc["items"][0]["geometry"]["top"] = Value::Array(many);
+        assert_eq!(migrate_ref(&doc), Err(ErrKind::Corrupt));
+        // A v3 document is too new for a build that stops at v2: the rule is unchanged.
+        let too_new = json!({"version": EDIT_STATE_VERSION + 1, "items": []});
+        assert_eq!(migrate_ref(&too_new), Err(ErrKind::SchemaTooNew));
     }
 
     #[test]

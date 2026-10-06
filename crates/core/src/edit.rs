@@ -16,7 +16,11 @@ use serde::{Deserialize, Serialize};
 /// Version 2 (M10.17) adds [`SplitState`]: the split policy, profile, order mode and the next free
 /// [`ItemId`]. A version 1 document migrates by adding the default `split` block, so nothing in it
 /// is lost or reinterpreted.
-pub const EDIT_STATE_VERSION: u32 = 2;
+///
+/// Version 3 (curved pages, `docs/dev/curved-pages.md`) adds the geometry variant `curved`. Nothing
+/// in an older document changes meaning, so v2 -> v3 only raises the version; the bump exists so an
+/// older build refuses a document that holds curves (`SchemaTooNew`) instead of half-reading it.
+pub const EDIT_STATE_VERSION: u32 = 3;
 
 /// Stable id of an item across edits and undo (not render-relevant).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -220,6 +224,16 @@ impl EditState {
         }
     }
 
+    /// The straight outline of the first included item that is a quad or a curved page.
+    pub fn outline_quad(&self) -> Option<QuadWarp> {
+        self.included().find_map(|i| i.geometry.outline_quad())
+    }
+
+    /// An included item is a curved page: it is held for review until the user accepts it.
+    pub fn has_curved(&self) -> bool {
+        self.included().any(|i| i.geometry.is_curved())
+    }
+
     /// The first included item that has a quad: what the single-image UI edits.
     pub fn quad(&self) -> Option<&QuadWarp> {
         self.items
@@ -382,6 +396,18 @@ impl Fnv {
                 self.u8(q.quarter_turns % 4);
                 self.bool(q.mirror);
                 self.f32(q.fine_deg);
+            }
+            Geometry::Curved(c) => {
+                self.u8(3);
+                for curve in c.curves() {
+                    self.u64(curve.points().len() as u64);
+                    for p in curve.points() {
+                        self.f64(p.x);
+                        self.f64(p.y);
+                    }
+                }
+                self.u8(c.quarter_turns % 4);
+                self.bool(c.mirror);
             }
             Geometry::Grid(g) => {
                 self.u8(2);
@@ -615,7 +641,7 @@ mod tests {
             "no splitting unless asked"
         );
         let v = serde_json::to_value(&s).unwrap();
-        assert_eq!(v["version"], 2);
+        assert_eq!(v["version"], EDIT_STATE_VERSION);
         assert_eq!(v["split"]["policy"], "never");
         assert_eq!(v["split"]["orderMode"], "reading");
         // A document without the block still loads (serde(default)).
@@ -669,5 +695,147 @@ mod tests {
         let mut m = s.clone();
         m.margin = MarginPolicy::PaperEdge { margin: 0.02 };
         assert_ne!(m.item_render_hash(ItemId(2)), Some(h2));
+    }
+
+    // ---------------------------------------------------------------- curved pages (schema v3)
+
+    fn curve_pts(p: &[(f64, f64)]) -> crate::curve::Curve {
+        crate::curve::Curve::new(p.iter().map(|&(x, y)| Pt::new(x, y)).collect()).unwrap()
+    }
+
+    fn curved_state() -> EditState {
+        let mut s = EditState::single(QuadWarp::new([
+            Pt::new(0.1, 0.1),
+            Pt::new(0.9, 0.1),
+            Pt::new(0.9, 0.9),
+            Pt::new(0.1, 0.9),
+        ]));
+        let c = crate::curve::CurveWarp {
+            top: curve_pts(&[(0.1, 0.1), (0.5, 0.06), (0.9, 0.1)]),
+            right: curve_pts(&[(0.9, 0.1), (0.94, 0.5), (0.9, 0.9)]),
+            bottom: curve_pts(&[(0.9, 0.9), (0.5, 0.95), (0.1, 0.9)]),
+            left: curve_pts(&[(0.1, 0.9), (0.07, 0.5), (0.1, 0.1)]),
+            quarter_turns: 1,
+            mirror: false,
+        };
+        s.set_item_curves(ItemId(1), c).unwrap();
+        s
+    }
+
+    #[test]
+    fn the_schema_is_v3_and_a_curved_state_round_trips_through_json() {
+        assert_eq!(EDIT_STATE_VERSION, 3);
+        let s = curved_state();
+        assert_eq!(s.version, 3);
+        let json = serde_json::to_string(&s).unwrap();
+        assert_eq!(serde_json::from_str::<EditState>(&json).unwrap(), s);
+        let v = serde_json::to_value(&s).unwrap();
+        assert_eq!(v["items"][0]["geometry"]["type"], "curved");
+        assert_eq!(
+            v["items"][0]["geometry"]["top"].as_array().unwrap().len(),
+            3
+        );
+        assert_eq!(v["items"][0]["geometry"]["quarterTurns"], 1);
+        assert!(s.has_curved());
+        assert!(s.quad().is_none(), "a curved page is not a plain quad");
+        let o = s.outline_quad().unwrap();
+        assert_eq!((o.corners[0], o.quarter_turns), (Pt::new(0.1, 0.1), 1));
+    }
+
+    #[test]
+    fn curves_are_part_of_the_render_hash_and_of_the_item_key() {
+        let base = curved_state();
+        let h0 = base.render_hash();
+        let k0 = base.item_render_hash(ItemId(1)).unwrap();
+        // Moving one interior control point by a hair changes both hashes.
+        let mut moved = base.clone();
+        if let Geometry::Curved(c) = &mut moved.items[0].geometry {
+            let mut p = c.top.points().to_vec();
+            p[1].y += 1e-9;
+            c.top = crate::curve::Curve::new(p).unwrap();
+        }
+        assert_ne!(moved.render_hash(), h0);
+        assert_ne!(moved.item_render_hash(ItemId(1)).unwrap(), k0);
+        // Turns and mirror too; a straight page differs from a curved one.
+        let mut turned = base.clone();
+        if let Geometry::Curved(c) = &mut turned.items[0].geometry {
+            c.quarter_turns = 2;
+        }
+        assert_ne!(turned.render_hash(), h0);
+        let mut straight = base.clone();
+        straight.clear_item_curves(ItemId(1)).unwrap();
+        assert_ne!(straight.render_hash(), h0);
+        // A curved page and its quad never collide: the tags differ.
+        let quad_only = EditState::single(QuadWarp::inset_frame(0.1));
+        assert_ne!(quad_only.render_hash(), h0);
+        // Provenance still does not count.
+        let mut p = base.clone();
+        p.items[0].origin = Origin::AutoThenEdited;
+        assert_eq!(p.render_hash(), h0);
+    }
+
+    #[test]
+    fn undo_and_redo_restore_the_curves_exactly() {
+        use crate::history::History;
+        let quad_state = EditState::single(QuadWarp::inset_frame(0.1));
+        let mut h = History::for_edit(quad_state.clone());
+        let mut next = quad_state.clone();
+        next.curve_item_from_quad(ItemId(1), (4000, 3000)).unwrap();
+        assert!(h.commit("Curve", next.clone()), "adding curves is a change");
+        let mut bent = next.clone();
+        let c = curved_state().items[0].geometry.curves().unwrap().clone();
+        bent.set_item_curves(ItemId(1), c).unwrap();
+        assert!(h.commit("Bend", bent.clone()));
+        assert_eq!(h.undo().unwrap(), &next);
+        assert!(h.current().has_curved());
+        assert_eq!(h.undo().unwrap(), &quad_state);
+        assert!(!h.current().has_curved());
+        assert_eq!(h.redo().unwrap(), &next);
+        assert_eq!(h.redo().unwrap(), &bent);
+    }
+
+    proptest::proptest! {
+        /// Any valid curved state survives save and load, byte for byte on the second pass.
+        #[test]
+        fn a_curved_state_round_trips(
+            ys in proptest::collection::vec(0.0f64..0.04, 4 * 5),
+            n in 2usize..6,
+            turns in 0u8..4,
+            mirror in proptest::bool::ANY,
+        ) {
+            use crate::curve::{Curve, CurveWarp};
+            let edge = |a: (f64, f64), b: (f64, f64), k: usize| -> Curve {
+                let mut p = vec![Pt::new(a.0, a.1)];
+                for i in 1..n - 1 {
+                    let t = i as f64 / (n - 1) as f64;
+                    // Bow the interior points sideways a little.
+                    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+                    let (nx, ny) = (-dy, dx);
+                    let off = ys[(k * 5 + i) % ys.len()];
+                    p.push(Pt::new(a.0 + dx * t + nx * off, a.1 + dy * t + ny * off));
+                }
+                p.push(Pt::new(b.0, b.1));
+                Curve::new(p).unwrap()
+            };
+            let (tl, tr, br, bl) = ((0.1, 0.1), (0.9, 0.12), (0.88, 0.9), (0.12, 0.88));
+            let warp = CurveWarp {
+                top: edge(tl, tr, 0),
+                right: edge(tr, br, 1),
+                bottom: edge(br, bl, 2),
+                left: edge(bl, tl, 3),
+                quarter_turns: turns,
+                mirror,
+            };
+            proptest::prop_assert_eq!(warp.validate(), Ok(()));
+            let mut s = EditState::single(QuadWarp::new([
+                Pt::new(tl.0, tl.1), Pt::new(tr.0, tr.1), Pt::new(br.0, br.1), Pt::new(bl.0, bl.1),
+            ]));
+            s.set_item_curves(ItemId(1), warp).unwrap();
+            let json = serde_json::to_string(&s).unwrap();
+            let back: EditState = serde_json::from_str(&json).unwrap();
+            proptest::prop_assert_eq!(&back, &s);
+            proptest::prop_assert_eq!(serde_json::to_string(&back).unwrap(), json);
+            proptest::prop_assert_eq!(back.render_hash(), s.render_hash());
+        }
     }
 }

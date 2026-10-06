@@ -1,0 +1,138 @@
+---
+source: crates/engine/src/migrate.rs
+expression: state
+---
+{
+  "version": 3,
+  "orientation": {
+    "quarterTurns": 0,
+    "mirror": false
+  },
+  "items": [
+    {
+      "id": 1,
+      "include": true,
+      "geometry": {
+        "type": "curved",
+        "top": [
+          {
+            "x": 0.1,
+            "y": 0.1
+          },
+          {
+            "x": 0.4,
+            "y": 0.08
+          },
+          {
+            "x": 0.45,
+            "y": 0.1
+          }
+        ],
+        "right": [
+          {
+            "x": 0.45,
+            "y": 0.1
+          },
+          {
+            "x": 0.46,
+            "y": 0.5
+          },
+          {
+            "x": 0.45,
+            "y": 0.9
+          }
+        ],
+        "bottom": [
+          {
+            "x": 0.45,
+            "y": 0.9
+          },
+          {
+            "x": 0.3,
+            "y": 0.93
+          },
+          {
+            "x": 0.1,
+            "y": 0.9
+          }
+        ],
+        "left": [
+          {
+            "x": 0.1,
+            "y": 0.9
+          },
+          {
+            "x": 0.09,
+            "y": 0.5
+          },
+          {
+            "x": 0.1,
+            "y": 0.1
+          }
+        ],
+        "quarterTurns": 3,
+        "mirror": true
+      },
+      "enhanceOverride": null,
+      "origin": {
+        "kind": "autoThenEdited"
+      },
+      "confidence": {
+        "score": 0.96875,
+        "forced": null,
+        "reasons": []
+      }
+    },
+    {
+      "id": 2,
+      "include": true,
+      "geometry": {
+        "type": "quad",
+        "corners": [
+          {
+            "x": 0.55,
+            "y": 0.1
+          },
+          {
+            "x": 0.9,
+            "y": 0.1
+          },
+          {
+            "x": 0.9,
+            "y": 0.9
+          },
+          {
+            "x": 0.55,
+            "y": 0.9
+          }
+        ],
+        "quarterTurns": 0,
+        "mirror": false,
+        "fineDeg": 0.0
+      },
+      "enhanceOverride": null,
+      "origin": {
+        "kind": "auto",
+        "pipelineVer": 1
+      },
+      "confidence": {
+        "score": 0.96875,
+        "forced": null,
+        "reasons": []
+      }
+    }
+  ],
+  "margin": {
+    "kind": "paperEdge",
+    "margin": 0.0
+  },
+  "enhance": {
+    "mode": "original"
+  },
+  "split": {
+    "policy": "always",
+    "profile": "photos",
+    "orderMode": "reading",
+    "nextId": 3
+  }
+}

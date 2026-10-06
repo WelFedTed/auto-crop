@@ -9,6 +9,7 @@
 //! the stored pixel layout again; [`ExifOrientation`] converts between the two spaces for the
 //! decoders and for tests.
 
+use crate::curve::CurveWarp;
 use crate::error::ErrKind;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -256,6 +257,27 @@ impl QuadWarp {
         self
     }
 
+    /// The same crop with the fine rotation baked into the corners: they are turned about their
+    /// centre by `fine_deg` (clockwise on screen) in the pixels of a `w` x `h` image, exactly as the
+    /// renderer does, and `fine_deg` becomes 0. Used when a straight crop becomes a curved page.
+    pub fn with_fine_baked(&self, w: u32, h: u32) -> QuadWarp {
+        let fine = f64::from(self.fine_deg);
+        let mut out = self.clone();
+        out.fine_deg = 0.0;
+        if fine == 0.0 || w == 0 || h == 0 {
+            return out;
+        }
+        let px = self.corners_px(w, h);
+        let cx = px.iter().map(|p| p.0).sum::<f64>() / 4.0;
+        let cy = px.iter().map(|p| p.1).sum::<f64>() / 4.0;
+        let (s, k) = fine.to_radians().sin_cos();
+        for (c, p) in out.corners.iter_mut().zip(px) {
+            let (dx, dy) = (p.0 - cx, p.1 - cy);
+            *c = Pt::from_px(cx + dx * k - dy * s, cy + dx * s + dy * k, w, h);
+        }
+        out
+    }
+
     /// The corners in pixels of an oriented image of `w` x `h`.
     pub fn corners_px(&self, w: u32, h: u32) -> [(f64, f64); 4] {
         self.corners.map(|c| c.to_px(w, h))
@@ -345,12 +367,40 @@ pub enum Geometry {
     Quad(QuadWarp),
     /// Dense dewarp; shared via `Arc` because a grid is tens of kilobytes.
     Grid(Arc<GridWarp>),
+    /// A page with four editable boundary curves (`docs/dev/curved-pages.md`), flattened with a
+    /// Coons patch. Never proposed by the detector: it exists only through the edit API, and it is
+    /// held for review until the user accepts it. Edited through its curves only.
+    Curved(CurveWarp),
 }
 
 impl Geometry {
+    /// The plain quad, for `Quad` only. A curved page has no plain quad: use
+    /// [`Geometry::outline_quad`] for its corners.
     pub fn quad(&self) -> Option<&QuadWarp> {
         match self {
             Geometry::Quad(q) => Some(q),
+            _ => None,
+        }
+    }
+
+    /// The curves of a `Curved` geometry.
+    pub fn curves(&self) -> Option<&CurveWarp> {
+        match self {
+            Geometry::Curved(c) => Some(c),
+            _ => None,
+        }
+    }
+
+    pub fn is_curved(&self) -> bool {
+        matches!(self, Geometry::Curved(_))
+    }
+
+    /// The straight quad of a page: the quad itself, or the corners (with the turns and mirror) of
+    /// a curved page. What the views show as the page outline. `None` for identity and grids.
+    pub fn outline_quad(&self) -> Option<QuadWarp> {
+        match self {
+            Geometry::Quad(q) => Some(q.clone()),
+            Geometry::Curved(c) => Some(c.outline()),
             _ => None,
         }
     }

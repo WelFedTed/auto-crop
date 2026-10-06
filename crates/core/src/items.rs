@@ -7,11 +7,18 @@
 //! [`EditState`] and the oriented source size; none touches pixels, files or history, so the
 //! caller commits the result as one undo step.
 //!
+//! Curved pages (`Geometry::Curved`) are edited only through [`EditState::set_item_curves`],
+//! [`EditState::curve_item_from_quad`] and [`EditState::clear_item_curves`]. Of the operations
+//! below, turn and flip handle a curved item (they only change its turns and mirror); merge, cut,
+//! the corner edit and the fine angle REFUSE it with [`ItemsError::Curved`] (code `ITEM_OP`), so a
+//! curved item can never silently lose its curves to a quad operation.
+//!
 //! Invariants every operation keeps (and the property tests check): ids are unique, an id is never
 //! reused ([`EditState::alloc_item_id`]), the output order is the order of `items`, an excluded
 //! item stays in the list so it can be restored, and no operation yields more than [`MAX_ITEMS`]
 //! items or a quad that cannot be warped.
 
+use crate::curve::CurveWarp;
 use crate::edit::{EditState, Item, ItemId, OrderMode, Origin};
 use crate::geometry::{Geometry, Pt, QuadWarp};
 use crate::{Confidence, ErrKind};
@@ -47,13 +54,17 @@ pub enum ItemsError {
     NotInBaseline(ItemId),
     #[error("the source has no size")]
     NoSize,
+    #[error("the item {0:?} is a curved page: edit its curves instead")]
+    Curved(ItemId),
+    #[error("the curves are not a valid page outline")]
+    BadCurves,
 }
 
 impl ItemsError {
     /// The engine-wide code for this refusal.
     pub fn kind(self) -> ErrKind {
         match self {
-            ItemsError::Degenerate => ErrKind::Degenerate,
+            ItemsError::Degenerate | ItemsError::BadCurves => ErrKind::Degenerate,
             _ => ErrKind::ItemOp,
         }
     }
@@ -253,6 +264,7 @@ pub fn hull_iou(a: &[P], b: &[P]) -> f64 {
 fn item_points(it: &Item, dims: Dims) -> Vec<P> {
     match &it.geometry {
         Geometry::Quad(q) => q.corners_px(dims.0, dims.1).to_vec(),
+        Geometry::Curved(c) => c.outline().corners_px(dims.0, dims.1).to_vec(),
         Geometry::Grid(g) => g.outline.iter().map(|c| c.to_px(dims.0, dims.1)).collect(),
         Geometry::Identity => {
             let (w, h) = (f64::from(dims.0), f64::from(dims.1));
@@ -368,6 +380,7 @@ impl EditState {
         let i = self.item_index(id).ok_or(ItemsError::UnknownItem(id))?;
         match &self.items[i].geometry {
             Geometry::Quad(q) => Ok((i, q.clone())),
+            Geometry::Curved(_) => Err(ItemsError::Curved(id)),
             _ => Err(ItemsError::NotAQuad(id)),
         }
     }
@@ -438,6 +451,10 @@ impl EditState {
         let quad = quad.sanitised();
         quad.check().map_err(|_| ItemsError::Degenerate)?;
         let it = self.item_mut(id).ok_or(ItemsError::UnknownItem(id))?;
+        if it.geometry.is_curved() {
+            // Replacing a curved page by a quad would silently drop its curves.
+            return Err(ItemsError::Curved(id));
+        }
         it.geometry = Geometry::Quad(quad);
         if matches!(it.origin, Origin::Auto { .. }) {
             it.origin = Origin::AutoThenEdited;
@@ -445,6 +462,9 @@ impl EditState {
         Ok(())
     }
 
+    /// Applies `f` to the turns and mirror of a quad or a curved page. `f` sees a quad; for a
+    /// curved page only its turns and mirror are taken back (the curves stay as they are), so `f`
+    /// must not rely on the fine angle (those callers refuse a curved item first).
     fn edit_item_warp(
         &mut self,
         id: ItemId,
@@ -453,6 +473,12 @@ impl EditState {
         let it = self.item_mut(id).ok_or(ItemsError::UnknownItem(id))?;
         match &mut it.geometry {
             Geometry::Quad(q) => f(q),
+            Geometry::Curved(c) => {
+                let mut view = c.outline();
+                f(&mut view);
+                c.quarter_turns = view.quarter_turns % 4;
+                c.mirror = view.mirror;
+            }
             _ => return Err(ItemsError::NotAQuad(id)),
         }
         if matches!(it.origin, Origin::Auto { .. }) {
@@ -474,6 +500,10 @@ impl EditState {
 
     /// Sets one item's fine angle in degrees (clamped to -45..=45).
     pub fn set_item_angle(&mut self, id: ItemId, deg: f32) -> Result<(), ItemsError> {
+        // A curved page has no fine angle: its curves already say how it lies.
+        if self.item(id).is_some_and(|i| i.geometry.is_curved()) {
+            return Err(ItemsError::Curved(id));
+        }
         self.edit_item_warp(id, |q| {
             q.fine_deg = if deg.is_finite() {
                 deg.clamp(-45.0, 45.0)
@@ -486,6 +516,57 @@ impl EditState {
     /// Mirrors one item left to right.
     pub fn flip_item(&mut self, id: ItemId) -> Result<(), ItemsError> {
         self.edit_item_warp(id, |q| q.mirror = !q.mirror)
+    }
+
+    /// Makes `id` a curved page with these boundary curves (the corners become the curves' end
+    /// points). The item must be a quad or already curved; the curves are validated
+    /// ([`CurveWarp::validate`]). An auto item becomes `AutoThenEdited`.
+    pub fn set_item_curves(&mut self, id: ItemId, curves: CurveWarp) -> Result<(), ItemsError> {
+        curves.validate().map_err(|_| ItemsError::BadCurves)?;
+        let it = self.item_mut(id).ok_or(ItemsError::UnknownItem(id))?;
+        if !matches!(it.geometry, Geometry::Quad(_) | Geometry::Curved(_)) {
+            return Err(ItemsError::NotAQuad(id));
+        }
+        let mut curves = curves;
+        curves.quarter_turns %= 4;
+        it.geometry = Geometry::Curved(curves);
+        if matches!(it.origin, Origin::Auto { .. }) {
+            it.origin = Origin::AutoThenEdited;
+        }
+        Ok(())
+    }
+
+    /// Turns a quad item into a curved page whose four edges are straight (the fine angle is
+    /// baked into the corners); the UI then adds points. An item that is already curved is left
+    /// alone.
+    pub fn curve_item_from_quad(&mut self, id: ItemId, dims: Dims) -> Result<(), ItemsError> {
+        check_dims(dims)?;
+        let it = self.item_mut(id).ok_or(ItemsError::UnknownItem(id))?;
+        let q = match &it.geometry {
+            Geometry::Curved(_) => return Ok(()),
+            Geometry::Quad(q) => q.with_fine_baked(dims.0, dims.1),
+            _ => return Err(ItemsError::NotAQuad(id)),
+        };
+        q.check().map_err(|_| ItemsError::Degenerate)?;
+        let curves = CurveWarp::from_quad(&q);
+        curves.validate().map_err(|_| ItemsError::BadCurves)?;
+        it.geometry = Geometry::Curved(curves);
+        if matches!(it.origin, Origin::Auto { .. }) {
+            it.origin = Origin::AutoThenEdited;
+        }
+        Ok(())
+    }
+
+    /// Takes a curved page back to the straight quad through its corners (its turns and mirror
+    /// are kept). A quad item is left alone.
+    pub fn clear_item_curves(&mut self, id: ItemId) -> Result<(), ItemsError> {
+        let it = self.item_mut(id).ok_or(ItemsError::UnknownItem(id))?;
+        match &it.geometry {
+            Geometry::Curved(c) => it.geometry = Geometry::Quad(c.outline()),
+            Geometry::Quad(_) => {}
+            _ => return Err(ItemsError::NotAQuad(id)),
+        }
+        Ok(())
     }
 
     /// Merges two or more included items into one whose quad is the minimum-area rectangle of
@@ -1309,5 +1390,161 @@ mod tests {
             }
             prop_assert!(!h.can_redo());
         }
+    }
+
+    // ---------------------------------------------------------------- curved pages
+
+    fn bulged(x0: f64, y0: f64, x1: f64, y1: f64) -> CurveWarp {
+        let c = |p: &[(f64, f64)]| {
+            crate::curve::Curve::new(p.iter().map(|&(x, y)| Pt::new(x, y)).collect()).unwrap()
+        };
+        let (mx, my) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
+        CurveWarp {
+            top: c(&[(x0, y0), (mx, y0 - 0.02), (x1, y0)]),
+            right: c(&[(x1, y0), (x1 + 0.02, my), (x1, y1)]),
+            bottom: c(&[(x1, y1), (mx, y1 + 0.02), (x0, y1)]),
+            left: c(&[(x0, y1), (x0 - 0.02, my), (x0, y0)]),
+            quarter_turns: 0,
+            mirror: false,
+        }
+    }
+
+    fn curved_two() -> EditState {
+        let mut s = EditState::default();
+        let a = s
+            .add_item(
+                rect(0.1, 0.1, 0.4, 0.4),
+                Origin::Auto { pipeline_ver: 1 },
+                DIMS,
+            )
+            .unwrap();
+        s.add_item(rect(0.55, 0.1, 0.9, 0.4), Origin::Manual, DIMS)
+            .unwrap();
+        s.set_item_curves(a, bulged(0.1, 0.1, 0.4, 0.4)).unwrap();
+        s
+    }
+
+    #[test]
+    fn curves_are_set_validated_cleared_and_never_lost_by_quad_operations() {
+        let mut s = curved_two();
+        let (a, b) = (s.items[0].id, s.items[1].id);
+        let before = s.clone();
+        assert!(s.items[0].geometry.is_curved());
+        // An auto item that was curved counts as edited, so a re-detection keeps it.
+        assert_eq!(s.items[0].origin, Origin::AutoThenEdited);
+
+        // Operations that would drop the curves are refused, typed, and change nothing.
+        let refused: Vec<(&str, Result<(), ItemsError>)> = vec![
+            ("angle", s.clone().set_item_angle(a, 5.0)),
+            (
+                "corner edit",
+                s.clone().edit_item_quad(a, QuadWarp::inset_frame(0.2)),
+            ),
+            ("merge", s.clone().merge_items(&[a, b], DIMS).map(|_| ())),
+            (
+                "cut",
+                s.clone()
+                    .split_item(a, Cut::halves(CutAxis::Vertical), DIMS)
+                    .map(|_| ()),
+            ),
+        ];
+        for (name, r) in refused {
+            assert_eq!(r, Err(ItemsError::Curved(a)), "{name}");
+            assert_eq!(r.unwrap_err().kind(), ErrKind::ItemOp, "{name}");
+        }
+        assert_eq!(s, before, "refused operations change nothing");
+
+        // Turn and flip are handled: only the turns and mirror change, the curves stay.
+        let curves = s.items[0].geometry.curves().unwrap().clone();
+        s.turn_item(a, true).unwrap();
+        s.flip_item(a).unwrap();
+        let after = s.items[0].geometry.curves().unwrap();
+        assert_eq!((after.quarter_turns, after.mirror), (1, true));
+        assert_eq!(after.top, curves.top);
+        assert_eq!(after.left, curves.left);
+        s.turn_item(a, false).unwrap();
+        assert_eq!(s.items[0].geometry.curves().unwrap().quarter_turns, 0);
+
+        // Invalid curves are refused (corners that do not meet).
+        let mut bad = bulged(0.1, 0.1, 0.4, 0.4);
+        bad.right = crate::curve::Curve::new(vec![
+            Pt::new(0.4, 0.1),
+            Pt::new(0.45, 0.2),
+            Pt::new(0.41, 0.4),
+        ])
+        .unwrap();
+        assert_eq!(s.set_item_curves(a, bad), Err(ItemsError::BadCurves));
+        assert_eq!(ItemsError::BadCurves.kind(), ErrKind::Degenerate);
+
+        // Clearing gives the straight quad through the corners, turns kept.
+        s.turn_item(a, true).unwrap();
+        s.clear_item_curves(a).unwrap();
+        let q = s.items[0].geometry.quad().unwrap();
+        assert_eq!(q.corners[2], Pt::new(0.4, 0.4));
+        assert_eq!(q.quarter_turns, 1);
+        // And a quad can be made curved again, straight, with the fine angle baked in.
+        let mut f = EditState::single(QuadWarp::inset_frame(0.1));
+        f.set_item_angle(ItemId(1), 3.0).unwrap();
+        f.curve_item_from_quad(ItemId(1), DIMS).unwrap();
+        let c = f.items[0].geometry.curves().unwrap();
+        assert!(c.is_straight() && c.validate().is_ok());
+        assert_ne!(
+            c.corners()[0],
+            Pt::new(0.1, 0.1),
+            "the angle moved the corners"
+        );
+        // Idempotent on a curved item.
+        let again = f.clone();
+        f.curve_item_from_quad(ItemId(1), DIMS).unwrap();
+        assert_eq!(f, again);
+    }
+
+    #[test]
+    fn a_redetection_keeps_a_curved_item_and_the_ids_are_stable() {
+        let mut s = curved_two();
+        let curved_id = s.items[0].id;
+        let det = vec![auto_item(rect(0.1, 0.1, 0.4, 0.4), 1, None)];
+        s.redetect(det, DIMS).unwrap();
+        let it = s.item(curved_id).unwrap();
+        assert!(
+            it.geometry.is_curved(),
+            "the user's curves survive re-detection"
+        );
+        assert_invariants(&s);
+    }
+
+    #[test]
+    fn a_curved_item_is_never_approved_by_triage() {
+        use crate::confidence::Confidence;
+        use crate::triage::{STRICT_CUTOFF, ScanTriage, scan_triage};
+        let mut s = EditState::default();
+        let a = s
+            .add_item(
+                rect(0.1, 0.1, 0.9, 0.9),
+                Origin::Auto { pipeline_ver: 1 },
+                DIMS,
+            )
+            .unwrap();
+        s.item_mut(a).unwrap().confidence = Some(Confidence {
+            score: 0.99,
+            forced: None,
+            reasons: vec![],
+        });
+        assert_eq!(scan_triage(&s, STRICT_CUTOFF), ScanTriage::Approved);
+        s.set_item_curves(a, bulged(0.1, 0.1, 0.9, 0.9)).unwrap();
+        assert_eq!(
+            scan_triage(&s, STRICT_CUTOFF),
+            ScanTriage::HeldForReview {
+                items_need_check: 1
+            }
+        );
+        // Even a manual curved item, and in the only-item case.
+        s.item_mut(a).unwrap().origin = Origin::Manual;
+        assert_eq!(
+            scan_triage(&s, STRICT_CUTOFF),
+            ScanTriage::HeldForReview {
+                items_need_check: 1
+            }
+        );
     }
 }

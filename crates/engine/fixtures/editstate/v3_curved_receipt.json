@@ -1,0 +1,100 @@
+{
+  "version": 3,
+  "orientation": {
+    "quarterTurns": 0,
+    "mirror": false
+  },
+  "items": [
+    {
+      "id": 1,
+      "include": true,
+      "geometry": {
+        "type": "curved",
+        "top": [
+          {
+            "x": 0.2,
+            "y": 0.05
+          },
+          {
+            "x": 0.35,
+            "y": 0.04
+          },
+          {
+            "x": 0.5,
+            "y": 0.045
+          },
+          {
+            "x": 0.65,
+            "y": 0.05
+          },
+          {
+            "x": 0.8,
+            "y": 0.06
+          }
+        ],
+        "right": [
+          {
+            "x": 0.8,
+            "y": 0.06
+          },
+          {
+            "x": 0.83,
+            "y": 0.5
+          },
+          {
+            "x": 0.79,
+            "y": 0.95
+          }
+        ],
+        "bottom": [
+          {
+            "x": 0.79,
+            "y": 0.95
+          },
+          {
+            "x": 0.5,
+            "y": 0.97
+          },
+          {
+            "x": 0.21,
+            "y": 0.94
+          }
+        ],
+        "left": [
+          {
+            "x": 0.21,
+            "y": 0.94
+          },
+          {
+            "x": 0.18,
+            "y": 0.5
+          },
+          {
+            "x": 0.2,
+            "y": 0.05
+          }
+        ],
+        "quarterTurns": 0,
+        "mirror": false
+      },
+      "enhanceOverride": null,
+      "origin": {
+        "kind": "manual"
+      },
+      "confidence": null
+    }
+  ],
+  "margin": {
+    "kind": "paperEdge",
+    "margin": 0.0
+  },
+  "enhance": {
+    "mode": "original"
+  },
+  "split": {
+    "policy": "never",
+    "profile": "photos",
+    "orderMode": "reading",
+    "nextId": 2
+  }
+}

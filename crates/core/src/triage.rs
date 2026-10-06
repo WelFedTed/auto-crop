@@ -60,18 +60,23 @@ pub enum ScanTriage {
 
 /// The scan-level triage of `state` at `cutoff` (use [`STRICT_CUTOFF`] for the 0.x rule): the
 /// minimum over the included items. An item the user placed or edited counts as reviewed (good);
-/// an auto item with no confidence, or a band other than Good, needs a check.
+/// an auto item with no confidence, or a band other than Good, needs a check. A curved page is
+/// never good here whatever its origin: it is held until the user accepts the scan (the engine's
+/// acceptance, `Engine::accept_scan`), in every triage mode.
 pub fn scan_triage(state: &EditState, cutoff: f32) -> ScanTriage {
     let mut total = 0usize;
     let mut need = 0usize;
-    for it in state.included().filter(|i| i.geometry.quad().is_some()) {
+    for it in state
+        .included()
+        .filter(|i| i.geometry.outline_quad().is_some())
+    {
         total += 1;
         let reviewed = !matches!(it.origin, Origin::Auto { .. });
-        let good = reviewed
-            || it
-                .confidence
-                .as_ref()
-                .is_some_and(|c| c.band(cutoff) == Band::Good);
+        let confident = it
+            .confidence
+            .as_ref()
+            .is_some_and(|c| c.band(cutoff) == Band::Good);
+        let good = !it.geometry.is_curved() && (reviewed || confident);
         if !good {
             need += 1;
         }
