@@ -54,13 +54,13 @@ bytes from the backup. A target that holds somebody else's bytes is never touche
 ## Measured: the kill loop
 
 Windows 11, debug build, four workers, killed child with the child still running in every run (the
-instants are uniform in the first 180 ms after the child's `READY`, widened by random microsecond
-sleeps at every protocol step):
+instants are uniform over a window of four files' worth of the child's work, timed once per run, after
+the child's `READY`; random microsecond sleeps at every protocol step widen the commit windows):
 
 | Kills | Died inside the commit protocol (journal found) | Files checked | Original intact | Verified output | Converted | Restores byte-identical | Violations |
 |---|---|---|---|---|---|---|---|
-| 500 (default run, about 25 s) | 288 | 930 | 276 | 569 | 85 | 654 | 0 |
-| 1,000 (nightly, about 50 s) | 606 | 1,897 | 545 | 1,178 | 174 | 1,352 | 0 |
+| 500 (default run, about 35 s) | 345 | 1,508 | 264 | 994 | 250 | 1,244 | 0 |
+| 1,000 (nightly, about 70 s) | 627 | 3,008 | 518 | 1,967 | 523 | 2,490 | 0 |
 
 A mutated protocol (the output's manifest left unsaved) makes the same loop report 96 violations in 40
 kills, so the checker does fail when it should. Linux and macOS run the same test in CI.

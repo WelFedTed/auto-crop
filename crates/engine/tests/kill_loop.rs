@@ -51,26 +51,25 @@ fn xorshift(state: &mut u64) -> u64 {
 // The child
 // ---------------------------------------------------------------------------------------------
 
-fn jpeg_bytes(seed: u64) -> Vec<u8> {
+/// Every file is unique (the round is part of its bytes), so a hash identifies one file.
+fn jpeg_bytes(seed: u64, round: u64) -> Vec<u8> {
     let mut s = auto_crop_codecs::fixtures::JpegSpec::new(96, 72);
     s.sampling = (2, 2);
     s.quality = 70 + (seed % 25) as u8;
-    s.icc = Some(auto_crop_codecs::fixtures::fake_icc(
-        300 + (seed % 7) as usize,
-    ));
+    s.icc = Some(auto_crop_codecs::fixtures::fake_icc(300 + round as usize));
     s.build()
 }
 
-fn png_bytes(seed: u64) -> Vec<u8> {
+fn png_bytes(seed: u64, round: u64) -> Vec<u8> {
     auto_crop_codecs::fixtures::png_with_icc(
         64 + (seed % 9) as u32,
         48,
-        &auto_crop_codecs::fixtures::fake_icc(200),
+        &auto_crop_codecs::fixtures::fake_icc(200 + round as usize),
     )
 }
 
-fn bmp_bytes(seed: u64) -> Vec<u8> {
-    let (w, h) = (40 + (seed % 5) as u32, 30);
+fn bmp_bytes(seed: u64, round: u64) -> Vec<u8> {
+    let (w, h) = (40 + (round % 60) as u32, 30 + (round / 60) as u32);
     auto_crop_codecs::fixtures::bmp_rgb24(
         w,
         h,
@@ -144,9 +143,9 @@ fn child_kill_worker() {
             let name = format!("r{round}_{kind}.{kind}");
             let s = xorshift(&mut rng);
             let bytes = match kind {
-                "jpg" => jpeg_bytes(s),
-                "png" => png_bytes(s),
-                _ => bmp_bytes(s),
+                "jpg" => jpeg_bytes(s, round),
+                "png" => png_bytes(s, round),
+                _ => bmp_bytes(s, round),
             };
             let path = dir.join(&name);
             // Ground truth first (a copy the engine never sees), then the file, then the marker
@@ -155,23 +154,28 @@ fn child_kill_worker() {
             fs::write(&path, &bytes).unwrap();
             set_mtime(&path);
             fs::write(marks.join(&name), b"").unwrap();
-            let opened = engine.open_paths(std::slice::from_ref(&path), false);
-            let id = opened.ids[0];
-            if engine.analyse(id).unwrap().error.is_some() {
-                continue;
-            }
-            if kind == "bmp" {
-                engine.convert_items_with_faults(&[id], "kill", &hook, &nop);
-                continue;
-            }
-            let aligned = kind == "jpg" && s.is_multiple_of(2);
-            crop(&engine, id, aligned, 0);
-            engine.save_items_with_faults(&[id], SaveTarget::Replace, "kill", &hook);
-            if kind == "jpg" && s.is_multiple_of(3) {
-                // A re-save: a second edit replaces the first output.
-                crop(&engine, id, false, 1);
+            'work: {
+                let opened = engine.open_paths(std::slice::from_ref(&path), false);
+                let id = opened.ids[0];
+                if engine.analyse(id).unwrap().error.is_some() {
+                    break 'work;
+                }
+                if kind == "bmp" {
+                    engine.convert_items_with_faults(&[id], "kill", &hook, &nop);
+                    break 'work;
+                }
+                let aligned = kind == "jpg" && s.is_multiple_of(2);
+                crop(&engine, id, aligned, 0);
                 engine.save_items_with_faults(&[id], SaveTarget::Replace, "kill", &hook);
+                if kind == "jpg" && s.is_multiple_of(3) {
+                    // A re-save: a second edit replaces the first output.
+                    crop(&engine, id, false, 1);
+                    engine.save_items_with_faults(&[id], SaveTarget::Replace, "kill", &hook);
+                }
             }
+            // The parent times this to size its kill window to the machine.
+            println!("AC-FILE");
+            std::io::stdout().flush().unwrap();
         }
         if round > 400 {
             break;
@@ -208,13 +212,19 @@ fn started_names(marks: &Path) -> Vec<String> {
     v
 }
 
-/// One kill: run the child, kill it at a random instant, recover, check.
-fn one_run(iter: u64, base: &Path, t: &mut Tally) {
-    let root = base.join(format!("run{iter}"));
+fn make_root(base: &Path, name: &str) -> PathBuf {
+    let root = base.join(name);
     for sub in ["photos", "orig", "started", "data", "config"] {
         fs::create_dir_all(root.join(sub)).unwrap();
     }
-    let seed = iter.wrapping_mul(0x2545_F491_4F6C_DD1D) ^ 0xA5A5;
+    root
+}
+
+/// Starts the worker on `root` and waits until it says it is ready.
+fn spawn_worker(
+    root: &Path,
+    seed: u64,
+) -> (std::process::Child, BufReader<std::process::ChildStdout>) {
     let exe = std::env::current_exe().unwrap();
     let mut child = Command::new(exe)
         .args([
@@ -223,7 +233,7 @@ fn one_run(iter: u64, base: &Path, t: &mut Tally) {
             "--nocapture",
             "--test-threads=1",
         ])
-        .env("AC_KILL_ROOT", &root)
+        .env("AC_KILL_ROOT", root)
         .env("AC_KILL_SEED", seed.to_string())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -240,10 +250,45 @@ fn one_run(iter: u64, base: &Path, t: &mut Tally) {
             break;
         }
     }
-    // The instant of the kill: anywhere in the first 0..180 ms of work (a debug-build child saves a
-    // file in a few tens of milliseconds, so this covers several saves and every protocol step).
+    (child, out)
+}
+
+/// The width of the kill window in microseconds: a few files' worth of the child's work on this
+/// machine (a debug build on a slow runner needs far longer than a fast desktop), found once by
+/// timing a child that is allowed to finish three files.
+fn kill_window_us() -> u64 {
+    static WINDOW: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *WINDOW.get_or_init(|| {
+        let base = tempfile::tempdir().unwrap();
+        let root = make_root(base.path(), "calibration");
+        let (mut child, mut out) = spawn_worker(&root, 7);
+        let started = std::time::Instant::now();
+        let mut line = String::new();
+        let mut files = 0;
+        while files < 3 {
+            line.clear();
+            if out.read_line(&mut line).unwrap() == 0 {
+                break;
+            }
+            files += u32::from(line.contains("AC-FILE"));
+        }
+        let per_file = started.elapsed().as_micros() as u64 / u64::from(files.max(1));
+        let _ = child.kill();
+        let _ = child.wait();
+        // Four files' worth, never less than the 180 ms of a fast machine.
+        (per_file * 4).clamp(180_000, 8_000_000)
+    })
+}
+
+/// One kill: run the child, kill it at a random instant, recover, check.
+fn one_run(iter: u64, base: &Path, t: &mut Tally) {
+    let root = make_root(base, &format!("run{iter}"));
+    let seed = iter.wrapping_mul(0x2545_F491_4F6C_DD1D) ^ 0xA5A5;
+    let (mut child, out) = spawn_worker(&root, seed);
+    // The instant of the kill: anywhere in the window (a few files of work, so every protocol step
+    // is a possible victim).
     let mut rng = seed | 1;
-    let wait = xorshift(&mut rng) % 180_000;
+    let wait = xorshift(&mut rng) % kill_window_us();
     std::thread::sleep(Duration::from_micros(wait));
     let alive = child.try_wait().unwrap().is_none();
     let _ = child.kill();
@@ -298,7 +343,14 @@ fn one_run(iter: u64, base: &Path, t: &mut Tally) {
         t.files_checked += 1;
         let path = dir.join(&name);
         let hash = blake3_hex(&orig);
-        let saved: Vec<_> = by_hash.get(&hash).cloned().unwrap_or_default();
+        // The backups of this very file (hashes are unique per file, the path is checked too).
+        let saved: Vec<_> = by_hash
+            .get(&hash)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|m| Path::new(&m.original_path) == path)
+            .collect();
         let cur = fs::read(&path).ok();
         let png_twin = path.with_extension("png");
         let is_bmp = name.ends_with(".bmp");
