@@ -4,13 +4,14 @@
 //! The Tauri side: commands, the `acimg` scheme, pickers and drag-and-drop.
 
 use auto_crop_engine::{
-    AppPaths, Cut, DerivedAction, Edit, Engine, ErrKind, ItemView, Notify, OpenSummary, Pt,
-    RestoreMode, RestoreOutcome, RevertTo, SaveOutcome, SaveTarget, SessionStep, Settings,
-    SplitPatch,
+    AppPaths, CurveWarp, Cut, DerivedAction, Edit, Engine, ErrKind, ItemView, Notify, OpenSummary,
+    Pt, RestoreMode, RestoreOutcome, RevertTo, SaveOutcome, SaveTarget, SessionStep, Settings,
+    SplitPatch, Superseded,
 };
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use tauri::http::{Response, StatusCode};
 use tauri::{AppHandle, DragDropEvent, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
@@ -24,6 +25,10 @@ struct Shared {
     /// 128-bit random launch token. It is not a credential: it keeps the image URLs unguessable
     /// by anything but this process's own webview, and it changes every launch.
     token: String,
+    /// Counters of the curve previews: a request that starts while an older one of the same kind
+    /// is still rendering cancels the older one (a drag makes many, only the last matters).
+    live_preview: Arc<AtomicU64>,
+    full_preview: Arc<AtomicU64>,
 }
 
 type Cmd<T> = Result<T, ErrKind>;
@@ -201,6 +206,37 @@ async fn add_crop(
 ) -> Cmd<ItemView> {
     let engine = shared.engine.clone();
     blocking(move || engine.add_crop(id, quad, at)).await?
+}
+
+// ---------------------------------------------------------------- curved pages (ids only)
+
+/// A quad crop becomes a curved page with four straight edges (idempotent on a curved crop).
+#[tauri::command]
+fn curve_from_quad(shared: State<'_, Shared>, id: u32, crop: u32) -> Cmd<ItemView> {
+    shared.engine.curve_from_quad(id, crop)
+}
+
+/// `phase: "live"` validates and returns the view without recording anything (a drag in progress);
+/// anything else is one undo step, and the same `gesture` coalesces a burst of nudges into one.
+#[tauri::command]
+fn set_curves(
+    shared: State<'_, Shared>,
+    id: u32,
+    crop: u32,
+    curves: CurveWarp,
+    phase: String,
+    label: String,
+    gesture: Option<u64>,
+) -> Cmd<ItemView> {
+    shared
+        .engine
+        .set_curves(id, crop, &curves, phase == "live", &label, gesture)
+}
+
+/// A curved crop becomes the straight quad through its corners.
+#[tauri::command]
+fn clear_curves(shared: State<'_, Shared>, id: u32, crop: u32) -> Cmd<ItemView> {
+    shared.engine.clear_curves(id, crop)
 }
 
 #[tauri::command]
@@ -483,9 +519,10 @@ fn image_response(status: StatusCode, mime: &str, body: Vec<u8>) -> Response<Vec
         .expect("static response parts are valid")
 }
 
-/// Answers one `acimg` request: the whole image or one crop of it, or a bare 404 for anything
-/// that is not exactly one of those.
-fn serve_image(shared: &Shared, path: &str) -> Response<Vec<u8>> {
+/// Answers one `acimg` request: the whole image, one crop of it, or the preview of a candidate
+/// curve set (the curves are in `query`), or a bare 404 for anything that is not exactly one of
+/// those.
+fn serve_image(shared: &Shared, path: &str, query: Option<&str>) -> Response<Vec<u8>> {
     let empty = |status| image_response(status, "text/plain", Vec::new());
     let Some(image) = crate::parse_image_path(path, &shared.token) else {
         return empty(StatusCode::NOT_FOUND);
@@ -493,6 +530,29 @@ fn serve_image(shared: &Shared, path: &str) -> Response<Vec<u8>> {
     let result = match image {
         crate::ImagePath::Whole(id, kind) => shared.engine.image_bytes(id, kind),
         crate::ImagePath::Crop(id, crop, kind) => shared.engine.crop_image_bytes(id, crop, kind),
+        crate::ImagePath::CurvePreview(id, crop, kind) => {
+            let Some(curves) = query.and_then(crate::parse_curve_query) else {
+                return empty(StatusCode::BAD_REQUEST);
+            };
+            // A newer preview of the same kind supersedes this one (see `Shared`).
+            let counter = if kind == auto_crop_engine::CropImage::Thumb {
+                &shared.live_preview
+            } else {
+                &shared.full_preview
+            };
+            let token = Superseded::begin(counter);
+            match shared
+                .engine
+                .preview_curves(id, crop, &curves, kind, &token)
+            {
+                // A superseded request is answered with an empty 204; the webview has moved on.
+                Err(ErrKind::Cancelled) => return empty(StatusCode::NO_CONTENT),
+                // The page the person is drawing is not one the renderer accepts (a crossing
+                // outline, a point out of range): nothing to show.
+                Err(ErrKind::Degenerate) => return empty(StatusCode::UNPROCESSABLE_ENTITY),
+                other => other,
+            }
+        }
     };
     match result {
         Ok((bytes, mime)) if bytes.len() <= MAX_BODY => {
@@ -520,6 +580,8 @@ pub fn run() {
     let shared = Shared {
         engine: Engine::new(paths),
         token: random_token(),
+        live_preview: Arc::new(AtomicU64::new(0)),
+        full_preview: Arc::new(AtomicU64::new(0)),
     };
     let for_scheme = shared.clone();
 
@@ -529,9 +591,10 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol("acimg", move |_ctx, request, responder| {
             let shared = for_scheme.clone();
             let path = request.uri().path().to_owned();
+            let query = request.uri().query().map(str::to_owned);
             // Rendering can take tens of milliseconds; never block the webview's thread.
             std::thread::spawn(move || {
-                let response = serve_image(&shared, &path);
+                let response = serve_image(&shared, &path, query.as_deref());
                 responder.respond(response);
             });
         })
@@ -554,6 +617,9 @@ pub fn run() {
             restore_file,
             restore_run,
             set_crop_edit,
+            curve_from_quad,
+            set_curves,
+            clear_curves,
             add_crop,
             remove_crop,
             restore_crop,

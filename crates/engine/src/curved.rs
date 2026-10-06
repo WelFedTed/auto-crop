@@ -26,6 +26,7 @@ use auto_crop_imgproc::cancel::{Cancel, NeverCancel};
 use auto_crop_imgproc::curved::{output_size, render_curved_cancellable};
 use auto_crop_imgproc::render::{Limits, RenderError, render_quad_cancellable};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// What a rendered crop is cut with: a perspective quad or a curved page.
 #[derive(Debug, Clone, PartialEq)]
@@ -218,4 +219,50 @@ pub fn curved_output_pixels(state: &EditState, dims: (u32, u32), cap: u64) -> u6
         .map(|(w, h)| u64::from(w) * u64::from(h))
         .max()
         .unwrap_or(0)
+}
+
+/// A cancellation token for the live preview of a curve drag: it fires as soon as a NEWER request
+/// has begun on the same counter, so a drag that produces many requests only ever finishes the
+/// last one (the resampler polls it once per 64-row band). The shell keeps one counter per kind of
+/// preview.
+#[derive(Debug, Clone)]
+pub struct Superseded {
+    latest: Arc<AtomicU64>,
+    mine: u64,
+}
+
+impl Superseded {
+    /// Starts a request on `latest`: every earlier request that shares it is superseded.
+    pub fn begin(latest: &Arc<AtomicU64>) -> Self {
+        let mine = latest.fetch_add(1, Ordering::SeqCst) + 1;
+        Self {
+            latest: Arc::clone(latest),
+            mine,
+        }
+    }
+}
+
+impl Cancel for Superseded {
+    fn is_cancelled(&self) -> bool {
+        self.latest.load(Ordering::SeqCst) != self.mine
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_newer_request_supersedes_the_older_one() {
+        let counter = Arc::new(AtomicU64::new(0));
+        let first = Superseded::begin(&counter);
+        assert!(!first.is_cancelled());
+        let second = Superseded::begin(&counter);
+        assert!(first.is_cancelled(), "the older request stops");
+        assert!(!second.is_cancelled(), "the newest request runs to the end");
+        // A different counter (the other kind of preview) is independent.
+        let other = Arc::new(AtomicU64::new(0));
+        let third = Superseded::begin(&other);
+        assert!(!third.is_cancelled() && !second.is_cancelled());
+    }
 }
