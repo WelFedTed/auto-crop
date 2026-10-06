@@ -345,10 +345,10 @@ class Store {
   }
 
   // ------------------------------------------------------------------------------------------ one scan
-  async acceptScan(id: number): Promise<boolean> {
+  async acceptScan(id: number, said: string = S.split.acceptedAnnounce): Promise<boolean> {
     try {
       this.upsert(await api.acceptScan(id));
-      this.announce(S.split.acceptedAnnounce);
+      this.announce(said);
       return true;
     } catch (e) {
       this.fail(e);
@@ -356,10 +356,10 @@ class Store {
     }
   }
 
-  async unacceptScan(id: number): Promise<void> {
+  async unacceptScan(id: number, said: string = S.split.withdrawnAnnounce): Promise<void> {
     try {
       this.upsert(await api.unacceptScan(id));
-      this.announce(S.split.withdrawnAnnounce);
+      this.announce(said);
     } catch (e) {
       this.fail(e);
     }

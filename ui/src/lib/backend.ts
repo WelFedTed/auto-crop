@@ -8,10 +8,13 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { curveQuery } from './curve.ts';
 import type {
   Api,
   BackupsView,
   CropImageKind,
+  CurvePreviewKind,
+  CurveSet,
   Cut,
   DerivedAction,
   Edit,
@@ -84,6 +87,11 @@ const tauriApi: Api = {
     invoke<RestoreOutcome>('restore_file_derived', { fileId, mode, derived }),
   restoreRunDerived: (runId: string, derived: DerivedAction) =>
     invoke<RestoreOutcome[]>('restore_run_derived', { runId, derived }),
+
+  curveFromQuad: (id: number, crop: number) => invoke<ItemView>('curve_from_quad', { id, crop }),
+  setCurves: (id: number, crop: number, curves: CurveSet, phase: 'live' | 'end', label: string, gesture: number | null) =>
+    invoke<ItemView>('set_curves', { id, crop, curves, phase, label, gesture }),
+  clearCurves: (id: number, crop: number) => invoke<ItemView>('clear_curves', { id, crop }),
 };
 
 export type Unlisten = () => void;
@@ -92,6 +100,8 @@ interface Impl {
   api: Api;
   imageUrl(kind: ImageKind, id: number, gen: number): string;
   cropImageUrl(kind: CropImageKind, id: number, crop: number, renderKey: string): string;
+  /** The engine's flattened preview of a candidate curve set, rendered without committing anything. */
+  curvePreviewUrl(kind: CurvePreviewKind, id: number, crop: number, curves: CurveSet): string;
   on<K extends keyof Events>(event: K, cb: (payload: Events[K]) => void): Promise<Unlisten>;
   /** Mock only: a file dropped on the window in a plain browser. */
   dropFiles?: (files: File[]) => Promise<OpenSummary>;
@@ -112,6 +122,11 @@ const tauriImpl: Impl = {
   },
   cropImageUrl(kind, id, crop, renderKey) {
     return schemeUrl(`${token}/${id}/crop/${crop}/${kind}?k=${encodeURIComponent(renderKey)}`);
+  },
+  curvePreviewUrl(kind, id, crop, curves) {
+    // The curves ride in the query (digits and commas only); the Rust side parses them strictly and renders from the
+    // display proxy at preview size. Nothing is committed or cached; a newer request cancels an older one.
+    return schemeUrl(`${token}/${id}/crop/${crop}/curve-${kind}?${curveQuery(curves)}`);
   },
   async on(event, cb) {
     const un = await listen<Events[typeof event]>(event, (e) => cb(e.payload));
@@ -178,6 +193,10 @@ export const api: Api = {
   unacceptScan: (id) => impl.api.unacceptScan(id),
   restoreFileDerived: (fileId, mode, derived) => impl.api.restoreFileDerived(fileId, mode, derived),
   restoreRunDerived: (runId, derived) => impl.api.restoreRunDerived(runId, derived),
+
+  curveFromQuad: (id, crop) => impl.api.curveFromQuad(id, crop),
+  setCurves: (id, crop, curves, phase, label, gesture) => impl.api.setCurves(id, crop, curves, phase, label, gesture),
+  clearCurves: (id, crop) => impl.api.clearCurves(id, crop),
 };
 
 /** URL of an image of an item. `gen` is part of the URL so a committed change always reloads. */
@@ -191,6 +210,14 @@ export function imageUrl(kind: ImageKind, id: number, gen: number): string {
  */
 export function cropImageUrl(kind: CropImageKind, id: number, crop: number, renderKey: string): string {
   return impl.cropImageUrl(kind, id, crop, renderKey);
+}
+
+/**
+ * URL of the flattened preview of `curves` for one crop (the engine's `preview_curves`): `thumb` while a handle is
+ * dragged, `result` for the straight-crop comparison. The committed picture is `cropImageUrl`.
+ */
+export function curvePreviewUrl(kind: CurvePreviewKind, id: number, crop: number, curves: CurveSet): string {
+  return impl.curvePreviewUrl(kind, id, crop, curves);
 }
 
 export function onItemsAdded(cb: (s: OpenSummary) => void): Promise<Unlisten> {

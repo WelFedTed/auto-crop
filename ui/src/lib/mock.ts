@@ -23,30 +23,39 @@ import {
   bedSingle,
   canvasFromFile,
   canvasToBlobUrl,
+  canvasToBlobUrlSync,
   defaultEdit,
   detectQuad,
   drawBed,
+  drawCurvedScene,
   drawScene,
   failedPlaceholderEdit,
   insetQuad,
   makeSpec,
   mulberry32,
+  renderCurvedResult,
   renderResult,
   scaleToLongEdge,
   skinnyQuad,
 } from './mock-scene.ts';
+import { curveQuery, validateCurves } from './curve.ts';
+import { curvedDetectedQuad } from './curved-model.ts';
+import { gestureKey, pushEntry } from './history.ts';
 import type { BedSpec, SceneSpec } from './mock-scene.ts';
 import { cloneEdit, type Quad } from './quad.ts';
 import {
   ItemOpError,
   addCrop,
   angleCrop,
+  clearCurves as clearCurvesState,
   cloneState,
   cropViews,
+  curveCrop,
   cutCrop,
   editCrop,
   emptyState,
   flipCrop,
+  hasCurved,
   included,
   isEdited,
   mergeCrops,
@@ -56,6 +65,7 @@ import {
   redetect as redetectState,
   renderSignature,
   revertCrop,
+  setCurves as setCurvesState,
   setInclude,
   splitView,
   toEdit,
@@ -75,6 +85,8 @@ import type {
   BackupsView,
   Confidence,
   CropImageKind,
+  CurvePreviewKind,
+  CurveSet,
   DerivedFile,
   Edit,
   ErrorCode,
@@ -100,6 +112,8 @@ const DAY = 86_400_000;
 interface HistoryEntry {
   state: ScanState;
   label: string;
+  /** `<gesture>:<crop>`: an edit under the same id as the entry at the cursor is merged into it (one undo step). */
+  gesture?: string;
 }
 
 interface MockItem {
@@ -199,6 +213,8 @@ function flipped(c: HTMLCanvasElement): HTMLCanvasElement {
 }
 
 function renderCrop(src: HTMLCanvasElement, c: ModelCrop): HTMLCanvasElement {
+  // A curved page is flattened through its curves (turns and mirror included); a quad goes through the homography.
+  if (c.curves) return renderCurvedResult(src, { ...c.curves, quarterTurns: c.quarterTurns, mirror: c.mirror });
   const out = renderResult(src, toEdit(c));
   return c.mirror ? flipped(out) : out;
 }
@@ -232,14 +248,14 @@ function bandFailed(c: ModelCrop): boolean {
 }
 
 // ---------------------------------------------------------------------------------------------- views
-function viewOf(m: MockItem): ItemView {
-  const state = m.hist.length ? current(m) : emptyState();
-  const crops = m.hist.length ? cropViews(state, { stem: m.stem, ext: m.ext, baseline: m.auto }) : [];
+function viewOf(m: MockItem, shown?: ScanState): ItemView {
+  const state = shown ?? (m.hist.length ? current(m) : emptyState());
+  const ready = m.status === 'ready';
+  const sig = ready ? renderSignature(state) : '';
+  const crops = m.hist.length ? cropViews(state, { stem: m.stem, ext: m.ext, baseline: m.auto, accepted: m.accepted === sig }) : [];
   const first = crops.find((c) => c.include) ?? crops[0] ?? null;
   const cur = m.hist[m.cursor];
   const next = m.hist[m.cursor + 1];
-  const ready = m.status === 'ready';
-  const sig = ready ? renderSignature(state) : '';
   return {
     id: m.id,
     name: m.name,
@@ -372,6 +388,8 @@ interface SampleDef {
   error?: ErrorCode;
   bed?: 'albums' | 'receipts' | 'two' | 'locked';
   openOnly?: string;
+  /** The curved sample: a receipt whose four edges are bent (curved-model.ts). */
+  curved?: boolean;
 }
 
 function sampleDefs(): SampleDef[] {
@@ -416,12 +434,33 @@ function sampleDefs(): SampleDef[] {
     { name: 'ledger_pages.tif', kind: 'document', score: 0.98, forced: null, reasons: [], noise: 0.004, openOnly: 'tiff.multi_page' },
     { name: 'holiday.webp', kind: 'receipt', score: 0.98, forced: null, reasons: [], noise: 0.004, openOnly: 'format.write_unavailable' },
   ];
-  return [...multi, ...defs];
+  // The curved page first: it is the one to try the curved-edges editor on. The detector, like the real one, finds a
+  // rough quad and flags the top and bottom edges.
+  const curved: SampleDef = {
+    name: 'receipt_curved.jpg',
+    kind: 'receipt',
+    score: 0.68,
+    forced: 'check',
+    reasons: [{ code: 'WEAK_EDGE', side: 'top' }, { code: 'WEAK_EDGE', side: 'bottom' }],
+    curved: true,
+  };
+  return [curved, ...multi, ...defs];
 }
 
 async function analyseSample(m: MockItem, d: SampleDef, seed: number): Promise<void> {
   if (d.error) {
     await failAnalysis(m, d.error);
+    return;
+  }
+  if (d.curved) {
+    const src = drawCurvedScene();
+    await finishAnalysis(
+      m,
+      src,
+      src.width * 2,
+      src.height * 2,
+      documentState(defaultEdit(curvedDetectedQuad()), { score: d.score, forced: d.forced, reasons: d.reasons }),
+    );
     return;
   }
   if (d.bed) {
@@ -557,7 +596,7 @@ function refuse(e: unknown): never {
 }
 
 /** Applies `fn` to a copy of the current state and commits the result as ONE undo step. A refusal changes nothing. */
-async function commitOp(m: MockItem, label: (before: ScanState) => string, fn: (s: ScanState) => ScanState): Promise<ItemView> {
+async function commitOp(m: MockItem, label: (before: ScanState) => string, fn: (s: ScanState) => ScanState, gesture?: string): Promise<ItemView> {
   const before = current(m);
   let next: ScanState;
   try {
@@ -567,9 +606,9 @@ async function commitOp(m: MockItem, label: (before: ScanState) => string, fn: (
   }
   await sleep(15 + Math.random() * 25);
   const text = label(before);
-  m.hist = m.hist.slice(0, m.cursor + 1);
-  m.hist.push({ state: next, label: text.slice(0, 60) });
-  m.cursor = m.hist.length - 1;
+  const pushed = pushEntry(m.hist, m.cursor, { state: next, label: text.slice(0, 60), gesture });
+  m.hist = pushed.hist;
+  m.cursor = pushed.cursor;
   return bump(m);
 }
 
@@ -652,7 +691,7 @@ const api: Api = {
   },
   addSamples,
   async listItems() {
-    return [...items.values()].map(viewOf);
+    return [...items.values()].map((m) => viewOf(m));
   },
   async setEdit(id, edit, phase, label) {
     const m = ready(id);
@@ -734,11 +773,14 @@ const api: Api = {
         continue;
       }
       const split = inc.length >= 2;
+      const curved = hasCurved(state);
       const sig = renderSignature(state);
-      if (split && !copy) {
-        const approved = settings.autoSaveSplits && triage(state).kind === 'approved';
+      // A split scan and a curved page are held: Replace needs the person's acceptance of this exact state (a curved
+      // page is never auto-saved). A copy overwrites nothing and needs none.
+      if ((split || curved) && !copy) {
+        const approved = !curved && settings.autoSaveSplits && triage(state).kind === 'approved';
         if (!(m.accepted === sig || approved)) {
-          fail('HELD_FOR_REVIEW', ['split.held']);
+          fail('HELD_FOR_REVIEW', [split ? 'split.held' : 'curved.held']);
           continue;
         }
       }
@@ -876,11 +918,11 @@ const api: Api = {
   },
 
   // ---- multi-item operations ------------------------------------------------------------------------
-  async setCropEdit(id, crop, edit, phase, label, _gesture) {
+  async setCropEdit(id, crop, edit, phase, label, gesture) {
     const m = ready(id);
     if (phase === 'live') {
       const c = current(m).crops.find((x) => x.id === crop);
-      if (!c) throw 'ITEM_OP';
+      if (!c || c.curves) throw 'ITEM_OP';
       return { ...viewOf(m), edit: cloneEdit(edit) };
     }
     const dims = dimsOf(m);
@@ -888,6 +930,7 @@ const api: Api = {
       m,
       (b) => labelled(label, b, crop),
       (s) => editCrop(s, crop, edit, dims),
+      gestureKey(gesture, crop),
     );
   },
   async addCrop(id, quad, at) {
@@ -945,9 +988,9 @@ const api: Api = {
     const m = ready(id);
     return commitOp(m, (b) => labelled(clockwise ? 'Turn right' : 'Turn left', b, crop), (s) => turnCrop(s, crop, clockwise));
   },
-  async setCropAngle(id, crop, deg, _gesture) {
+  async setCropAngle(id, crop, deg, gesture) {
     const m = ready(id);
-    return commitOp(m, (b) => labelled('Straighten', b, crop), (s) => angleCrop(s, crop, deg));
+    return commitOp(m, (b) => labelled('Straighten', b, crop), (s) => angleCrop(s, crop, deg), gestureKey(gesture, crop));
   },
   async flipCrop(id, crop) {
     const m = ready(id);
@@ -998,7 +1041,53 @@ const api: Api = {
     emit('item-updated', v);
     return v;
   },
+
+  // ---- curved pages -------------------------------------------------------------------------------------
+  async curveFromQuad(id, crop) {
+    const m = ready(id);
+    const dims = dimsOf(m);
+    return commitOp(m, (b) => labelled('Curve edges', b, crop), (s) => curveCrop(s, crop, dims));
+  },
+  async setCurves(id, crop, curves, phase, label, gesture) {
+    const m = ready(id);
+    if (phase === 'live') {
+      // Validates and shows what the view would be; nothing is recorded.
+      let next: ScanState;
+      try {
+        next = setCurvesState(current(m), crop, curves);
+      } catch (e) {
+        refuse(e);
+      }
+      return viewOf(m, next);
+    }
+    return commitOp(m, (b) => labelled(label || 'Bend edges', b, crop), (s) => setCurvesState(s, crop, curves), gestureKey(gesture, crop));
+  },
+  async clearCurves(id, crop) {
+    const m = ready(id);
+    return commitOp(m, (b) => labelled('Straighten edges', b, crop), (s) => clearCurvesState(s, crop));
+  },
 };
+
+// ---------------------------------------------------------------------------------------------- curve previews
+const previews = new Map<string, string>();
+
+/** The mock's `preview_curves`: renders the candidate through the canvas flattener; nothing is committed. */
+function mockCurvePreviewUrl(kind: CurvePreviewKind, id: number, _crop: number, curves: CurveSet): string {
+  const m = items.get(id);
+  if (!m?.src || validateCurves(curves) !== null) return ensurePlaceholder();
+  const key = `${id}/${kind}/${curveQuery(curves)}`;
+  const hit = previews.get(key);
+  if (hit) return hit;
+  const url = canvasToBlobUrlSync(renderCurvedResult(m.src, curves, kind === 'thumb' ? 256 : 760));
+  previews.set(key, url);
+  if (previews.size > 40) {
+    const oldest = previews.keys().next().value as string;
+    const gone = previews.get(oldest);
+    previews.delete(oldest);
+    if (gone) setTimeout(() => URL.revokeObjectURL(gone), 8000);
+  }
+  return url;
+}
 
 // ---------------------------------------------------------------------------------------------- backups
 function expiry(createdMs: number): string | null {
@@ -1109,6 +1198,7 @@ export const mockImpl: BackendImpl = {
   api,
   imageUrl: mockImageUrl,
   cropImageUrl: mockCropImageUrl,
+  curvePreviewUrl: mockCurvePreviewUrl,
   async on<K extends keyof Events>(event: K, cb: (payload: Events[K]) => void): Promise<Unlisten> {
     listeners[event].add(cb);
     return () => {

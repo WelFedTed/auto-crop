@@ -23,6 +23,20 @@ export function isSplitScan(item: ItemView): boolean {
   return (item.split?.included ?? 0) >= 2;
 }
 
+/** An included crop is a curved page (it has boundary curves). */
+export function isCurvedScan(item: ItemView): boolean {
+  return item.crops.some((c) => c.include && !!c.curves);
+}
+
+/**
+ * The scan waits for the person's OK before the engine replaces the original: several files from one scan, or a page
+ * flattened from curves. Both are accepted through the engine (`acceptScan`) and the acceptance is bound to the exact
+ * state, so any later edit asks again.
+ */
+export function isHeldScan(item: ItemView): boolean {
+  return isSplitScan(item) || isCurvedScan(item);
+}
+
 /** The editor shows the item layer (chips, overlay) even for a single crop: it is where a missed item is added. */
 export function hasItemLayer(item: ItemView): boolean {
   return item.status === 'ready' && item.crops.length > 0;
@@ -119,6 +133,7 @@ export function collisionNotice(planned: string[], written: string[]): { wanted:
 export type SaveGate =
   | { replace: 'ok' }
   | { replace: 'accept-first' } // a split scan the person has not accepted
+  | { replace: 'accept-curved' } // a curved page the person has not accepted
   | { replace: 'open-only'; reason: string } // never replaced: copy only
   | { replace: 'no-crop' };
 
@@ -135,6 +150,8 @@ export function saveGate(item: ItemView, settings: Pick<Settings, 'autoSaveSplit
     if (item.split?.accepted || (settings.autoSaveSplits && approved)) return { replace: 'ok' };
     return { replace: 'accept-first' };
   }
+  // A curved page is never auto-saved: only the person's acceptance of this exact state lets it replace the original.
+  if (isCurvedScan(item) && !item.split?.accepted) return { replace: 'accept-curved' };
   return { replace: 'ok' };
 }
 
@@ -145,6 +162,8 @@ export type BannerState =
   | { kind: 'ready'; items: number } // every item Good, waiting for the person (default rule)
   | { kind: 'accepted'; items: number }
   | { kind: 'auto'; items: number } // auto-save (Experimental) may write it
+  | { kind: 'curved' } // a curved page, held until accepted
+  | { kind: 'curvedAccepted' }
   | { kind: 'noItems' };
 
 export function bannerState(item: ItemView, settings: Pick<Settings, 'autoSaveSplits'>): BannerState {
@@ -152,7 +171,10 @@ export function bannerState(item: ItemView, settings: Pick<Settings, 'autoSaveSp
   const sp = item.split;
   // Nothing left to write on a scan that is allowed to split: offer Draw items, Treat as one item, Skip.
   if (sp.triage.kind === 'noItems' && sp.policy !== 'never') return { kind: 'noItems' };
-  if (!isSplitScan(item)) return { kind: 'none' };
+  if (!isSplitScan(item)) {
+    if (isCurvedScan(item)) return sp.accepted ? { kind: 'curvedAccepted' } : { kind: 'curved' };
+    return { kind: 'none' };
+  }
   const items = sp.included;
   if (sp.accepted) return { kind: 'accepted', items };
   if (sp.triage.kind === 'heldForReview') return { kind: 'held', items, need: sp.triage.itemsNeedCheck };
@@ -162,10 +184,11 @@ export function bannerState(item: ItemView, settings: Pick<Settings, 'autoSaveSp
 
 /** Whether Save all may write this image without the person looking at it, in the given mode. */
 export function mayAutoSave(item: ItemView, settings: Pick<Settings, 'autoSaveSplits' | 'saveAsCopy'>): boolean {
-  if (!isSplitScan(item)) return true;
+  if (!isHeldScan(item)) return true;
   const sp = item.split;
   if (!sp) return false;
   if (sp.accepted) return true;
+  if (isCurvedScan(item)) return false; // never auto-saved, whatever the settings
   if (sp.triage.kind !== 'approved') return false;
   return settings.autoSaveSplits || settings.saveAsCopy;
 }

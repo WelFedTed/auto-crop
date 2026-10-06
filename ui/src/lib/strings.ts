@@ -4,6 +4,7 @@
 // Every user-visible string lives here (English). The engine returns codes, never prose (B20, PLAN 6.7);
 // this file is the single place that turns a code into words, so a Fluent catalogue can replace it later.
 
+import type { CurveProblem } from './curve.ts';
 import type { ErrorCode, Reason, Side } from './types.ts';
 
 export interface HoldCopy {
@@ -238,6 +239,13 @@ export const NOTICES: Record<string, string> = {
     'This scan is held for review, so nothing was written. Accept the split to replace the original, or use Save as copy.',
   'derived.user_edited':
     'You edited a file from an earlier save, so it was left alone and this set was saved under a new name.',
+  'curved.held':
+    'This curved page is held for review, so nothing was written. Accept the page to replace the original, or use Save as copy.',
+  'jpeg.lossless':
+    'Saved without re-compressing the picture: the crop was cut on the JPEG blocks, so no quality was lost.',
+  'sync.root':
+    'This folder is kept in sync by a cloud service, which can upload a half-written file or undo the swap. Save as copy is safer here.',
+  'convert.same_format': 'This file is already in the target format, so there was nothing to convert.',
 };
 
 const GENERIC_NOTICE = 'Auto Crop added a note to this result.';
@@ -675,6 +683,109 @@ export const S = {
     subtiles: 'Items on this scan',
     strictNote: 'Split scans always use the Strict setting.',
   },
+  // Curved pages: four editable edges, flattened by the engine (docs/dev/curved-pages.md).
+  curved: {
+    modeLabel: 'Page shape',
+    straight: 'Straight',
+    curved: 'Curved',
+    straightHint: 'Four straight edges: a normal crop.',
+    curvedHint: 'Bend the edges of a page that is curved, like a crumpled receipt.',
+    toolbarLabel: 'Curved edges',
+    // the picture
+    viewLabel: 'Result view',
+    flattened: 'Flattened',
+    straightCrop: 'Straight crop',
+    viewFlattenedHint: 'The page flattened from its curved edges',
+    viewStraightHint: 'The same corners with straight edges, for comparison',
+    drawing: 'Drawing…',
+    previewWord: 'Preview',
+    renderedWord: 'Rendered',
+    flattenedAlt: 'Flattened page preview',
+    straightAlt: 'Straight crop preview',
+    // handles
+    handleRole: 'curve handle',
+    pointLabel: (edge: string, n: number, of: number, x: string, y: string) => `${edge}, point ${n} of ${of}, x ${x}%, y ${y}%`,
+    ghostLabel: (edge: string, x: string, y: string) => `${edge}, middle, not yet a point: drag to bend this edge, x ${x}%, y ${y}%`,
+    group: 'Curved edge handles',
+    // actions
+    addPoint: 'Add point',
+    addPointHint: 'Adds a point on the selected edge. Double-click or press and hold on an edge does the same.',
+    removePoint: 'Remove point',
+    removeShort: 'Remove',
+    straightenShort: 'Straighten',
+    resetShort: 'Reset',
+    removePointHint: 'Removes the selected point (Delete). An edge keeps at least its two corners.',
+    straightenEdge: 'Straighten edge',
+    straightenEdgeHint: 'Takes the selected edge back to a straight line.',
+    resetCurves: 'Reset curves',
+    resetCurvesHint: 'All four edges straight again, corners kept.',
+    backToStraight: 'Back to straight',
+    backToStraightHint: 'Leaves curved mode. The page becomes a plain crop again; Undo brings the curves back.',
+    selectedPoint: 'Selected point (% of image)',
+    noSelection: 'Select a handle (Tab, then [ and ] to walk the handles) or double-click an edge to add a point.',
+    keysHelp: 'Arrows nudge 1 px, Shift 10 px, Alt a fraction of a pixel. [ and ] walk the handles, Delete removes a point, Esc deselects.',
+    help: 'Drag the middle of an edge to bend it. Double-click an edge to add a point.',
+    // locked while curved
+    locked: 'Locked while the edges are curved',
+    angleLocked: 'A curved page has no fine angle: its curves already say how it lies. Use Back to straight to rotate by degrees.',
+    mergeCutLocked: 'A curved page cannot be merged or cut. Use Back to straight first.',
+    itemOp: 'That change is not possible on a curved page, so nothing was changed. Back to straight turns it into a plain crop again.',
+    cornersNote: 'Moving a corner carries the two edges that meet there with it.',
+    // honest limits
+    limits: 'Fixes bowed edges and perspective. Wrinkles inside the page stay.',
+    limitsMore: 'Only what the four edges show can be corrected: a page bent about a line whose edges stay straight is not flattened.',
+    // banner and review
+    held: 'Curved page: review, then accept',
+    heldNote: 'The page is flattened from the edges you set. Check the flattened result, then accept. The original is not replaced until you do; Save as copy is always possible.',
+    accepted: 'Curved page accepted',
+    acceptedNote: 'This page can be saved. Any change to its edges asks for your OK again.',
+    accept: 'Accept',
+    withdraw: 'Withdraw OK',
+    tileHeld: 'Curved page: held for review',
+    tileAccepted: 'Curved page: accepted',
+    reasonLine: 'Curved page: review, then accept',
+    whyTitle: 'Curved page',
+    whyCause: 'A page flattened from edges placed by hand is always held for review, so a result you have not looked at is never written over the original.',
+    whyAction: 'Look at the flattened result, then press Accept, or use Back to straight.',
+    curvedBadge: 'Curved',
+    acceptedAnnounce: 'Curved page accepted.',
+    withdrawnAnnounce: 'Acceptance withdrawn.',
+    // history labels: what Undo and Redo name
+    labels: {
+      enter: 'Curve edges',
+      leave: 'Straighten edges',
+      moveCorner: 'Move corner',
+      bendEdge: 'Bend edge',
+      addPoint: 'Add point',
+      removePoint: 'Remove point',
+      straightenEdge: 'Straighten edge',
+      resetCurves: 'Reset curves',
+      editCorner: 'Edit corner',
+    },
+    // announcements
+    entered: 'Curved edges on. Four straight edges to start: drag the handle in the middle of an edge to bend it.',
+    left: 'Back to straight edges. Undo brings the curves back.',
+    pointAdded: (edge: string, n: number) => `Point ${n} added on the ${edge.toLowerCase()}.`,
+    pointRemoved: (edge: string) => `Point removed from the ${edge.toLowerCase()}.`,
+    edgeStraightened: (edge: string) => `${edge} straight again.`,
+    allStraight: 'All four edges straight again.',
+    selected: (label: string) => `${label} selected.`,
+    deselected: 'Handle deselected.',
+    maxPoints: 'That edge already has the most points a curve can have (32).',
+    minPoints: 'An edge keeps at least its two corners.',
+    flattenedUpdated: 'Flattened preview updated.',
+    previewFailed: 'The flattened preview could not be drawn for this shape.',
+    // why a shape is refused (what the engine would answer with DEGENERATE)
+    problems: {
+      points: 'A curve can have 2 to 32 points.',
+      nonFinite: 'A point has no position.',
+      range: 'A point is too far outside the picture.',
+      coincident: 'Two neighbouring points are in the same place. Move one of them.',
+      corners: 'The corners of the edges do not meet.',
+      noArea: 'The outline has no area.',
+      crossing: 'The edges would cross each other, so that change was not applied.',
+    } satisfies Record<CurveProblem, string>,
+  },
   // Saving one scan from the editor (M10.43).
   save: {
     heading: 'SAVE THIS SCAN',
@@ -682,6 +793,7 @@ export const S = {
     replace: 'Replace original',
     saving: 'Saving…',
     acceptFirst: 'Accept the split first, then you can replace the original.',
+    acceptFirstCurved: 'Replace original is off until you accept this curved page. Save as copy needs no OK.',
     openOnly: 'This format is open-only: Save as copy.',
     copyNote: 'A copy goes to the AutoCrop folder next to the scan. The scan is not touched.',
     replaceNote: 'The original is backed up first and can be restored.',

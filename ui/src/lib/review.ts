@@ -4,7 +4,7 @@
 // Pure review logic: tiers from strictness cut-offs (PLAN 6.2.4), filters, sort, counts and what Save all
 // writes. No Svelte, no DOM, so it runs under `node --test`.
 
-import { includedCrops, isSplitScan, mayAutoSave, worstBand } from './items.ts';
+import { includedCrops, isCurvedScan, isHeldScan, isSplitScan, mayAutoSave, worstBand } from './items.ts';
 import type { Confidence, ItemView, Settings } from './types.ts';
 import { FALLBACK_HOLD, S, errorMessage, holdTitle } from './strings.ts';
 
@@ -37,8 +37,8 @@ export function tierOf(item: ItemView, strictness: Strictness): Tier {
   if (item.status === 'error') return 'failed';
   if (item.status === 'analysing') return 'analysing';
   // A scan with several items takes the worst band over its items (always at the Strict cutoff, the engine's
-  // hold rule), so one Check item keeps the whole scan in review.
-  if (isSplitScan(item)) return worstBand(item) ?? 'check';
+  // hold rule), so one Check item keeps the whole scan in review. A curved page is Check until it is accepted.
+  if (isHeldScan(item)) return worstBand(item) ?? 'check';
   if (!item.confidence) {
     // Ready but no detection confidence: a crop the person placed is reviewed (Good); no crop at all is Failed.
     return includedCrops(item).length > 0 ? 'good' : 'failed';
@@ -48,14 +48,14 @@ export function tierOf(item: ItemView, strictness: Strictness): Tier {
 
 /** Failed tile that still shows the untouched original and the "Draw crop" banner. */
 export function needsDrawCrop(item: ItemView, strictness: Strictness): boolean {
-  if (isSplitScan(item)) return false; // its items are fixed one by one
+  if (isHeldScan(item)) return false; // its items are fixed one by one
   return item.status === 'ready' && tierOf(item, strictness) === 'failed' && !item.edited;
 }
 
 /** Whether Accept makes sense: there is an outline, and a Failed item has had a crop drawn. */
 export function canAccept(item: ItemView, strictness: Strictness): boolean {
   if (item.status !== 'ready' || !item.edit) return false;
-  if (isSplitScan(item)) return true; // the person looked at the items: Accept split
+  if (isHeldScan(item)) return true; // the person looked at the items or the curves: Accept
   return tierOf(item, strictness) !== 'failed' || item.edited;
 }
 
@@ -68,7 +68,7 @@ export function needsReview(item: ItemView, strictness: Strictness, decisions: D
   const tier = tierOf(item, strictness);
   if (tier === 'analysing') return false;
   if (item.status === 'error') return false; // nothing to review; shown under Failed
-  if (isSplitScan(item)) {
+  if (isHeldScan(item)) {
     // A split replaces one file with several, so by default every one waits for the person's OK (0.x rule): an
     // edit does not count as an OK, because the engine withdraws an acceptance whenever the items change.
     if (decisions[item.id] === 'skipped' || item.split?.accepted) return false;
@@ -89,7 +89,7 @@ export interface Classified {
 /** The decision to show: a split scan is accepted by the ENGINE (and only while its state is the accepted one). */
 function decisionOf(item: ItemView, decisions: DecisionMap): Decision | null {
   const d = decisions[item.id] ?? null;
-  if (!isSplitScan(item)) return d;
+  if (!isHeldScan(item)) return d;
   if (d === 'skipped') return d;
   return item.split?.accepted ? 'accepted' : null;
 }
@@ -178,7 +178,7 @@ export function saveCandidates(list: Classified[], opts: ReviewOpts = NO_OPTS): 
     if (x.item.openOnly && !opts.saveAsCopy) return false;
     // A scan with several items is written only when it is accepted, or approved and allowed (copy mode, or the
     // Experimental auto-save). Held scans stay unwritten whatever else is true.
-    if (isSplitScan(x.item)) return includedCrops(x.item).length >= 2 && mayAutoSave(x.item, opts);
+    if (isHeldScan(x.item)) return mayAutoSave(x.item, opts);
     if (x.decision === 'accepted') return true;
     if (x.tier === 'good') return true;
     return x.item.edited; // a drawn or adjusted crop counts as reviewed
@@ -193,6 +193,7 @@ export function openOnlyLeftAlone(list: Classified[], opts: ReviewOpts): Classif
 /** One line for a tile: the title of the first reason, or the generic line for the tier. */
 export function reasonLine(item: ItemView, tier: Tier): string | null {
   if (tier === 'good' || tier === 'analysing') return null;
+  if (isCurvedScan(item) && !isSplitScan(item)) return S.curved.reasonLine;
   if (isSplitScan(item)) {
     // the first reason of the first item that needs a look
     const worst = includedCrops(item).find((c) => (c.band ?? 'check') !== 'good');
@@ -237,6 +238,7 @@ export function tileLabel(x: Classified): string {
   const t = S.grid.tileStatus;
   const parts: string[] = [item.name];
   if (isSplitScan(item)) parts.push(S.split.countBadgeLabel(item.split?.included ?? 0));
+  if (isCurvedScan(item)) parts.push(S.curved.curvedBadge.toLowerCase());
   if (item.openOnly) parts.push(S.grid.openOnlyBadge.toLowerCase());
   if (tier === 'analysing') {
     parts.push(t.analysing);

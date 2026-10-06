@@ -72,6 +72,7 @@ export function crop(id: number, order: number, band: Band | null = 'good', patc
     edit: sampleEdit(),
     autoEdit: sampleEdit(),
     mirror: false,
+    curves: null,
     origin: 'auto',
     confidence: { score: band === 'good' ? 0.98 : 0.8, forced: null, reasons: [] },
     band,

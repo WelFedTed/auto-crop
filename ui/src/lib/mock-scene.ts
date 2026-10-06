@@ -5,10 +5,12 @@
 // perspective-distorted paper, text-like bars), and a software perspective warp used as the mock's "engine"
 // result. Browser only (needs canvas); the real app never loads this.
 
+import { arcAt, arcOf, coonsBlend, cornersOf, flatSize, type Scale } from './curve.ts';
+import { CURVED_H, CURVED_W, PAGE_H, PAGE_W, PAGE_X, PAGE_Y, BULGE, SAG, curvedPageCoords, receiptInk } from './curved-model.ts';
 import { applyH, solveHomography, type H, type Pt as PxPt } from './homography.ts';
 import { insetQuad, type Quad } from './quad.ts';
 import { mulberry32 } from './rng.ts';
-import type { Edit, Side } from './types.ts';
+import type { CurveSet, Edit, Side } from './types.ts';
 
 export interface SceneSpec {
   kind: 'receipt' | 'document';
@@ -325,6 +327,120 @@ export function renderResult(src: HTMLCanvasElement, edit: Edit, maxLong = 760):
   g.rotate(theta);
   g.drawImage(warped, -w / 2, -h / 2);
   return out;
+}
+
+/**
+ * The browser mock's stand-in for the engine's curved renderer: flattens `src` through the Coons patch of the four
+ * boundary curves (arc-length parameter, bilinear sampling), then mirrors and turns it. The product renders in Rust;
+ * this only lets the editor be developed and tested in a plain browser.
+ */
+export function renderCurvedResult(src: HTMLCanvasElement, curves: CurveSet, maxLong = 760): HTMLCanvasElement {
+  const sw = src.width;
+  const sh = src.height;
+  const scale: Scale = [sw, sh];
+  const [fw, fh] = flatSize(curves, scale);
+  const k = Math.min(1, maxLong / Math.max(fw, fh, 1));
+  const W = Math.max(8, Math.round(fw * k));
+  const Hh = Math.max(8, Math.round(fh * k));
+  const top = arcOf(curves.top, scale);
+  const right = arcOf(curves.right, scale);
+  const bottom = arcOf(curves.bottom, scale);
+  const left = arcOf(curves.left, scale);
+  const corners = cornersOf(curves);
+  const sd = src.getContext('2d', { willReadFrequently: true })!.getImageData(0, 0, sw, sh).data;
+  const flat = makeCanvas(W, Hh);
+  const fctx = flat.getContext('2d')!;
+  const od = fctx.createImageData(W, Hh);
+  const o = od.data;
+  for (let y = 0; y < Hh; y++) {
+    const v = (y + 0.5) / Hh;
+    const l = arcAt(left, 1 - v);
+    const r = arcAt(right, v);
+    for (let x = 0; x < W; x++) {
+      const u = (x + 0.5) / W;
+      const p = coonsBlend(corners, u, v, arcAt(top, u), arcAt(bottom, 1 - u), l, r);
+      const sx = Math.min(sw - 1.001, Math.max(0, p.x * sw - 0.5));
+      const sy = Math.min(sh - 1.001, Math.max(0, p.y * sh - 0.5));
+      const x0 = sx | 0;
+      const y0 = sy | 0;
+      const fx = sx - x0;
+      const fy = sy - y0;
+      const i00 = (y0 * sw + x0) * 4;
+      const i01 = i00 + sw * 4;
+      const oi = (y * W + x) * 4;
+      for (let ch = 0; ch < 3; ch++) {
+        const t = sd[i00 + ch] * (1 - fx) + sd[i00 + 4 + ch] * fx;
+        const b = sd[i01 + ch] * (1 - fx) + sd[i01 + 4 + ch] * fx;
+        o[oi + ch] = t * (1 - fy) + b * fy;
+      }
+      o[oi + 3] = 255;
+    }
+  }
+  fctx.putImageData(od, 0, 0);
+  const turns = ((curves.quarterTurns % 4) + 4) % 4;
+  if (turns === 0 && !curves.mirror) return flat;
+  const odd = turns % 2 === 1;
+  const out = makeCanvas(odd ? Hh : W, odd ? W : Hh);
+  const g = out.getContext('2d')!;
+  g.translate(out.width / 2, out.height / 2);
+  g.rotate((turns * Math.PI) / 2);
+  if (curves.mirror) g.scale(-1, 1);
+  g.drawImage(flat, -W / 2, -Hh / 2);
+  return out;
+}
+
+/** The curved sample picture (see curved-model.ts): a receipt on a desk with bent edges, 2x2 supersampled. */
+export function drawCurvedScene(): HTMLCanvasElement {
+  const c = makeCanvas(CURVED_W, CURVED_H);
+  const g = c.getContext('2d', { willReadFrequently: true })!;
+  const img = g.createImageData(CURVED_W, CURVED_H);
+  const d = img.data;
+  const rnd = mulberry32(21);
+  const desk = [118, 98, 80];
+  const x0 = Math.max(0, Math.floor(PAGE_X - BULGE - 4));
+  const x1 = Math.min(CURVED_W, Math.ceil(PAGE_X + PAGE_W + BULGE + 4));
+  const y0 = Math.max(0, Math.floor(PAGE_Y - 4));
+  const y1 = Math.min(CURVED_H, Math.ceil(PAGE_Y + PAGE_H + SAG + 4));
+  for (let y = 0; y < CURVED_H; y++) {
+    for (let x = 0; x < CURVED_W; x++) {
+      const n = (rnd() - 0.5) * 8;
+      let col = [...desk];
+      if (x >= x0 && x < x1 && y >= y0 && y < y1) {
+        const acc = [0, 0, 0];
+        let paper = 0;
+        for (const [dx, dy] of [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]]) {
+          const { s, t } = curvedPageCoords(x + dx, y + dy);
+          if (s >= 0 && s <= 1 && t >= 0 && t <= 1) {
+            const ink = receiptInk(s, t);
+            acc[0] += ink[0];
+            acc[1] += ink[1];
+            acc[2] += ink[2];
+            paper++;
+          }
+        }
+        if (paper > 0) {
+          const share = paper / 4;
+          col = col.map((v, i) => v * (1 - share) + (acc[i] / paper) * share);
+        }
+      }
+      const i = (y * CURVED_W + x) * 4;
+      d[i] = Math.min(255, Math.max(0, col[0] + n));
+      d[i + 1] = Math.min(255, Math.max(0, col[1] + n));
+      d[i + 2] = Math.min(255, Math.max(0, col[2] + n));
+      d[i + 3] = 255;
+    }
+  }
+  g.putImageData(img, 0, 0);
+  return c;
+}
+
+/** `canvasToBlobUrl` without the promise: the encode is synchronous anyway (a preview URL is needed at once). */
+export function canvasToBlobUrlSync(c: HTMLCanvasElement, quality = 0.8): string {
+  const data = c.toDataURL('image/jpeg', quality);
+  const bin = atob(data.slice(data.indexOf(',') + 1));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' }));
 }
 
 export function scaleToLongEdge(src: HTMLCanvasElement, longEdge: number): HTMLCanvasElement {

@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Auto Crop contributors
 
 import type { Quad } from './quad.ts';
-import type { Band, Pt } from './types.ts';
+import type { Band, CurveSet, Pt } from './types.ts';
 
 /** One crop as the source view draws it. */
 export interface StageCrop {
@@ -12,6 +12,8 @@ export interface StageCrop {
   quad: Quad;
   include: boolean;
   band: Band | null;
+  /** The boundary curves of a curved page: the outline is drawn through them instead of as a straight quad. */
+  curves?: CurveSet | null;
 }
 
 /** One entry of a popup menu. */

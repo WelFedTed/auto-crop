@@ -14,6 +14,20 @@ export interface Pt {
 
 export type Side = 'top' | 'right' | 'bottom' | 'left';
 
+/**
+ * The four boundary curves of a curved page (docs/dev/curved-pages.md). Each edge is 2 to 32 points in order along
+ * it; the first and last point of every edge ARE the page corners (top: TL to TR, right: TR to BR, bottom: BR to
+ * BL, left: BL to TL). `quarterTurns` and `mirror` act on the flattened page.
+ */
+export interface CurveSet {
+  top: Pt[];
+  right: Pt[];
+  bottom: Pt[];
+  left: Pt[];
+  quarterTurns: number;
+  mirror: boolean;
+}
+
 /** Parameters of a crop. `quad` is TL, TR, BR, BL; `quarterTurns` is 0..3 (clockwise). */
 export interface Edit {
   quad: [Pt, Pt, Pt, Pt];
@@ -90,7 +104,7 @@ export type ErrorCode =
   | 'GROUP_COMMIT_FAILED'
   | 'SAVED_SOURCE_IN_USE'
   | 'HELD_FOR_REVIEW' // not a failure: nothing was written and the scan waits for the person
-  | 'ITEM_OP' // a refused item operation; nothing changed
+  | 'ITEM_OP' // a refused item operation; nothing changed (a corner edit, angle, merge or cut on a curved crop)
   | 'NOT_REPLACEABLE' // the source is never replaced in place; the reason is the notice
   | 'SCHEMA_TOO_NEW'
   | 'CANCELLED'
@@ -121,6 +135,11 @@ export interface CropView {
   /** The detector's proposal for this crop; null for a crop drawn by hand. */
   autoEdit: Edit | null;
   mirror: boolean;
+  /**
+   * The boundary curves of a curved page, else null. `edit` is then the straight outline through the corners, and
+   * the crop is held for review until the scan is accepted (band `check`).
+   */
+  curves: CurveSet | null;
   origin: CropOrigin;
   confidence: Confidence | null;
   /** Band at the Strict cutoff; a crop the person placed or edited counts as reviewed (good). */
@@ -322,6 +341,12 @@ export interface LaunchInfo {
   inputExtensions?: string[];
 }
 
+/**
+ * A curve preview served by the `acimg` scheme (the engine's `preview_curves`, nothing is committed or cached):
+ * `/<token>/<id>/crop/<crop>/curve-<kind>?<curves>`. `thumb` is the small, fast one for a drag in progress.
+ */
+export type CurvePreviewKind = 'thumb' | 'result';
+
 /** Image kinds served by the `acimg` scheme: `/<token>/<id>/<kind>?g=<gen>`. */
 export type ImageKind = 'thumb' | 'src' | 'result';
 /** Crop images: `/<token>/<id>/crop/<crop>/<kind>?k=<renderKey>`. */
@@ -379,6 +404,17 @@ export interface Api {
   unacceptScan(id: number): Promise<ItemView>;
   restoreFileDerived(fileId: string, mode: RestoreMode, derived: DerivedAction): Promise<RestoreOutcome>;
   restoreRunDerived(runId: string, derived: DerivedAction): Promise<RestoreOutcome[]>;
+
+  // ---- curved pages (docs/dev/curved-pages.md). Each edit is ONE undo step and returns the new view. ----
+  /** A quad crop becomes a curved page with four straight edges (idempotent on a curved crop). */
+  curveFromQuad(id: number, crop: number): Promise<ItemView>;
+  /**
+   * Replaces the curves of a quad or curved crop. `phase: 'live'` validates and returns the view without recording
+   * anything; `'end'` records one step, and the same `gesture` id coalesces a burst of nudges into one step.
+   */
+  setCurves(id: number, crop: number, curves: CurveSet, phase: 'live' | 'end', label: string, gesture: number | null): Promise<ItemView>;
+  /** A curved crop becomes the straight quad through its corners ("Back to straight"). */
+  clearCurves(id: number, crop: number): Promise<ItemView>;
 }
 
 /** Events the shell emits (`@tauri-apps/api/event`). */

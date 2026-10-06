@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Auto Crop contributors
 
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { test } from 'node:test';
 import { defaultSettings, patchedSettings } from './settings-defaults.ts';
 import {
@@ -20,6 +20,7 @@ import {
   openOnlyShort,
   retentionText,
 } from './strings.ts';
+import type { CurveProblem } from './curve.ts';
 import type { ReasonCode } from './types.ts';
 
 // Every code in the contract must have copy. The map is typed against `ReasonCode`, so adding a code to
@@ -165,4 +166,76 @@ test('typed error messages are complete and SOURCE_CHANGED matches PLAN 6.7', ()
 test('retention text', () => {
   assert.equal(retentionText(30), '30 days');
   assert.equal(retentionText(null), 'until you delete them');
+});
+
+// ------------------------------------------------------------------------------------------ notices and curves
+
+/** Every notice code the engine can put on a result: its `NOTICE_*` constants and the literals it pushes or returns. */
+function engineNoticeCodes(): string[] {
+  const dir = new URL('../../../crates/engine/src/', import.meta.url);
+  const found = new Set<string>();
+  for (const f of readdirSync(dir).filter((n) => n.endsWith('.rs'))) {
+    const src = readFileSync(new URL(f, dir), 'utf8');
+    for (const m of src.matchAll(/pub const NOTICE_[A-Z_]+: &str = "([a-z_]+\.[a-z_]+)"/g)) found.add(m[1]);
+    for (const m of src.matchAll(/notices(?:\.push\(|\s*=\s*vec!\[)"([a-z_]+\.[a-z_]+)"/g)) found.add(m[1]);
+    for (const m of src.matchAll(/\(ErrKind::HeldForReview, vec!\["([a-z_]+\.[a-z_]+)"/g)) found.add(m[1]);
+    // fsplan's refusals: `Some("tiff.multi_page")` and the `_ => "tiff.multi_page"` arm
+    if (f === 'fsplan.rs') for (const m of src.matchAll(/(?:Some\(|=>\s*)"((?:tiff|format)\.[a-z_]+)"/g)) found.add(m[1]);
+  }
+  return [...found].sort();
+}
+
+test('every notice code the engine can send has its own line (read from crates/engine)', () => {
+  const codes = engineNoticeCodes();
+  for (const known of ['curved.held', 'split.held', 'tiff.multi_page', 'format.write_unavailable', 'derived.user_edited', 'jpeg.lossless', 'sync.root']) {
+    assert.ok(codes.includes(known), `the scan of the engine sources missed ${known}: ${codes.join(', ')}`);
+  }
+  for (const code of codes) {
+    assert.ok(code in NOTICES, `no copy for the notice ${code}`);
+    assert.ok(NOTICES[code].length > 20, code);
+    assert.notEqual(noticeText(code), noticeText('some.future.code'), `${code} falls back to the generic line`);
+  }
+});
+
+test('curved pages: the held notice says what to do, and the limits note is honest', () => {
+  assert.match(NOTICES['curved.held'], /held for review/);
+  assert.match(NOTICES['curved.held'], /Accept the page/);
+  assert.match(NOTICES['curved.held'], /Save as copy/);
+  assert.equal(S.curved.limits, 'Fixes bowed edges and perspective. Wrinkles inside the page stay.');
+  assert.match(S.curved.limitsMore, /four edges/);
+  assert.equal(S.curved.held, 'Curved page: review, then accept');
+  assert.match(S.save.acceptFirstCurved, /Save as copy/);
+  assert.match(S.curved.itemOp, /Back to straight/);
+  assert.match(S.curved.backToStraightHint, /Undo/);
+});
+
+test('every way the engine can refuse a curve set has its own plain sentence (read from crates/core)', () => {
+  // CurveError variant -> the problem the UI names it with (curve.ts `validateCurves`)
+  const problemOf: Record<string, CurveProblem> = {
+    TooFewPoints: 'points',
+    TooManyPoints: 'points',
+    NonFinite: 'nonFinite',
+    CoincidentPoints: 'coincident',
+    OutOfRange: 'range',
+    CornerMismatch: 'corners',
+    SelfIntersecting: 'crossing',
+    NoArea: 'noArea',
+  };
+  for (const v of rustVariants('crates/core/src/curve.rs', 'CurveError')) {
+    const problem = problemOf[v];
+    assert.ok(problem, `CurveError::${v} has no mapping in this test: give it copy and add it here`);
+    assert.ok(S.curved.problems[problem].length > 15, `${v} -> ${problem}`);
+  }
+  for (const text of Object.values(S.curved.problems)) assert.ok(!/DEGENERATE/.test(text));
+});
+
+test('the curved copy has no empty line', () => {
+  const walk = (o: unknown, path: string): void => {
+    if (typeof o === 'string') assert.ok(o.trim().length > 0, path);
+    else if (typeof o === 'function') {
+      const out = (o as (...a: never[]) => unknown)(...(['Top edge', 3, 5, '1.0', '2.0'] as never[]));
+      assert.ok(typeof out === 'string' && out.trim().length > 0, `${path}()`);
+    } else if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) walk(v, `${path}.${k}`);
+  };
+  walk(S.curved, 'S.curved');
 });

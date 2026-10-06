@@ -16,12 +16,14 @@ import {
   cutPieces,
   mergedQuad,
 } from './geometry.ts';
+import { cloneCurves, cornersOf, curvesFromQuad, validateCurves } from './curve.ts';
 import type { Quad } from './quad.ts';
 import type {
   Band,
   Confidence,
   CropOrigin,
   CropView,
+  CurveSet,
   Cut,
   Edit,
   ErrorCode,
@@ -39,6 +41,8 @@ export interface ModelCrop {
   quarterTurns: number;
   fineDeg: number;
   mirror: boolean;
+  /** The four boundary curves of a curved page, else null. Its corners ARE `quad`; its turns and mirror follow the crop's. */
+  curves: CurveSet | null;
   origin: CropOrigin;
   confidence: Confidence | null;
 }
@@ -71,6 +75,7 @@ export function cloneCrop(c: ModelCrop): ModelCrop {
   return {
     ...c,
     quad: c.quad.map((p) => ({ x: p.x, y: p.y })) as Quad,
+    curves: c.curves ? cloneCurves(c.curves) : null,
     confidence: c.confidence ? { ...c.confidence, reasons: c.confidence.reasons.map((r) => ({ ...r })) } : null,
   };
 }
@@ -86,9 +91,16 @@ export function bandOf(c: Confidence, cutoff = STRICT): Band {
   return 'good';
 }
 
-export function cropBand(c: ModelCrop): Band | null {
+/** A curved page is held (Check) until the person accepts this exact state; any other crop the person placed or edited is reviewed. */
+export function cropBand(c: ModelCrop, accepted = false): Band | null {
+  if (c.curves) return accepted ? 'good' : 'check';
   if (c.origin !== 'auto') return 'good'; // placed or edited by the person: reviewed
   return c.confidence ? bandOf(c.confidence) : null;
+}
+
+/** True when any included crop is a curved page: the scan is held for review and accepted through the engine. */
+export function hasCurved(s: ScanState): boolean {
+  return included(s).some((c) => !!c.curves);
 }
 
 export function included(s: ScanState): ModelCrop[] {
@@ -122,18 +134,25 @@ export function outputNames(stem: string, ext: string, total: number): string[] 
 /** Everything that decides the pixels: acceptance and the render key are tied to it. */
 export function renderSignature(s: ScanState): string {
   return JSON.stringify(
-    s.crops.map((c) => [c.id, c.include, c.quad.map((p) => [round(p.x), round(p.y)]), c.quarterTurns, c.fineDeg, c.mirror]),
+    s.crops.map((c) => [c.id, c.include, c.quad.map((p) => [round(p.x), round(p.y)]), c.quarterTurns, c.fineDeg, c.mirror, curvesSig(c.curves)]),
   );
 }
 
 export function cropKey(c: ModelCrop): string {
-  const text = JSON.stringify([c.id, c.quad.map((p) => [round(p.x), round(p.y)]), c.quarterTurns, c.fineDeg, c.mirror]);
+  const text = JSON.stringify([c.id, c.quad.map((p) => [round(p.x), round(p.y)]), c.quarterTurns, c.fineDeg, c.mirror, curvesSig(c.curves)]);
   let h = 2166136261;
   for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619) >>> 0;
   return h.toString(16).padStart(8, '0') + c.id.toString(16).padStart(4, '0');
 }
 
 const round = (v: number) => Math.round(v * 1e6) / 1e6;
+
+/** The control points rounded like the quad: part of the render signature and the per-crop render key. */
+function curvesSig(c: CurveSet | null): unknown {
+  if (!c) return 0;
+  const k = (p: { x: number; y: number }[]) => p.map((q) => [round(q.x), round(q.y)]);
+  return [k(c.top), k(c.right), k(c.bottom), k(c.left)];
+}
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
@@ -185,7 +204,7 @@ function resortIfReading(s: ScanState): void {
 }
 
 function newCrop(s: ScanState, quad: Quad, origin: CropOrigin, confidence: Confidence | null = null): ModelCrop {
-  return { id: s.nextId++, include: true, quad: sanitise(quad), quarterTurns: 0, fineDeg: 0, mirror: false, origin, confidence };
+  return { id: s.nextId++, include: true, quad: sanitise(quad), quarterTurns: 0, fineDeg: 0, mirror: false, curves: null, origin, confidence };
 }
 
 // ------------------------------------------------------------------------------------------ operations
@@ -210,6 +229,8 @@ export function setInclude(s: ScanState, id: number, include: boolean): ScanStat
 export function editCrop(s: ScanState, id: number, edit: Edit, dims: Dims): ScanState {
   const next = cloneState(s);
   const c = find(next, id);
+  // A quad edit would silently drop the curves, so the engine refuses it: the person goes back to straight first.
+  if (c.curves) throw new ItemOpError('ITEM_OP', 'a curved crop is edited through its curves');
   const quad = sanitise(edit.quad);
   if (degenerate(quad, dims[0], dims[1])) throw new ItemOpError('DEGENERATE');
   c.quad = quad;
@@ -223,6 +244,7 @@ export function turnCrop(s: ScanState, id: number, clockwise: boolean): ScanStat
   const next = cloneState(s);
   const c = find(next, id);
   c.quarterTurns = (c.quarterTurns + (clockwise ? 1 : 3)) % 4;
+  if (c.curves) c.curves.quarterTurns = c.quarterTurns;
   if (c.origin === 'auto') c.origin = 'autoThenEdited';
   return next;
 }
@@ -230,6 +252,7 @@ export function turnCrop(s: ScanState, id: number, clockwise: boolean): ScanStat
 export function angleCrop(s: ScanState, id: number, deg: number): ScanState {
   const next = cloneState(s);
   const c = find(next, id);
+  if (c.curves) throw new ItemOpError('ITEM_OP', 'a curved page has no fine angle');
   c.fineDeg = Math.min(45, Math.max(-45, Number.isFinite(deg) ? deg : 0));
   if (c.origin === 'auto') c.origin = 'autoThenEdited';
   return next;
@@ -239,6 +262,7 @@ export function flipCrop(s: ScanState, id: number): ScanState {
   const next = cloneState(s);
   const c = find(next, id);
   c.mirror = !c.mirror;
+  if (c.curves) c.curves.mirror = c.mirror;
   if (c.origin === 'auto') c.origin = 'autoThenEdited';
   return next;
 }
@@ -250,6 +274,7 @@ export function mergeCrops(s: ScanState, ids: number[], dims: Dims): { state: Sc
   const next = cloneState(s);
   const crops = uniq.map((id) => find(next, id));
   if (crops.some((c) => !c.include)) throw new ItemOpError('ITEM_OP', 'an excluded item cannot be merged');
+  if (crops.some((c) => c.curves)) throw new ItemOpError('ITEM_OP', 'a curved page cannot be merged');
   const rect = mergedQuad(
     crops.map((c) => c.quad),
     dims[0],
@@ -265,6 +290,7 @@ export function mergeCrops(s: ScanState, ids: number[], dims: Dims): { state: Sc
     quarterTurns: base.quarterTurns,
     fineDeg: 0,
     mirror: base.mirror,
+    curves: null,
     origin: 'manual',
     confidence: null,
   };
@@ -280,6 +306,7 @@ export function cutCrop(s: ScanState, id: number, cut: Cut, dims: Dims): { state
   if (at < 0) throw new ItemOpError('ITEM_OP', 'no such item');
   const c = next.crops[at];
   if (!c.include) throw new ItemOpError('ITEM_OP', 'an excluded item cannot be cut');
+  if (c.curves) throw new ItemOpError('ITEM_OP', 'a curved page cannot be cut');
   if (next.crops.length + 1 > MAX_ITEMS) throw new ItemOpError('ITEM_OP', 'too many items');
   const pieces = cutPieces(c.quad, cut);
   if (!pieces) throw new ItemOpError('ITEM_OP', 'bad cut');
@@ -348,7 +375,7 @@ export function redetect(s: ScanState, detected: { quad: Quad; confidence: Confi
     });
     if (best >= 0) {
       pool[best].used = true;
-      out.push({ ...c, quad: sanitise(pool[best].quad), confidence: pool[best].confidence, quarterTurns: 0, fineDeg: 0, mirror: false, include: true, origin: 'auto' });
+      out.push({ ...c, quad: sanitise(pool[best].quad), confidence: pool[best].confidence, quarterTurns: 0, fineDeg: 0, mirror: false, curves: null, include: true, origin: 'auto' });
     }
   }
   next.crops = out;
@@ -362,6 +389,59 @@ export function redetect(s: ScanState, detected: { quad: Quad; confidence: Confi
   return next;
 }
 
+// ------------------------------------------------------------------------------------------ curved pages
+
+/** The corners of `quad` with the fine angle baked in: the quad turned about its centre in pixel space. */
+export function bakeAngle(quad: Quad, deg: number, dims: Dims): Quad {
+  if (Math.abs(deg) < 1e-9) return quad.map((p) => ({ x: p.x, y: p.y })) as Quad;
+  const th = (-deg * Math.PI) / 180; // the result is rotated clockwise by `deg`: the source quad by the opposite
+  const cos = Math.cos(th);
+  const sin = Math.sin(th);
+  const cx = quad.reduce((a, p) => a + p.x, 0) / 4;
+  const cy = quad.reduce((a, p) => a + p.y, 0) / 4;
+  return quad.map((p) => {
+    const dx = (p.x - cx) * dims[0];
+    const dy = (p.y - cy) * dims[1];
+    return { x: cx + (dx * cos - dy * sin) / dims[0], y: cy + (dx * sin + dy * cos) / dims[1] };
+  }) as Quad;
+}
+
+/** A quad crop becomes a curved page with four straight edges (idempotent on a curved crop). */
+export function curveCrop(s: ScanState, id: number, dims: Dims): ScanState {
+  const next = cloneState(s);
+  const c = find(next, id);
+  if (c.curves) return next;
+  const corners = sanitise(bakeAngle(c.quad, c.fineDeg, dims));
+  c.quad = corners;
+  c.fineDeg = 0;
+  c.curves = curvesFromQuad(corners, c.quarterTurns, c.mirror);
+  if (c.origin === 'auto') c.origin = 'autoThenEdited';
+  return next;
+}
+
+/** Replaces the curves of a quad or curved crop; the corners move with the end points. A refused set changes nothing. */
+export function setCurves(s: ScanState, id: number, curves: CurveSet): ScanState {
+  const next = cloneState(s);
+  const c = find(next, id);
+  if (validateCurves(curves) !== null) throw new ItemOpError('DEGENERATE');
+  c.curves = cloneCurves(curves);
+  c.quad = cornersOf(curves);
+  c.quarterTurns = ((curves.quarterTurns % 4) + 4) % 4;
+  c.mirror = curves.mirror;
+  c.fineDeg = 0;
+  if (c.origin === 'auto') c.origin = 'autoThenEdited';
+  return next;
+}
+
+/** A curved crop becomes the straight quad through its corners (turns and mirror kept). */
+export function clearCurves(s: ScanState, id: number): ScanState {
+  const next = cloneState(s);
+  const c = find(next, id);
+  if (!c.curves) return next;
+  c.curves = null;
+  return next;
+}
+
 // ----------------------------------------------------------------------------------------------- views
 export function toEdit(c: ModelCrop): Edit {
   return { quad: c.quad.map((p) => ({ x: p.x, y: p.y })) as Quad, quarterTurns: c.quarterTurns, fineDeg: c.fineDeg };
@@ -371,6 +451,8 @@ export interface ViewContext {
   stem: string;
   ext: string;
   baseline: ScanState | null;
+  /** The person accepted exactly this state: a curved page is no longer held. */
+  accepted?: boolean;
 }
 
 export function cropViews(s: ScanState, ctx: ViewContext): CropView[] {
@@ -385,14 +467,15 @@ export function cropViews(s: ScanState, ctx: ViewContext): CropView[] {
       edit: toEdit(c),
       autoEdit: base ? toEdit(base) : null,
       mirror: c.mirror,
+      curves: c.curves ? { ...cloneCurves(c.curves), quarterTurns: c.quarterTurns, mirror: c.mirror } : null,
       origin: c.origin,
       confidence: c.confidence ? { ...c.confidence, reasons: c.confidence.reasons.map((r) => ({ ...r })) } : null,
-      band: cropBand(c),
+      band: cropBand(c, ctx.accepted),
       edited:
         !base ||
         base.include !== c.include ||
         base.origin !== c.origin ||
-        JSON.stringify([base.quad, base.quarterTurns, base.fineDeg, base.mirror]) !== JSON.stringify([c.quad, c.quarterTurns, c.fineDeg, c.mirror]),
+        JSON.stringify([base.quad, base.quarterTurns, base.fineDeg, base.mirror, base.curves]) !== JSON.stringify([c.quad, c.quarterTurns, c.fineDeg, c.mirror, c.curves]),
       outputName: order > 0 ? outputName(ctx.stem, ctx.ext, order, total) : null,
       renderKey: cropKey(c),
     };
@@ -403,7 +486,7 @@ export function cropViews(s: ScanState, ctx: ViewContext): CropView[] {
 export function isEdited(s: ScanState, baseline: ScanState | null): boolean {
   if (!baseline) return false;
   const sig = (x: ScanState) =>
-    JSON.stringify([x.policy, x.profile, x.crops.map((c) => [c.id, c.include, c.origin, c.quad, c.quarterTurns, c.fineDeg, c.mirror])]);
+    JSON.stringify([x.policy, x.profile, x.crops.map((c) => [c.id, c.include, c.origin, c.quad, c.quarterTurns, c.fineDeg, c.mirror, c.curves])]);
   return sig(s) !== sig(baseline);
 }
 
