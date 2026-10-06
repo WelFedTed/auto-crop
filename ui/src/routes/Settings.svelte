@@ -7,6 +7,7 @@
   import { routePath } from '../lib/routes.ts';
   import { store, type ThemeChoice } from '../lib/store.svelte.ts';
   import { RETENTION_OPTIONS, S } from '../lib/strings.ts';
+  import type { SplitPolicy, SplitProfile } from '../lib/types.ts';
 
   const back = $derived(
     router.previous && router.previous.name !== 'settings' ? routePath(router.previous) : store.items.length > 0 ? '/grid' : '/',
@@ -19,6 +20,11 @@
   async function setCopy(next: boolean): Promise<void> {
     const ok = await store.updateSettings({ saveAsCopy: next });
     if (ok) store.announce(next ? S.toasts.copyModeOn : S.toasts.copyModeOff);
+  }
+
+  async function setAutoSplit(next: boolean): Promise<void> {
+    const ok = await store.updateSettings({ autoSaveSplits: next });
+    if (ok) store.announce(next ? S.settings.autoSaveSplitsWarning : 'Auto-save splits is off.');
   }
 
   const platformName = $derived(
@@ -57,6 +63,45 @@
             <a class="btn" href={href('/backups')}>{S.settings.openBackups}</a>
           </div>
         </div>
+      </section>
+
+      <section class="card" aria-labelledby="s-split" data-settings-split>
+        <h2 id="s-split">{S.settings.splitting}</h2>
+        <div class="row">
+          <div>
+            <label class="label" for="split-policy">{S.settings.splitPolicy}</label>
+            <div class="help">{S.settings.splitPolicyHelp}</div>
+          </div>
+          <select id="split-policy" class="select" value={store.settings.splitPolicy} onchange={(e) => store.updateSettings({ splitPolicy: e.currentTarget.value as SplitPolicy })}>
+            <option value="auto">{S.settings.splitPolicyOptions.auto}</option>
+            <option value="always">{S.settings.splitPolicyOptions.always}</option>
+            <option value="never">{S.settings.splitPolicyOptions.never}</option>
+          </select>
+        </div>
+        <div class="row">
+          <div>
+            <label class="label" for="split-profile">{S.settings.splitProfile}</label>
+            <div class="help">{S.settings.splitProfileHelp}</div>
+          </div>
+          <select id="split-profile" class="select" value={store.settings.splitProfile} onchange={(e) => store.updateSettings({ splitProfile: e.currentTarget.value as SplitProfile })}>
+            <option value="photos">{S.settings.splitProfileOptions.photos}</option>
+            <option value="receipts">{S.settings.splitProfileOptions.receipts}</option>
+          </select>
+        </div>
+        <div class="row last col">
+          <div class="rowtop">
+            <div>
+              <div class="label" id="auto-split-label">{S.settings.autoSaveSplits} <span class="tag">{S.settings.autoSaveSplitsTag}</span></div>
+              <div class="help">{S.settings.autoSaveSplitsHelp}</div>
+            </div>
+            <Switch checked={store.settings.autoSaveSplits} label={`${S.settings.autoSaveSplits} (${S.settings.autoSaveSplitsTag})`} onchange={setAutoSplit} />
+          </div>
+          <div class="warn" role="note" id="auto-split-warning">
+            <Icon name="check" size={18} />
+            <span>{S.settings.autoSaveSplitsWarning}</span>
+          </div>
+        </div>
+        <div class="help foot">{S.settings.appliesToNew}</div>
       </section>
 
       <section class="card" aria-labelledby="s-look">
@@ -154,6 +199,35 @@
     margin-top: 2px;
     font-size: 13px;
     color: var(--text-3);
+  }
+
+  .row.col {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .rowtop {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px 20px;
+  }
+
+  .warn {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    background: var(--check-bg);
+    border: 1px solid var(--check-line);
+    border-radius: 10px;
+    color: var(--check-text-strong);
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .foot {
+    padding: 4px 0 10px;
   }
 
   .inline {

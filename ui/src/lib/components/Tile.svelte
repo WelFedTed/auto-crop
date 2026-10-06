@@ -1,28 +1,42 @@
 <!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 Auto Crop contributors -->
 <script lang="ts">
-  import { imageUrl } from '../backend.ts';
+  import { cropImageUrl, imageUrl } from '../backend.ts';
+  import { bannerState, includedCrops, isSplitScan } from '../items.ts';
   import { needsDrawCrop, reasonLine, tileLabel, type Classified, type Strictness } from '../review.ts';
   import { href } from '../router.svelte.ts';
-  import { S } from '../strings.ts';
+  import { S, noticeText } from '../strings.ts';
   import Icon from './Icon.svelte';
+  import ScanBanner from './ScanBanner.svelte';
   import TierBadge from './TierBadge.svelte';
 
   let {
     x,
     strictness,
     selected,
+    autoSaveSplits = false,
     ontoggle,
     onopen,
+    onaccept,
+    onreview,
   }: {
     x: Classified;
     strictness: Strictness;
     selected: boolean;
+    autoSaveSplits?: boolean;
     ontoggle: (id: number) => void;
     onopen: (id: number) => void;
+    /** "Accept split" on the tile's banner. */
+    onaccept?: (id: number) => void;
+    /** "Review items": open the editor on this scan. */
+    onreview?: (id: number) => void;
   } = $props();
 
   const item = $derived(x.item);
+  const split = $derived(isSplitScan(item));
+  const banner = $derived(split ? bannerState(item, { autoSaveSplits }) : ({ kind: 'none' } as const));
+  const subs = $derived(split ? includedCrops(item) : []);
+  let expanded = $state(false);
   const label = $derived(tileLabel(x));
   const reason = $derived(reasonLine(item, x.tier));
   const draw = $derived(needsDrawCrop(item, strictness));
@@ -56,6 +70,9 @@
         {/if}
       </a>
     {/if}
+    {#if split}
+      <span class="count" title={S.split.countBadgeLabel(item.split?.included ?? 0)} aria-hidden="true">{S.split.countBadge(item.split?.included ?? 0)}</span>
+    {/if}
     {#if x.tier !== 'analysing'}
       <button
         type="button"
@@ -80,11 +97,33 @@
       {:else}
         <TierBadge tier={x.tier} />
       {/if}
+      {#if item.openOnly}
+        <span class="badge neutral" title={noticeText(item.openOnly)} data-open-only>{S.grid.openOnlyBadge}</span>
+      {/if}
       {#if reason}
         <div class="reason">{reason}</div>
       {/if}
     {/if}
   </div>
+  {#if split && banner.kind !== 'none'}
+    <div class="splitbar">
+      <ScanBanner state={banner} compact onaccept={() => onaccept?.(item.id)} onreview={() => onreview?.(item.id)} />
+      <button type="button" class="btn-link expand" aria-expanded={expanded} onclick={() => (expanded = !expanded)}>
+        {expanded ? S.split.collapse : S.split.expand}
+      </button>
+      {#if expanded}
+        <ul class="subs" aria-label={S.split.subtiles}>
+          {#each subs as c (c.id)}
+            <li class={c.band ?? 'check'}>
+              <img src={cropImageUrl('thumb', item.id, c.id, c.renderKey)} alt="" loading="lazy" draggable="false" />
+              <span class="sn">{c.order}</span>
+              <span class="sb">{S.tier[c.band ?? 'check']}</span>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </div>
+  {/if}
 </article>
 
 <style>
@@ -240,5 +279,101 @@
     line-height: 1.35;
     color: var(--text);
     min-height: 32px;
+  }
+
+  .count {
+    position: absolute;
+    right: 6px;
+    top: 6px;
+    min-width: 34px;
+    height: 24px;
+    padding: 0 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 12px;
+    background: var(--bulk-bg);
+    color: var(--bulk-text);
+    border: 2px solid #ffffff;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .splitbar {
+    padding: 0 8px 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .splitbar :global(.banner) {
+    align-self: stretch;
+  }
+
+  .expand {
+    padding: 0 2px;
+  }
+
+  .subs {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    align-self: stretch;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+    gap: 6px;
+  }
+
+  .subs li {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface-2);
+    font-size: 11px;
+  }
+
+  .subs img {
+    width: 100%;
+    height: 52px;
+    object-fit: contain;
+    background: var(--tile-bg);
+    border-radius: 4px;
+  }
+
+  .sn {
+    position: absolute;
+    left: 6px;
+    top: 6px;
+    min-width: 18px;
+    height: 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9px;
+    background: var(--surface);
+    border: 1px solid var(--line-strong);
+    font-weight: 700;
+  }
+
+  .subs li.good .sb {
+    color: var(--good-fg);
+  }
+
+  .subs li.check .sb {
+    color: var(--check-fg);
+  }
+
+  .subs li.failed .sb {
+    color: var(--fail-fg);
+  }
+
+  .sb {
+    font-weight: 600;
   }
 </style>

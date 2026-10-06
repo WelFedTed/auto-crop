@@ -1565,13 +1565,19 @@ fn the_classical_detector_splits_a_synthetic_scan_and_the_whole_flow_works() {
 
 #[test]
 fn a_single_document_on_a_desk_still_takes_the_single_item_route() {
-    // The existing sample set: none of these is a multi-item scan, so the classical detector must
-    // leave every one on the single-item route and the old results unchanged.
+    // The receipt and document samples are not multi-item scans, so the classical detector must
+    // leave every one on the single-item route and the old results unchanged. The `scan_*` samples
+    // ARE multi-item scans (flatbed beds with several photos or receipts) and must split.
     let e = env();
     let files = auto_crop_engine::samples::write_samples(&e.dir).unwrap();
     let s = e.engine.open_paths(&files, false);
     for id in s.ids {
         let v = e.engine.analyse(id).unwrap();
+        if v.name.starts_with("scan_") {
+            assert!(v.crops.len() >= 2, "{}: {} crops", v.name, v.crops.len());
+            assert!(v.split.as_ref().unwrap().is_split, "{}", v.name);
+            continue;
+        }
         assert!(v.crops.len() <= 1, "{}: {} crops", v.name, v.crops.len());
         assert!(!v.split.as_ref().unwrap().is_split, "{}", v.name);
     }

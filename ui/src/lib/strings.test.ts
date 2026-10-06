@@ -2,8 +2,24 @@
 // SPDX-FileCopyrightText: 2026 Auto Crop contributors
 
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { ERRORS, FALLBACK_HOLD, HOLD, errorMessage, holdAction, holdCause, holdTitle, retentionText } from './strings.ts';
+import { defaultSettings, patchedSettings } from './settings-defaults.ts';
+import {
+  ERRORS,
+  FALLBACK_HOLD,
+  HOLD,
+  NOTICES,
+  S,
+  errorMessage,
+  formatList,
+  holdAction,
+  holdCause,
+  holdTitle,
+  noticeText,
+  openOnlyShort,
+  retentionText,
+} from './strings.ts';
 import type { ReasonCode } from './types.ts';
 
 // Every code in the contract must have copy. The map is typed against `ReasonCode`, so adding a code to
@@ -15,14 +31,96 @@ const CONTRACT_CODES: Record<ReasonCode, true> = {
   ODD_ASPECT: true,
   LOW_CONTRAST_EDGE: true,
   IMPLAUSIBLE_QUAD: true,
+  TOUCHING_ITEMS: true,
+  OVERLAPPING_ITEMS: true,
+  ITEMS_TOO_CLOSE: true,
+  SPLIT_UNSTABLE: true,
+  TOO_MANY_ITEMS: true,
+  BED_UNCERTAIN: true,
+  ANALYSIS_LIMIT: true,
+  NO_DOCUMENT: true,
 };
+
+const screaming = (camel: string) => camel.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toUpperCase();
+const camel = (snake: string) => snake.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+
+/** The variant names of a Rust enum, read from its source (drift guard between the engine and the copy). */
+function rustVariants(file: string, enumName: string): string[] {
+  const src = readFileSync(new URL(`../../../${file}`, import.meta.url), 'utf8');
+  const start = src.indexOf(`pub enum ${enumName} {`);
+  assert.ok(start >= 0, `${enumName} not found in ${file}`);
+  const body = src.slice(start, src.indexOf('\n}', start));
+  return [...body.matchAll(/^ {4}([A-Z][A-Za-z0-9]*)(?:\s*[,{(]|$)/gm)].map((m) => m[1]);
+}
 
 test('every contract reason code has a title, cause and action', () => {
   for (const code of Object.keys(CONTRACT_CODES) as ReasonCode[]) {
     assert.ok(holdTitle({ code }).length > 0, code);
     assert.ok(holdCause({ code }).length > 10, code);
     assert.ok(holdAction({ code }).length > 3, code);
+    assert.ok(HOLD[code], `${code} has its own copy, not the fallback`);
   }
+});
+
+test('every reason code the engine can send has its own copy (read from crates/core)', () => {
+  for (const v of rustVariants('crates/core/src/confidence.rs', 'ReasonCode')) {
+    const code = screaming(v);
+    assert.ok(HOLD[code], `no hold copy for ${code}`);
+    assert.ok((CONTRACT_CODES as Record<string, true>)[code], `${code} is missing from the TypeScript ReasonCode`);
+  }
+});
+
+test('every error code the engine can send has its own message (read from crates/core)', () => {
+  const codes = rustVariants('crates/core/src/error.rs', 'ErrKind').map(screaming);
+  assert.ok(codes.length >= 30, `found only ${codes.length} codes`);
+  for (const code of codes) {
+    assert.ok(code in ERRORS, `no message for ${code}`);
+    if (code !== 'INTERNAL') assert.notEqual(ERRORS[code as keyof typeof ERRORS], ERRORS.INTERNAL, `${code} reuses the generic message`);
+  }
+});
+
+test('the multi-item error codes read as plain language that says what to do', () => {
+  assert.match(errorMessage('HELD_FOR_REVIEW'), /held for review/i);
+  assert.match(errorMessage('HELD_FOR_REVIEW'), /Accept split/);
+  assert.match(errorMessage('PLAN_STALE'), /nothing was written/i);
+  assert.match(errorMessage('GROUP_COMMIT_FAILED'), /scan is untouched/i);
+  assert.match(errorMessage('SAVED_SOURCE_IN_USE'), /set is complete/i);
+  assert.match(errorMessage('ITEM_OP'), /nothing was changed/i);
+  assert.match(errorMessage('NOT_REPLACEABLE'), /Save as copy/);
+});
+
+test('notices: every code the engine sends has a line, and an unknown code never shows raw', () => {
+  for (const code of ['tiff.multi_page', 'format.write_unavailable', 'split.held', 'derived.user_edited']) {
+    assert.ok(NOTICES[code].length > 20, code);
+    assert.equal(noticeText(code), NOTICES[code]);
+  }
+  assert.match(NOTICES['tiff.multi_page'], /never replaced/);
+  assert.match(NOTICES['format.write_unavailable'], /Save as copy/);
+  assert.ok(!noticeText('some.future.code').includes('some.future'));
+  assert.equal(openOnlyShort('tiff.multi_page'), 'Multi-page: copy only');
+  assert.equal(openOnlyShort(null), '');
+});
+
+test('the formats line names what the shell reports, in a fixed order', () => {
+  assert.equal(formatList(['jpg', 'jpeg', 'png']), 'JPG and PNG');
+  assert.equal(formatList(['jpg', 'jpeg', 'png', 'tif', 'tiff', 'webp']), 'JPG, PNG, WebP and TIFF');
+  assert.equal(formatList(['jpg', 'jpeg', 'png', 'tif', 'tiff', 'webp', 'heic', 'heif', 'avif']), 'JPG, PNG, WebP, TIFF, HEIC and AVIF');
+  assert.equal(formatList(undefined), 'JPG and PNG');
+  assert.equal(S.home.formats(['jpg', 'png', 'webp']), 'JPG · PNG · WebP');
+});
+
+test('settings: the defaults carry every field of the engine struct, and a patch keeps the rest', () => {
+  const src = readFileSync(new URL('../../../crates/engine/src/settings.rs', import.meta.url), 'utf8');
+  const start = src.indexOf('pub struct Settings {');
+  const body = src.slice(start, src.indexOf('\n}', start));
+  const fields = [...body.matchAll(/^ {4}pub ([a-z_]+):/gm)].map((m) => camel(m[1]));
+  assert.ok(fields.includes('splitPolicy') && fields.includes('autoSaveSplits'));
+  assert.deepEqual(Object.keys(defaultSettings()).sort(), fields.sort());
+  const received = { ...defaultSettings(), someFutureField: 7 } as ReturnType<typeof defaultSettings>;
+  const sent = patchedSettings(received, { saveAsCopy: true });
+  assert.equal(sent.saveAsCopy, true);
+  assert.equal(sent.splitPolicy, 'auto');
+  assert.equal((sent as unknown as Record<string, unknown>).someFutureField, 7, 'a field the UI does not know survives');
 });
 
 test('PLAN 6.7 titles', () => {

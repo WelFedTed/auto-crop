@@ -2,9 +2,11 @@
 <!-- SPDX-FileCopyrightText: 2026 Auto Crop contributors -->
 <script lang="ts">
   import { onMount, tick } from 'svelte';
+  import FirstSplitSheet from '../lib/components/FirstSplitSheet.svelte';
   import FirstWriteSheet from '../lib/components/FirstWriteSheet.svelte';
   import Icon from '../lib/components/Icon.svelte';
   import Tile from '../lib/components/Tile.svelte';
+  import { isSplitScan, plannedNames } from '../lib/items.ts';
   import {
     canAccept,
     isItemFlaggedFirstQueue,
@@ -111,9 +113,15 @@
   }
 
   // ---- bulk actions --------------------------------------------------------------------------
-  const acceptable = $derived(selectedList.filter((x) => x.tier === 'check' && canAccept(x.item, store.strictness) && x.decision !== 'accepted'));
+  // A scan with several items is accepted by the ENGINE (Accept split); the rest are UI decisions.
+  const acceptable = $derived(
+    selectedList.filter((x) =>
+      isSplitScan(x.item) ? !x.item.split?.accepted && x.item.status === 'ready' : x.tier === 'check' && canAccept(x.item, store.strictness) && x.decision !== 'accepted',
+    ),
+  );
   const unreviewed = $derived(acceptable.filter((x) => x.needs));
   const hasSkippedSelected = $derived(selectedList.some((x) => x.decision === 'skipped'));
+  const splittable = $derived(selectedList.filter((x) => x.item.status === 'ready').map((x) => x.item.id));
 
   function askAccept(): void {
     if (acceptable.length === 0) {
@@ -125,11 +133,31 @@
     else doAccept();
   }
 
-  function doAccept(): void {
+  async function doAccept(): Promise<void> {
     const ids = acceptable.map((x) => x.item.id);
-    store.decide(ids, 'accepted');
+    const splits = acceptable.filter((x) => isSplitScan(x.item)).map((x) => x.item.id);
+    store.decide(
+      ids.filter((i) => !splits.includes(i)),
+      'accepted',
+    );
+    for (const sid of splits) await store.acceptScan(sid);
     store.announce(S.grid.accepted(ids.length));
     clearSelection();
+  }
+
+  function doSplit(policy: 'never' | 'always'): void {
+    const ids = splittable;
+    clearSelection();
+    void store.changeSplit(ids, { policy });
+  }
+
+  function acceptOne(id: number): void {
+    void store.acceptScan(id);
+  }
+
+  function reviewOne(id: number): void {
+    open(id);
+    navigate(`/item/${id}`);
   }
 
   function doSkip(): void {
@@ -162,9 +190,17 @@
     void tick().then(() => saveBtn?.focus());
   }
 
+  const splitInSet = $derived(store.saveSet.filter((x) => isSplitScan(x.item)));
+  const filesInSet = $derived(store.saveSet.reduce((n, x) => n + (isSplitScan(x.item) ? (x.item.split?.included ?? 1) : 1), 0));
+  let splitSheetOpen = $state(false);
+
   function confirmSave(): void {
     if (!store.settings.firstWriteAck) {
       sheetOpen = true;
+      return;
+    }
+    if (!store.settings.saveAsCopy && splitInSet.length > 0 && !store.firstSplitAck) {
+      splitSheetOpen = true;
       return;
     }
     void doSave();
@@ -173,12 +209,26 @@
   async function chooseMode(copy: boolean): Promise<void> {
     const ok = await store.updateSettings({ saveAsCopy: copy, firstWriteAck: true });
     sheetOpen = false;
-    if (ok) void doSave();
+    if (!ok) return;
+    if (!copy && splitInSet.length > 0 && !store.firstSplitAck) {
+      splitSheetOpen = true;
+      return;
+    }
+    void doSave();
   }
 
-  async function doSave(): Promise<void> {
+  async function doSave(keepSplitScans = false): Promise<void> {
     saveStage = 0;
-    await store.performSave(store.saveSet.map((x) => x.item.id));
+    const splitIds = splitInSet.map((x) => x.item.id);
+    const all = store.saveSet.map((x) => x.item.id);
+    if (keepSplitScans && splitIds.length > 0) {
+      // "Keep the scan": the split scans are written as copies, everything else as the mode says.
+      await store.performSave(splitIds, null, 'copy');
+      const rest = all.filter((i) => !splitIds.includes(i));
+      if (rest.length > 0) await store.performSave(rest, store.summary);
+      return;
+    }
+    await store.performSave(all);
   }
 
   function reviewFlagged(): void {
@@ -194,9 +244,13 @@
     const t = e.target as HTMLElement | null;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
     if (e.key === 'Escape' && selected.size > 0) clearSelection();
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
       e.preventDefault();
-      store.undoDecision();
+      if (e.shiftKey) void store.redoGrid();
+      else void store.undoGrid();
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+      e.preventDefault();
+      void store.redoGrid();
     }
   }
 </script>
@@ -212,12 +266,24 @@
       <button
         type="button"
         class="icon-btn"
-        aria-label={store.decisions.history.length ? S.grid.undoDecision : S.grid.nothingToUndo}
-        title={store.decisions.history.length ? S.grid.undoDecision : S.grid.nothingToUndo}
-        disabled={store.decisions.history.length === 0}
-        onclick={() => store.undoDecision()}
+        aria-label={store.canUndoGrid ? S.grid.undoDecision : S.grid.nothingToUndo}
+        title={store.canUndoGrid ? S.grid.undoDecision : S.grid.nothingToUndo}
+        disabled={!store.canUndoGrid}
+        onclick={() => void store.undoGrid()}
+        data-grid-undo
       >
         <Icon name="undo" />
+      </button>
+      <button
+        type="button"
+        class="icon-btn"
+        aria-label={store.canRedoGrid ? S.grid.redoSession : S.grid.nothingToRedo}
+        title={store.canRedoGrid ? S.grid.redoSession : S.grid.nothingToRedo}
+        disabled={!store.canRedoGrid}
+        onclick={() => void store.redoGrid()}
+        data-grid-redo
+      >
+        <Icon name="redo" />
       </button>
       <span class="grow"></span>
       {#if anyBackup}
@@ -232,7 +298,9 @@
       <div class="confirm" role="group" aria-label="Confirm save">
         <div class="confirm-text">
           <b>{S.grid.willSave(store.saveSet.length)}</b>
+          {#if filesInSet !== store.saveSet.length}{S.grid.savedFiles(filesInSet, store.saveSet.length)}.{/if}
           {S.grid.flaggedStay(counts.needs)}
+          {#if store.openOnlyAside.length > 0}{S.grid.notReplaced(store.openOnlyAside.length)}{/if}
         </div>
         {#if counts.needs > 0}
           <button type="button" class="btn" onclick={reviewFlagged}>{S.grid.reviewFlaggedFirst}</button>
@@ -249,6 +317,9 @@
           <Icon name="good" size={20} stroke={2} />
           <div class="grow summary-text">
             <b>{sm.copy ? S.grid.savedCopiesSummary(sm.saved, sm.skipped, sm.failed.length) : S.grid.savedSummary(sm.saved, sm.skipped, sm.failed.length)}</b>
+            {#if sm.files !== sm.saved}<span class="sumnote">{S.grid.savedFiles(sm.files, sm.saved)}.</span>{/if}
+            {#if sm.held > 0}<span class="sumnote">{S.grid.heldScans(sm.held)}</span>{/if}
+            {#if sm.notReplaced > 0}<span class="sumnote">{S.grid.notReplaced(sm.notReplaced)}</span>{/if}
           </div>
           {#if !sm.copy && sm.saved > 0}
             <button type="button" class="btn btn-sm" onclick={() => navigate('/backups')}>{S.grid.restoreAllOriginals}</button>
@@ -263,6 +334,13 @@
           <ul class="failures">
             {#each sm.failed as f (f.id)}
               <li><span class="mono">{f.name}</span> {errorMessage(f.error)}</li>
+            {/each}
+          </ul>
+        {/if}
+        {#if sm.notes.length > 0}
+          <ul class="failures notes" aria-label={S.grid.noticesTitle}>
+            {#each sm.notes as n, i (i)}
+              <li><span class="mono">{n.name}</span> {n.text}</li>
             {/each}
           </ul>
         {/if}
@@ -328,6 +406,8 @@
         {:else}
           <button type="button" class="bulk-btn solid" onclick={askAccept}>{S.grid.accept}</button>
           <button type="button" class="bulk-btn" onclick={doSkip}>{S.grid.skip}</button>
+          <button type="button" class="bulk-btn" onclick={() => doSplit('always')} data-bulk-split>{S.grid.splitSelected}</button>
+          <button type="button" class="bulk-btn" onclick={() => doSplit('never')} data-bulk-one>{S.grid.oneSelected}</button>
           {#if hasSkippedSelected}
             <button type="button" class="bulk-btn" onclick={doPutBack}>{S.grid.unskip}</button>
           {/if}
@@ -350,7 +430,16 @@
     {:else}
       <div class="tiles" style:--min="{TILE_MIN[tileSize - 1]}px">
         {#each shown as x (x.item.id)}
-          <Tile {x} strictness={store.strictness} selected={selected.has(x.item.id)} ontoggle={toggle} onopen={open} />
+          <Tile
+            {x}
+            strictness={store.strictness}
+            selected={selected.has(x.item.id)}
+            autoSaveSplits={store.settings.autoSaveSplits}
+            ontoggle={toggle}
+            onopen={open}
+            onaccept={acceptOne}
+            onreview={reviewOne}
+          />
         {/each}
       </div>
     {/if}
@@ -372,6 +461,23 @@
   </footer>
   {/if}
 </div>
+
+<FirstSplitSheet
+  open={splitSheetOpen}
+  count={splitInSet[0]?.item.split?.included ?? 0}
+  first={plannedNames(splitInSet[0]?.item ?? ({ crops: [] } as never))[0] ?? ''}
+  onreplace={() => {
+    splitSheetOpen = false;
+    store.ackFirstSplit();
+    void doSave();
+  }}
+  onkeep={() => {
+    splitSheetOpen = false;
+    store.ackFirstSplit();
+    void doSave(true);
+  }}
+  oncancel={() => (splitSheetOpen = false)}
+/>
 
 <FirstWriteSheet
   open={sheetOpen}
@@ -485,6 +591,17 @@
     flex-direction: column;
     gap: 4px;
     font-size: 13px;
+    color: var(--text);
+  }
+
+  .sumnote {
+    margin-left: 8px;
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--text);
+  }
+
+  .failures.notes {
     color: var(--text);
   }
 

@@ -2,20 +2,30 @@
 // SPDX-FileCopyrightText: 2026 Auto Crop contributors
 
 // In-memory implementation of the `Api` contract, used automatically when the UI runs in a plain browser
-// (no `window.__TAURI_INTERNALS__`). It generates synthetic receipt and document photos with canvas,
-// simulates asynchronous analysis (items appear "analysing", then "ready"), keeps a real edit history,
-// "saves" items into fake backup runs and serves the backups API from memory. Image URLs are blob: URLs.
+// (no `window.__TAURI_INTERNALS__`). It generates synthetic receipt, document and multi-item scanner-bed
+// photos with canvas, simulates asynchronous analysis (items appear "analysing", then "ready"), keeps a real
+// edit history of a multi-crop edit state (scan-model.ts, the same rules as crates/core/src/items.rs), applies
+// the engine's hold rule when "saving", and serves the backups API from memory. Image URLs are blob: URLs.
 //
-// Deliberate demo behaviour worth knowing: the first save of six or more items fails exactly one item with
-// SOURCE_CHANGED so the per-file failure row and "Retry failed" can be seen; the retry succeeds. Backups
-// start with three runs, one of them already expired (Purge expired now removes it) and one file that
-// "changed since saved" (Restore asks for Restore as copy or Replace anyway).
+// Deliberate demo behaviour worth knowing:
+//  * the first save of six or more items fails exactly one item with SOURCE_CHANGED so the per-file failure row
+//    and "Retry failed" can be seen; the retry succeeds;
+//  * `scan_locked.jpg` saves its set but cannot be removed (SAVED_SOURCE_IN_USE); `scan_two.jpg` collides with
+//    a file called scan_two_01.jpg, so its set is saved as `scan_two (2)_01.jpg`;
+//  * `ledger_pages.tif` (multi-page) and `holiday.webp` are open-only: Replace says NOT_REPLACEABLE;
+//  * backups start with four runs: one expired, one file "changed since saved", and one split scan with
+//    derived files in every state;
+//  * `window.__autoCropMock.failNextSave(code)` forces the next save to fail with that code (for testing).
 
 import {
+  bedDetections,
+  bedLayout,
+  bedSingle,
   canvasFromFile,
   canvasToBlobUrl,
   defaultEdit,
   detectQuad,
+  drawBed,
   drawScene,
   failedPlaceholderEdit,
   insetQuad,
@@ -25,8 +35,38 @@ import {
   scaleToLongEdge,
   skinnyQuad,
 } from './mock-scene.ts';
-import type { SceneSpec } from './mock-scene.ts';
-import { cloneEdit } from './quad.ts';
+import type { BedSpec, SceneSpec } from './mock-scene.ts';
+import { cloneEdit, type Quad } from './quad.ts';
+import {
+  ItemOpError,
+  addCrop,
+  angleCrop,
+  cloneState,
+  cropViews,
+  cutCrop,
+  editCrop,
+  emptyState,
+  flipCrop,
+  included,
+  isEdited,
+  mergeCrops,
+  moveCrop,
+  outputName,
+  outputNames,
+  redetect as redetectState,
+  renderSignature,
+  revertCrop,
+  setInclude,
+  splitView,
+  toEdit,
+  triage,
+  turnCrop,
+  useReadingOrder,
+  type Dims,
+  type ModelCrop,
+  type ScanState,
+} from './scan-model.ts';
+import { defaultSettings } from './settings-defaults.ts';
 import type { BackendImpl, Unlisten } from './backend.ts';
 import type {
   Api,
@@ -34,6 +74,8 @@ import type {
   BackupRun,
   BackupsView,
   Confidence,
+  CropImageKind,
+  DerivedFile,
   Edit,
   ErrorCode,
   Events,
@@ -42,36 +84,55 @@ import type {
   LaunchInfo,
   OpenSummary,
   Reason,
+  RedetectResult,
   RestoreMode,
   RestoreOutcome,
   SaveOutcome,
   SaveTarget,
+  SessionStep,
   Settings,
+  SplitPatch,
 } from './types.ts';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const DAY = 86_400_000;
 
 interface HistoryEntry {
-  edit: Edit;
+  state: ScanState;
   label: string;
-  drawn: boolean;
 }
 
 interface MockItem {
-  view: ItemView;
+  id: number;
+  name: string;
+  stem: string;
+  ext: string;
+  status: ItemView['status'];
+  error: ErrorCode | null;
+  width: number;
+  height: number;
+  gen: number;
   src: HTMLCanvasElement | null;
   spec: SceneSpec | null;
-  history: HistoryEntry[];
+  bed: BedSpec | null;
+  hist: HistoryEntry[];
   cursor: number;
-  failedUntouched: boolean;
+  auto: ScanState | null;
+  /** The render signature the person accepted (a held split is saved only while the state still has it). */
+  accepted: string | null;
+  saved: { backupId: string | null; output: string; outputs: string[]; copy: boolean; sig: string } | null;
+  groupSaved: boolean;
+  openOnly: string | null;
 }
 
 const items = new Map<number, MockItem>();
 let nextId = 1;
-let settings: Settings = { saveAsCopy: false, retentionDays: 30, firstWriteAck: false };
+let settings: Settings = defaultSettings();
 let saveCount = 0;
 let failedOnce = false;
+let forcedFailure: ErrorCode | null = null;
+/** File names that "already exist" next to the scans, to show a collision. */
+const existingNames = new Set<string>(['scan_two_01.jpg']);
 
 // ---------------------------------------------------------------------------------------------- events
 const listeners: { [K in keyof Events]: Set<(p: Events[K]) => void> } = {
@@ -92,21 +153,13 @@ function emit<K extends keyof Events>(event: K, payload: Events[K]): void {
 // ---------------------------------------------------------------------------------------------- images
 const urlExact = new Map<string, string>();
 const urlLatest = new Map<string, string>();
+const urlCrop = new Map<string, string>();
 let placeholder = '';
 
 function ensurePlaceholder(): string {
   if (!placeholder) {
-    const c = document.createElement('canvas');
-    c.width = 4;
-    c.height = 4;
-    const g = c.getContext('2d')!;
-    g.fillStyle = '#c9ced7';
-    g.fillRect(0, 0, 4, 4);
-    // synchronous data is not available from toBlob; a 1x1 transparent GIF as a blob is built by hand
-    const bytes = Uint8Array.from(
-      atob('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'),
-      (ch) => ch.charCodeAt(0),
-    );
+    // a 1x1 transparent GIF as a blob (synchronous data is not available from toBlob)
+    const bytes = Uint8Array.from(atob('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'), (ch) => ch.charCodeAt(0));
     placeholder = URL.createObjectURL(new Blob([bytes], { type: 'image/gif' }));
   }
   return placeholder;
@@ -115,6 +168,10 @@ function ensurePlaceholder(): string {
 function mockImageUrl(kind: ImageKind, id: number, gen: number): string {
   const exact = urlExact.get(`${id}/${kind}/${kind === 'src' ? 0 : gen}`);
   return exact ?? urlLatest.get(`${id}/${kind}`) ?? ensurePlaceholder();
+}
+
+function mockCropImageUrl(kind: CropImageKind, id: number, crop: number, renderKey: string): string {
+  return urlCrop.get(`${id}/${crop}/${kind}/${renderKey}`) ?? ensurePlaceholder();
 }
 
 async function publish(id: number, kind: ImageKind, gen: number, canvas: HTMLCanvasElement): Promise<void> {
@@ -130,50 +187,82 @@ async function publish(id: number, kind: ImageKind, gen: number, canvas: HTMLCan
   }
 }
 
-/** (Re)renders the result and thumbnail for the current state of an item and publishes blob URLs. */
+function flipped(c: HTMLCanvasElement): HTMLCanvasElement {
+  const out = document.createElement('canvas');
+  out.width = c.width;
+  out.height = c.height;
+  const g = out.getContext('2d')!;
+  g.translate(c.width, 0);
+  g.scale(-1, 1);
+  g.drawImage(c, 0, 0);
+  return out;
+}
+
+function renderCrop(src: HTMLCanvasElement, c: ModelCrop): HTMLCanvasElement {
+  const out = renderResult(src, toEdit(c));
+  return c.mirror ? flipped(out) : out;
+}
+
+const current = (m: MockItem): ScanState => m.hist[m.cursor].state;
+
+/** Whole-scan and per-crop images for the current state. Per-crop images are cached by render key. */
 async function renderItem(m: MockItem): Promise<void> {
   if (!m.src) return;
-  const v = m.view;
-  const edit = v.edit ?? defaultEdit(insetQuad(0.05));
-  const result = renderResult(m.src, edit);
-  const thumbSource = m.failedUntouched ? m.src : result;
-  await publish(v.id, 'result', v.gen, result);
-  await publish(v.id, 'thumb', v.gen, scaleToLongEdge(thumbSource, 256));
+  const state = current(m);
+  const inc = included(state);
+  const first = inc[0] ?? state.crops[0];
+  const split = inc.length >= 2;
+  const failedUntouched = !!first && first.confidence !== null && bandFailed(first) && !isEdited(state, m.auto);
+  const firstResult = first ? renderCrop(m.src, first) : m.src;
+  await publish(m.id, 'result', m.gen, firstResult);
+  await publish(m.id, 'thumb', m.gen, scaleToLongEdge(split || failedUntouched || !first ? m.src : firstResult, 256));
+  const views = cropViews(state, { stem: m.stem, ext: m.ext, baseline: m.auto });
+  for (const v of views) {
+    const c = state.crops.find((x) => x.id === v.id)!;
+    const rk = `${m.id}/${v.id}/result/${v.renderKey}`;
+    if (urlCrop.has(rk)) continue;
+    const res = c === first ? firstResult : renderCrop(m.src, c);
+    urlCrop.set(rk, await canvasToBlobUrl(res));
+    urlCrop.set(`${m.id}/${v.id}/thumb/${v.renderKey}`, await canvasToBlobUrl(scaleToLongEdge(res, 256)));
+  }
 }
 
-// ---------------------------------------------------------------------------------------------- items
-function snapshot(m: MockItem): ItemView {
-  const v = m.view;
-  const cur = m.history[m.cursor];
-  const next = m.history[m.cursor + 1];
-  const auto = v.autoEdit;
-  const editedNow = !!auto && (cur.drawn || !editsEqual(cur.edit, auto));
+function bandFailed(c: ModelCrop): boolean {
+  return !!c.confidence && (c.confidence.forced === 'failed' || c.confidence.score < 0.6);
+}
+
+// ---------------------------------------------------------------------------------------------- views
+function viewOf(m: MockItem): ItemView {
+  const state = m.hist.length ? current(m) : emptyState();
+  const crops = m.hist.length ? cropViews(state, { stem: m.stem, ext: m.ext, baseline: m.auto }) : [];
+  const first = crops.find((c) => c.include) ?? crops[0] ?? null;
+  const cur = m.hist[m.cursor];
+  const next = m.hist[m.cursor + 1];
+  const ready = m.status === 'ready';
+  const sig = ready ? renderSignature(state) : '';
   return {
-    ...v,
-    edit: v.edit ? cloneEdit(cur.edit) : null,
-    autoEdit: auto ? cloneEdit(auto) : null,
-    confidence: v.confidence ? { ...v.confidence, reasons: v.confidence.reasons.map((r) => ({ ...r })) } : null,
-    edited: v.status === 'ready' && editedNow,
-    saved: v.saved ? { ...v.saved } : null,
-    canUndo: m.cursor > 0,
-    canRedo: !!next,
-    undoLabel: m.cursor > 0 ? cur.label : null,
-    redoLabel: next ? next.label : null,
+    id: m.id,
+    name: m.name,
+    width: m.width,
+    height: m.height,
+    status: m.status,
+    error: m.error,
+    edit: first?.edit ? cloneEdit(first.edit) : null,
+    autoEdit: first?.autoEdit ? cloneEdit(first.autoEdit) : null,
+    confidence: first?.confidence ? { ...first.confidence, reasons: first.confidence.reasons.map((r) => ({ ...r })) } : null,
+    gen: m.gen,
+    edited: ready && isEdited(state, m.auto),
+    saved: m.saved ? { backupId: m.saved.backupId, output: m.saved.output, copy: m.saved.copy, outputs: [...m.saved.outputs] } : null,
+    dirtySinceSave: !!m.saved && m.saved.sig !== sig,
+    canUndo: ready && m.cursor > 0,
+    canRedo: ready && !!next,
+    undoLabel: ready && m.cursor > 0 ? cur.label : null,
+    redoLabel: ready && next ? next.label : null,
+    crops,
+    split: ready ? splitView(state, m.accepted === sig, m.groupSaved) : null,
+    historyPosition: m.cursor,
+    openOnly: ready ? m.openOnly : null,
   };
-}
-
-function editsEqual(a: Edit, b: Edit): boolean {
-  const eps = 1e-6;
-  return (
-    a.quarterTurns === b.quarterTurns &&
-    Math.abs(a.fineDeg - b.fineDeg) < eps &&
-    a.quad.every((p, i) => Math.abs(p.x - b.quad[i].x) < eps && Math.abs(p.y - b.quad[i].y) < eps)
-  );
-}
-
-function sync(m: MockItem): ItemView {
-  m.view = { ...m.view, ...snapshot(m) };
-  return snapshot(m);
 }
 
 function getItem(id: number): MockItem {
@@ -182,70 +271,91 @@ function getItem(id: number): MockItem {
   return m;
 }
 
+function ready(id: number): MockItem {
+  const m = getItem(id);
+  if (m.status !== 'ready') throw 'INTERNAL';
+  return m;
+}
+
 function newAnalysingItem(name: string): MockItem {
   const id = nextId++;
+  const dot = name.lastIndexOf('.');
   const m: MockItem = {
-    view: {
-      id,
-      name,
-      width: 0,
-      height: 0,
-      status: 'analysing',
-      error: null,
-      edit: null,
-      autoEdit: null,
-      confidence: null,
-      gen: 0,
-      edited: false,
-      saved: null,
-      dirtySinceSave: false,
-      canUndo: false,
-      canRedo: false,
-      undoLabel: null,
-      redoLabel: null,
-    },
+    id,
+    name,
+    stem: dot > 0 ? name.slice(0, dot) : name,
+    ext: dot > 0 ? name.slice(dot + 1).toLowerCase().replace('jpeg', 'jpg') : 'jpg',
+    status: 'analysing',
+    error: null,
+    width: 0,
+    height: 0,
+    gen: 0,
     src: null,
     spec: null,
-    history: [],
+    bed: null,
+    hist: [],
     cursor: 0,
-    failedUntouched: false,
+    auto: null,
+    accepted: null,
+    saved: null,
+    groupSaved: false,
+    openOnly: null,
   };
   items.set(id, m);
   return m;
 }
 
-async function finishAnalysis(
-  m: MockItem,
-  src: HTMLCanvasElement,
-  spec: SceneSpec | null,
-  width: number,
-  height: number,
-  auto: Edit,
-  confidence: Confidence,
-): Promise<void> {
+async function finishAnalysis(m: MockItem, src: HTMLCanvasElement, width: number, height: number, auto: ScanState): Promise<void> {
   m.src = src;
-  m.spec = spec;
-  m.history = [{ edit: cloneEdit(auto), label: 'Auto', drawn: false }];
+  m.auto = cloneState(auto);
+  m.hist = [{ state: cloneState(auto), label: 'Auto' }];
   m.cursor = 0;
-  m.failedUntouched = confidence.forced === 'failed' || confidence.score < 0.6;
-  m.view = {
-    ...m.view,
-    width,
-    height,
-    status: 'ready',
-    edit: cloneEdit(auto),
-    autoEdit: cloneEdit(auto),
-    confidence,
-    gen: 1,
-  };
-  await publish(m.view.id, 'src', 1, src);
+  m.width = width;
+  m.height = height;
+  m.status = 'ready';
+  m.gen = 1;
+  await publish(m.id, 'src', 1, src);
   await renderItem(m);
-  emit('item-updated', sync(m));
+  emit('item-updated', viewOf(m));
 }
 
 async function failAnalysis(m: MockItem, error: ErrorCode): Promise<void> {
-  m.view = { ...m.view, status: 'error', error, gen: 1 };
-  emit('item-updated', sync(m));
+  m.status = 'error';
+  m.error = error;
+  m.gen = 1;
+  emit('item-updated', viewOf(m));
+}
+
+const dimsOf = (m: MockItem): Dims => [m.src?.width ?? 1000, m.src?.height ?? 1000];
+
+// ---------------------------------------------------------------------------------------------- detection
+function documentState(edit: Edit, confidence: Confidence): ScanState {
+  let s = emptyState(settings.splitPolicy, settings.splitProfile);
+  s = addCrop(s, edit.quad, 'auto', [1000, 1000], confidence).state;
+  return s;
+}
+
+function bedCrops(spec: BedSpec): { quad: Quad; confidence: Confidence }[] {
+  return bedDetections(spec).map((d) => ({
+    quad: d.quad,
+    confidence: { score: d.score, forced: null, reasons: d.reasons.map((r) => ({ ...r })) as Reason[] },
+  }));
+}
+
+/** The initial crops of a bed scan under `policy`: several, or one around everything. */
+function bedState(spec: BedSpec, policy: ScanState['policy'], profile: ScanState['profile'], dims: Dims): ScanState {
+  let s = emptyState(policy, profile);
+  if (policy === 'never') {
+    s = addCrop(s, bedSingle(spec), 'auto', dims, { score: 0.97, forced: null, reasons: [] }).state;
+    return s;
+  }
+  for (const d of bedCrops(spec)) s = addCrop(s, d.quad, 'auto', dims, d.confidence).state;
+  // Candidates the detector looked at and rejected: excluded, restorable as items.
+  for (const dust of spec.dust) {
+    const r = addCrop(s, dust, 'auto', dims, { score: 0.41, forced: null, reasons: [] });
+    s = setInclude(r.state, r.id, false);
+  }
+  return s;
 }
 
 // ---------------------------------------------------------------------------------------------- samples
@@ -260,6 +370,8 @@ interface SampleDef {
   weak?: 'top' | 'right' | 'bottom' | 'left';
   skinny?: boolean;
   error?: ErrorCode;
+  bed?: 'albums' | 'receipts' | 'two' | 'locked';
+  openOnly?: string;
 }
 
 function sampleDefs(): SampleDef[] {
@@ -295,7 +407,16 @@ function sampleDefs(): SampleDef[] {
     const j = Math.floor(rnd() * (i + 1));
     [defs[i], defs[j]] = [defs[j], defs[i]];
   }
-  return defs;
+  const none = { score: 0.98, forced: null, reasons: [] as Reason[], kind: 'document' as const };
+  const multi: SampleDef[] = [
+    { name: 'scan_albums.jpg', ...none, bed: 'albums' },
+    { name: 'scan_receipts.jpg', ...none, bed: 'receipts' },
+    { name: 'scan_two.jpg', ...none, bed: 'two' },
+    { name: 'scan_locked.jpg', ...none, bed: 'locked' },
+    { name: 'ledger_pages.tif', kind: 'document', score: 0.98, forced: null, reasons: [], noise: 0.004, openOnly: 'tiff.multi_page' },
+    { name: 'holiday.webp', kind: 'receipt', score: 0.98, forced: null, reasons: [], noise: 0.004, openOnly: 'format.write_unavailable' },
+  ];
+  return [...multi, ...defs];
 }
 
 async function analyseSample(m: MockItem, d: SampleDef, seed: number): Promise<void> {
@@ -303,19 +424,31 @@ async function analyseSample(m: MockItem, d: SampleDef, seed: number): Promise<v
     await failAnalysis(m, d.error);
     return;
   }
+  if (d.bed) {
+    const spec = bedLayout(d.bed);
+    m.bed = spec;
+    const src = drawBed(spec);
+    const dims: Dims = [src.width, src.height];
+    await finishAnalysis(m, src, Math.round(src.width * 2.9), Math.round(src.height * 2.9), bedState(spec, settings.splitPolicy, settings.splitProfile, dims));
+    return;
+  }
   const rnd = mulberry32(seed * 31 + 5);
   const spec = makeSpec(rnd, d.kind, { ...d.opts, seed });
   const src = drawScene(spec);
-  let auto: Edit;
-  if (d.forced === 'failed' && !d.skinny) auto = failedPlaceholderEdit();
-  else if (d.skinny) auto = defaultEdit(skinnyQuad());
-  else auto = defaultEdit(detectQuad(spec, rnd, d.noise ?? 0.005, d.weak));
+  let edit: Edit;
+  if (d.forced === 'failed' && !d.skinny) edit = failedPlaceholderEdit();
+  else if (d.skinny) edit = defaultEdit(skinnyQuad());
+  else edit = defaultEdit(detectQuad(spec, rnd, d.noise ?? 0.005, d.weak));
+  m.spec = spec;
+  m.openOnly = d.openOnly ?? null;
   // Pretend the original is a 3.3x larger camera photo.
-  await finishAnalysis(m, src, spec, Math.round(spec.w * 3.33), Math.round(spec.h * 3.33), auto, {
-    score: d.score,
-    forced: d.forced,
-    reasons: d.reasons,
-  });
+  await finishAnalysis(
+    m,
+    src,
+    Math.round(spec.w * 3.33),
+    Math.round(spec.h * 3.33),
+    documentState(edit, { score: d.score, forced: d.forced, reasons: d.reasons }),
+  );
 }
 
 async function runAnalysisQueue(jobs: (() => Promise<void>)[]): Promise<void> {
@@ -333,7 +466,7 @@ async function addSamples(): Promise<OpenSummary> {
   const defs = sampleDefs();
   const base = nextId;
   const created = defs.map((d) => newAnalysingItem(d.name));
-  const ids = created.map((m) => m.view.id);
+  const ids = created.map((m) => m.id);
   const summary: OpenSummary = { added: ids.length, skipped: 0, ids, skippedReasons: [] };
   emit('items-added', summary);
   void runAnalysisQueue(created.map((m, i) => () => analyseSample(m, defs[i], base + i)));
@@ -342,26 +475,40 @@ async function addSamples(): Promise<OpenSummary> {
 }
 
 // ---------------------------------------------------------------------------------------------- user files
+const INPUT = ['jpg', 'jpeg', 'png', 'webp', 'tif', 'tiff'];
+
 async function addFiles(files: File[]): Promise<OpenSummary> {
-  const ok = files.filter((f) => /^image\/(jpeg|png)$/.test(f.type) || /\.(jpe?g|png)$/i.test(f.name));
+  const extOf = (f: File) => f.name.slice(f.name.lastIndexOf('.') + 1).toLowerCase();
+  const ok = files.filter((f) => INPUT.includes(extOf(f)));
   const skippedReasons: ErrorCode[] = files.filter((f) => !ok.includes(f)).map(() => 'UNSUPPORTED_FORMAT');
   const created = ok.map((f) => newAnalysingItem(f.name));
-  const ids = created.map((m) => m.view.id);
+  const ids = created.map((m) => m.id);
   const summary: OpenSummary = { added: ids.length, skipped: skippedReasons.length, ids, skippedReasons };
   if (ids.length > 0) {
     emit('items-added', summary);
     void runAnalysisQueue(
       created.map((m, i) => async () => {
         try {
-          const { canvas, width, height } = await canvasFromFile(ok[i]);
-          const rnd = mulberry32(m.view.id * 97);
+          const e = extOf(ok[i]);
+          const rnd = mulberry32(m.id * 97);
           const score = 0.62 + rnd() * 0.36;
-          // Without a detector the mock proposes a slightly inset full frame.
-          await finishAnalysis(m, canvas, null, width, height, defaultEdit(insetQuad(0.04)), {
+          const confidence: Confidence = {
             score,
             forced: null,
             reasons: score < 0.9 ? [{ code: 'WEAK_EDGE', side: (['top', 'right', 'bottom', 'left'] as const)[Math.floor(rnd() * 4)] }] : [],
-          });
+          };
+          // The browser cannot decode TIFF: a stand-in scene is shown, marked open-only like the real one.
+          const { canvas, width, height } =
+            e === 'tif' || e === 'tiff'
+              ? (() => {
+                  const c = drawScene(makeSpec(rnd, 'document', { seed: m.id }));
+                  return { canvas: c, width: c.width * 3, height: c.height * 3 };
+                })()
+              : await canvasFromFile(ok[i]);
+          if (e === 'webp') m.openOnly = 'format.write_unavailable';
+          if (e === 'tif' || e === 'tiff') m.openOnly = 'format.write_unavailable';
+          // Without a detector the mock proposes a slightly inset full frame.
+          await finishAnalysis(m, canvas, width, height, documentState(defaultEdit(insetQuad(0.04)), confidence));
         } catch {
           await failAnalysis(m, 'UNREADABLE');
         }
@@ -376,7 +523,7 @@ function chooseFiles(directory: boolean): Promise<File[]> {
     const input = document.createElement('input');
     input.type = 'file';
     input.multiple = true;
-    input.accept = 'image/jpeg,image/png';
+    input.accept = 'image/jpeg,image/png,image/webp,image/tiff';
     if (directory) (input as HTMLInputElement & { webkitdirectory: boolean }).webkitdirectory = true;
     input.style.display = 'none';
     document.body.appendChild(input);
@@ -391,21 +538,101 @@ function chooseFiles(directory: boolean): Promise<File[]> {
 }
 
 // ---------------------------------------------------------------------------------------------- edits
-function pushHistory(m: MockItem, edit: Edit, label: string, drawn: boolean): void {
-  m.history = m.history.slice(0, m.cursor + 1);
-  m.history.push({ edit: cloneEdit(edit), label, drawn });
-  m.cursor = m.history.length - 1;
+/** The 1-based place of a crop for a history label: its output rank, or its place in the list while excluded. */
+function who(state: ScanState, id: number): string {
+  const inc = included(state);
+  const r = inc.findIndex((c) => c.id === id);
+  if (r >= 0) return String(r + 1);
+  const i = state.crops.findIndex((c) => c.id === id);
+  return i >= 0 ? String(i + 1) : `#${id}`;
 }
 
-async function commit(m: MockItem): Promise<ItemView> {
-  m.view = { ...m.view, edit: cloneEdit(m.history[m.cursor].edit), gen: m.view.gen + 1 };
-  if (m.view.saved) m.view = { ...m.view, dirtySinceSave: true };
-  const now = sync(m);
-  const c = now.confidence;
-  m.failedUntouched = !!c && (c.forced === 'failed' || c.score < 0.6) && !now.edited;
-  await renderItem(m);
-  return sync(m);
+function labelled(label: string, state: ScanState, id: number): string {
+  return state.crops.length > 1 ? `${label} (item ${who(state, id)})` : label;
 }
+
+function refuse(e: unknown): never {
+  if (e instanceof ItemOpError) throw e.code;
+  throw e;
+}
+
+/** Applies `fn` to a copy of the current state and commits the result as ONE undo step. A refusal changes nothing. */
+async function commitOp(m: MockItem, label: (before: ScanState) => string, fn: (s: ScanState) => ScanState): Promise<ItemView> {
+  const before = current(m);
+  let next: ScanState;
+  try {
+    next = fn(before);
+  } catch (e) {
+    refuse(e);
+  }
+  await sleep(15 + Math.random() * 25);
+  const text = label(before);
+  m.hist = m.hist.slice(0, m.cursor + 1);
+  m.hist.push({ state: next, label: text.slice(0, 60) });
+  m.cursor = m.hist.length - 1;
+  return bump(m);
+}
+
+async function bump(m: MockItem): Promise<ItemView> {
+  m.gen++;
+  await renderItem(m);
+  const v = viewOf(m);
+  emit('item-updated', v);
+  return v;
+}
+
+async function seek(m: MockItem, position: number): Promise<ItemView> {
+  m.cursor = Math.min(Math.max(0, position), m.hist.length - 1);
+  return bump(m);
+}
+
+// ---- session history: one entry for a change made to many images (M10.19)
+interface SessionCmd {
+  label: string;
+  moves: { id: number; before: number; after: number }[];
+}
+let sessionLog: SessionCmd[] = [];
+let sessionCursor = 0;
+
+async function sessionStep(undo: boolean): Promise<SessionStep | null> {
+  if (undo ? sessionCursor === 0 : sessionCursor >= sessionLog.length) return null;
+  const cmd = undo ? sessionLog[--sessionCursor] : sessionLog[sessionCursor++];
+  const out: ItemView[] = [];
+  for (const mv of cmd.moves) {
+    const m = items.get(mv.id);
+    if (m && m.status === 'ready') out.push(await seek(m, undo ? mv.before : mv.after));
+  }
+  return { label: cmd.label, items: out };
+}
+
+function detectionsFor(m: MockItem, policy: ScanState['policy']): { quad: Quad; confidence: Confidence | null }[] {
+  if (m.bed) {
+    if (policy === 'never') return [{ quad: bedSingle(m.bed), confidence: { score: 0.97, forced: null, reasons: [] } }];
+    return bedCrops(m.bed);
+  }
+  // A single paper: the same crop whatever the policy.
+  const base = m.auto?.crops[0];
+  return base ? [{ quad: base.quad, confidence: base.confidence }] : [];
+}
+
+async function redetectOne(m: MockItem, patch: SplitPatch): Promise<ItemView> {
+  const cur = current(m);
+  const policy = patch.policy ?? cur.policy;
+  const profile = patch.profile ?? cur.profile;
+  const label = patch.policy === 'never' ? 'Treat as one item' : patch.policy ? 'Split into items' : 'Re-detect items';
+  return commitOp(
+    m,
+    () => label,
+    (s) => {
+      const next = redetectState(s, detectionsFor(m, policy), dimsOf(m));
+      next.policy = policy;
+      next.profile = profile;
+      return next;
+    },
+  );
+}
+
+const firstCrop = (s: ScanState): ModelCrop | undefined => included(s)[0] ?? s.crops[0];
 
 const api: Api = {
   async launchInfo(): Promise<LaunchInfo> {
@@ -414,6 +641,7 @@ const api: Api = {
       version: '0.0.0-mock',
       platform: navigator.userAgent.includes('Windows') ? 'windows' : navigator.userAgent.includes('Mac') ? 'macos' : 'linux',
       backupsLocation: '%LOCALAPPDATA%\\AutoCrop\\backups',
+      inputExtensions: [...INPUT],
     };
   },
   async pickFiles() {
@@ -424,52 +652,46 @@ const api: Api = {
   },
   addSamples,
   async listItems() {
-    return [...items.values()].map(snapshot);
+    return [...items.values()].map(viewOf);
   },
   async setEdit(id, edit, phase, label) {
-    const m = getItem(id);
-    if (m.view.status !== 'ready') throw new Error('item is not ready');
-    if (phase === 'live') {
-      m.view = { ...m.view, edit: cloneEdit(edit) };
-      return { ...snapshot(m), edit: cloneEdit(edit) };
-    }
-    await sleep(30 + Math.random() * 50);
-    pushHistory(m, edit, label, m.history[m.cursor].drawn);
-    const v = await commit(m);
-    emit('item-updated', v);
-    return v;
+    const m = ready(id);
+    const c = firstCrop(current(m));
+    if (!c) throw 'NO_CROP';
+    return api.setCropEdit(m.id, c.id, edit, phase, label, null);
   },
   async undo(id) {
-    const m = getItem(id);
-    await sleep(30);
-    if (m.cursor > 0) m.cursor--;
-    const v = await commit(m);
-    emit('item-updated', v);
-    return v;
+    const m = ready(id);
+    await sleep(25);
+    return seek(m, m.cursor - 1);
   },
   async redo(id) {
-    const m = getItem(id);
-    await sleep(30);
-    if (m.cursor < m.history.length - 1) m.cursor++;
-    const v = await commit(m);
-    emit('item-updated', v);
-    return v;
+    const m = ready(id);
+    await sleep(25);
+    return seek(m, m.cursor + 1);
   },
   async resetToAuto(id) {
-    const m = getItem(id);
-    await sleep(40);
-    if (m.view.autoEdit) pushHistory(m, m.view.autoEdit, 'Reset to auto', false);
-    const v = await commit(m);
-    emit('item-updated', v);
-    return v;
+    const m = ready(id);
+    return commitOp(
+      m,
+      () => 'Reset to auto',
+      () => cloneState(m.auto!),
+    );
   },
   async drawCrop(id) {
-    const m = getItem(id);
-    await sleep(40);
-    pushHistory(m, failedPlaceholderEdit(), 'Draw crop', true);
-    const v = await commit(m);
-    emit('item-updated', v);
-    return v;
+    const m = ready(id);
+    return commitOp(
+      m,
+      () => 'Draw crop',
+      (s) => {
+        const quad = failedPlaceholderEdit().quad;
+        const c = firstCrop(s);
+        if (!c) return addCrop(s, quad, 'manual', dimsOf(m)).state;
+        const next = editCrop(s, c.id, { quad, quarterTurns: 0, fineDeg: 0 }, dimsOf(m));
+        next.crops.find((x) => x.id === c.id)!.origin = 'manual';
+        return next;
+      },
+    );
   },
   async removeItems(ids) {
     for (const id of ids) items.delete(id);
@@ -481,41 +703,79 @@ const api: Api = {
     const runId = `run-${Date.now().toString(36)}`;
     const files: BackupFile[] = [];
     const failIndex = !failedOnce && ids.length >= 6 ? 2 : -1;
+    const copy = target === 'copy';
     for (let i = 0; i < ids.length; i++) {
       const m = items.get(ids[i]);
       await sleep(25);
-      if (!m || m.view.status !== 'ready') {
-        outcomes.push({ id: ids[i], ok: false, error: 'INTERNAL', saved: null });
+      const fail = (error: ErrorCode, notices: string[] = []) => outcomes.push({ id: ids[i], ok: false, error, saved: null, notes: [], notices });
+      if (!m || m.status !== 'ready') {
+        fail('INTERNAL');
+        continue;
+      }
+      if (forcedFailure) {
+        const code = forcedFailure;
+        forcedFailure = null;
+        fail(code);
         continue;
       }
       if (i === failIndex) {
         failedOnce = true;
-        outcomes.push({ id: ids[i], ok: false, error: 'SOURCE_CHANGED', saved: null });
+        fail('SOURCE_CHANGED');
         continue;
       }
-      const copy = target === 'copy';
-      const bytes = 2_000_000 + ((m.view.id * 7919) % 3_000_000);
+      const state = current(m);
+      const inc = included(state);
+      if (inc.length === 0) {
+        fail('NO_CROP');
+        continue;
+      }
+      if (!copy && m.openOnly) {
+        fail('NOT_REPLACEABLE', [m.openOnly]);
+        continue;
+      }
+      const split = inc.length >= 2;
+      const sig = renderSignature(state);
+      if (split && !copy) {
+        const approved = settings.autoSaveSplits && triage(state).kind === 'approved';
+        if (!(m.accepted === sig || approved)) {
+          fail('HELD_FOR_REVIEW', ['split.held']);
+          continue;
+        }
+      }
+      // Output names: a copy of an open-only source is a PNG; a taken name moves the WHOLE set to `name (2)`.
+      const ext = copy && m.openOnly ? 'png' : m.ext;
+      let stem = m.stem;
+      const plan = (s: string) => (split ? outputNames(s, ext, inc.length) : [outputName(s, ext, 1, 1)]);
+      const ownOld = new Set(m.saved?.outputs ?? []);
+      const notices: string[] = [];
+      if (plan(stem).some((n) => existingNames.has(n) && !ownOld.has(n))) {
+        stem = `${stem} (2)`;
+      }
+      const outputs = plan(stem);
+      for (const n of outputs) existingNames.add(n);
+      const bytes = 2_000_000 + ((m.id * 7919) % 3_000_000);
       let backupId: string | null = null;
       if (!copy) {
         backupId = `${runId}/${files.length}`;
+        const derived: DerivedFile[] = split ? outputs.map((name, k) => ({ name, bytes: Math.round((bytes * 0.3) / inc.length) + k * 1000, state: 'unchanged' })) : [];
         files.push({
           id: backupId,
-          name: m.view.name,
-          displayPath: `C:\\Users\\you\\Pictures\\Receipts\\${m.view.name}`,
+          name: m.name,
+          displayPath: `C:\\Users\\you\\Pictures\\Receipts\\${m.name}`,
           originalBytes: bytes,
           outputBytes: Math.round(bytes * 0.32),
           changedSinceSaved: false,
           restored: false,
+          kind: split ? 'OneToN' : 'OneToOne',
+          derived,
         });
       }
-      m.view = {
-        ...m.view,
-        saved: { backupId, output: m.view.name, copy },
-        dirtySinceSave: false,
-        gen: m.view.gen + 1,
-      };
-      const v = sync(m);
-      outcomes.push({ id: m.view.id, ok: true, error: null, saved: v.saved });
+      m.saved = { backupId, output: outputs[0], outputs: split ? outputs : [], copy, sig };
+      m.groupSaved = split;
+      m.gen++;
+      const notes: ErrorCode[] = split && !copy && m.name === 'scan_locked.jpg' ? ['SAVED_SOURCE_IN_USE'] : [];
+      const v = viewOf(m);
+      outcomes.push({ id: m.id, ok: true, error: null, saved: v.saved, notes, notices });
       emit('item-updated', v);
     }
     if (files.length > 0) {
@@ -537,7 +797,8 @@ const api: Api = {
     return { ...settings };
   },
   async setSettings(s) {
-    settings = { ...s };
+    // The engine takes the whole object: anything missing resets to its default.
+    settings = { ...defaultSettings(), ...s };
     for (const r of backups) if (!r.pinned) r.expiresAt = expiry(Date.parse(r.createdAt));
     return { ...settings };
   },
@@ -548,38 +809,50 @@ const api: Api = {
       location: '%LOCALAPPDATA%\\AutoCrop\\backups',
       usedBytes: used,
       freeBytes: 212 * 1024 ** 3,
-      runs: backups.map((r) => ({ ...r, files: r.files.map((f) => ({ ...f })) })),
+      runs: backups.map((r) => ({ ...r, files: r.files.map((f) => ({ ...f, derived: f.derived.map((d) => ({ ...d })) })) })),
     };
   },
   async restoreFile(fileId: string, mode: RestoreMode): Promise<RestoreOutcome> {
+    return api.restoreFileDerived(fileId, mode, 'keep');
+  },
+  async restoreRun(runId: string): Promise<RestoreOutcome[]> {
+    return api.restoreRunDerived(runId, 'keep');
+  },
+  async restoreFileDerived(fileId, mode, derived): Promise<RestoreOutcome> {
     await sleep(120);
     const found = findFile(fileId);
-    if (!found) return { ok: false, needsChoice: false, error: 'ORIGINAL_EXPIRED', restored: null };
+    if (!found) return { ok: false, needsChoice: false, error: 'ORIGINAL_EXPIRED', restored: null, derived: [] };
     const { run, file } = found;
     if (run.expiresAt && Date.parse(run.expiresAt) < Date.now()) {
-      return { ok: false, needsChoice: false, error: 'ORIGINAL_EXPIRED', restored: null };
+      return { ok: false, needsChoice: false, error: 'ORIGINAL_EXPIRED', restored: null, derived: [] };
     }
-    if (mode === 'auto' && file.changedSinceSaved) return { ok: false, needsChoice: true, error: null, restored: null };
+    if (mode === 'auto' && file.changedSinceSaved) return { ok: false, needsChoice: true, error: null, restored: null, derived: [] };
     const dot = file.name.lastIndexOf('.');
     const copyName = dot > 0 ? `${file.name.slice(0, dot)} (restored)${file.name.slice(dot)}` : `${file.name} (restored)`;
+    if (derived === 'remove') {
+      // Only files still exactly as saved are moved (to the backup store, never deleted); edited or missing ones stay.
+      for (const d of file.derived) if (d.state === 'unchanged') d.state = 'removed';
+    }
     file.restored = true;
     file.changedSinceSaved = false;
     // If the file belongs to an item of this session, the original is back on disk.
     for (const m of items.values()) {
-      if (m.view.saved?.backupId === file.id && mode !== 'as_copy') {
-        m.view = { ...m.view, saved: null, dirtySinceSave: false, gen: m.view.gen + 1 };
-        emit('item-updated', sync(m));
+      if (m.saved?.backupId === file.id && mode !== 'as_copy') {
+        m.saved = null;
+        m.groupSaved = false;
+        m.gen++;
+        emit('item-updated', viewOf(m));
       }
     }
-    return { ok: true, needsChoice: false, error: null, restored: mode === 'as_copy' ? copyName : file.name };
+    return { ok: true, needsChoice: false, error: null, restored: mode === 'as_copy' ? copyName : file.name, derived: file.derived.map((d) => ({ ...d })) };
   },
-  async restoreRun(runId: string): Promise<RestoreOutcome[]> {
+  async restoreRunDerived(runId, derived): Promise<RestoreOutcome[]> {
     const run = backups.find((r) => r.id === runId);
     if (!run) return [];
     const out: RestoreOutcome[] = [];
     for (const f of run.files) {
       if (f.restored) continue;
-      out.push(await api.restoreFile(f.id, 'auto'));
+      out.push(await api.restoreFileDerived(f.id, 'auto', derived));
     }
     return out;
   },
@@ -601,6 +874,130 @@ const api: Api = {
   async openBackupsFolder() {
     console.info('[mock] open backups folder');
   },
+
+  // ---- multi-item operations ------------------------------------------------------------------------
+  async setCropEdit(id, crop, edit, phase, label, _gesture) {
+    const m = ready(id);
+    if (phase === 'live') {
+      const c = current(m).crops.find((x) => x.id === crop);
+      if (!c) throw 'ITEM_OP';
+      return { ...viewOf(m), edit: cloneEdit(edit) };
+    }
+    const dims = dimsOf(m);
+    return commitOp(
+      m,
+      (b) => labelled(label, b, crop),
+      (s) => editCrop(s, crop, edit, dims),
+    );
+  },
+  async addCrop(id, quad, at) {
+    const m = ready(id);
+    const dims = dimsOf(m);
+    return commitOp(
+      m,
+      () => 'Add item',
+      (s) => {
+        let q: Quad;
+        if (quad) q = quad;
+        else if (at) {
+          const x0 = Math.min(0.8, Math.max(0, at.x - 0.1));
+          const x1 = Math.max(0.2, Math.min(1, at.x + 0.1));
+          const y0 = Math.min(0.8, Math.max(0, at.y - 0.1));
+          const y1 = Math.max(0.2, Math.min(1, at.y + 0.1));
+          q = [
+            { x: x0, y: y0 },
+            { x: x1, y: y0 },
+            { x: x1, y: y1 },
+            { x: x0, y: y1 },
+          ];
+        } else q = insetQuad(0.2);
+        return addCrop(s, q, 'manual', dims).state;
+      },
+    );
+  },
+  async removeCrop(id, crop) {
+    const m = ready(id);
+    return commitOp(m, (b) => labelled('Remove', b, crop), (s) => setInclude(s, crop, false));
+  },
+  async restoreCrop(id, crop) {
+    const m = ready(id);
+    return commitOp(m, (b) => labelled('Restore', b, crop), (s) => setInclude(s, crop, true));
+  },
+  async mergeCrops(id, crops) {
+    const m = ready(id);
+    const dims = dimsOf(m);
+    return commitOp(m, () => `Merge ${new Set(crops).size} items`, (s) => mergeCrops(s, crops, dims).state);
+  },
+  async cutCrop(id, crop, cut) {
+    const m = ready(id);
+    const dims = dimsOf(m);
+    return commitOp(m, (b) => labelled('Cut', b, crop), (s) => cutCrop(s, crop, cut, dims).state);
+  },
+  async moveCrop(id, crop, toIndex) {
+    const m = ready(id);
+    return commitOp(m, (b) => labelled('Move', b, crop), (s) => moveCrop(s, crop, toIndex));
+  },
+  async useReadingOrder(id) {
+    const m = ready(id);
+    return commitOp(m, () => 'Reading order', (s) => useReadingOrder(s));
+  },
+  async turnCrop(id, crop, clockwise) {
+    const m = ready(id);
+    return commitOp(m, (b) => labelled(clockwise ? 'Turn right' : 'Turn left', b, crop), (s) => turnCrop(s, crop, clockwise));
+  },
+  async setCropAngle(id, crop, deg, _gesture) {
+    const m = ready(id);
+    return commitOp(m, (b) => labelled('Straighten', b, crop), (s) => angleCrop(s, crop, deg));
+  },
+  async flipCrop(id, crop) {
+    const m = ready(id);
+    return commitOp(m, (b) => labelled('Flip', b, crop), (s) => flipCrop(s, crop));
+  },
+  async revertCrop(id, crop, to) {
+    const m = ready(id);
+    const baseline = to.kind === 'auto' ? m.auto : (m.hist[to.position]?.state ?? null);
+    if (!baseline) throw 'ITEM_OP';
+    return commitOp(m, (b) => labelled('Revert', b, crop), (s) => revertCrop(s, crop, baseline));
+  },
+  async redetect(id, patch) {
+    return redetectOne(ready(id), patch);
+  },
+  async redetectMany(ids, patch): Promise<RedetectResult[]> {
+    const label = patch.policy === 'never' ? 'Treat as one item' : patch.policy ? 'Split into items' : 'Re-detect items';
+    const cmd: SessionCmd = { label: `${label} (${ids.length} images)`, moves: [] };
+    const out: RedetectResult[] = [];
+    for (const id of ids) {
+      try {
+        const m = ready(id);
+        const before = m.cursor;
+        const view = await redetectOne(m, patch);
+        cmd.moves.push({ id, before, after: m.cursor });
+        out.push({ id, view, error: null });
+      } catch (e) {
+        out.push({ id, view: null, error: typeof e === 'string' ? (e as ErrorCode) : 'INTERNAL' });
+      }
+    }
+    sessionLog = sessionLog.slice(0, sessionCursor);
+    sessionLog.push(cmd);
+    sessionCursor = sessionLog.length;
+    return out;
+  },
+  sessionUndo: () => sessionStep(true),
+  sessionRedo: () => sessionStep(false),
+  async acceptScan(id) {
+    const m = ready(id);
+    m.accepted = renderSignature(current(m));
+    const v = viewOf(m);
+    emit('item-updated', v);
+    return v;
+  },
+  async unacceptScan(id) {
+    const m = ready(id);
+    m.accepted = null;
+    const v = viewOf(m);
+    emit('item-updated', v);
+    return v;
+  },
 };
 
 // ---------------------------------------------------------------------------------------------- backups
@@ -617,6 +1014,8 @@ function mkFiles(runId: string, names: string[], changed: number[] = []): Backup
     outputBytes: 1_100_000 + i * 90_000,
     changedSinceSaved: changed.includes(i),
     restored: false,
+    kind: 'OneToOne',
+    derived: [],
   }));
 }
 
@@ -625,8 +1024,34 @@ function seedBackups(): BackupRun[] {
   const a = mkFiles('seed-a', ['IMG_0007.jpg', 'IMG_0133.jpg', 'IMG_0094.jpg'], [1]);
   const b = mkFiles('seed-b', ['scan_01.jpg', 'scan_02.jpg']);
   const c = mkFiles('seed-c', ['IMG_5501.jpg', 'IMG_5502.jpg', 'IMG_5503.jpg', 'IMG_5504.jpg']);
+  const album: BackupFile = {
+    id: 'seed-d/0',
+    name: 'album_page.jpg',
+    displayPath: 'C:\\Users\\you\\Pictures\\Scans\\album_page.jpg',
+    originalBytes: 9_800_000,
+    outputBytes: 4_100_000,
+    changedSinceSaved: false,
+    restored: false,
+    kind: 'OneToN',
+    derived: [
+      { name: 'album_page_01.jpg', bytes: 1_200_000, state: 'unchanged' },
+      { name: 'album_page_02.jpg', bytes: 1_150_000, state: 'unchanged' },
+      { name: 'album_page_03.jpg', bytes: 980_000, state: 'changed' },
+      { name: 'album_page_04.jpg', bytes: 1_020_000, state: 'missing' },
+    ],
+  };
   const total = (f: BackupFile[]) => f.reduce((s, x) => s + x.originalBytes, 0);
   return [
+    {
+      id: 'seed-d',
+      name: 'Album scans',
+      createdAt: new Date(now - 3_600_000).toISOString(),
+      expiresAt: new Date(now + 30 * DAY).toISOString(),
+      fileCount: 1,
+      totalBytes: album.originalBytes,
+      pinned: false,
+      files: [album],
+    },
     {
       id: 'seed-a',
       name: 'Sep-receipts',
@@ -670,10 +1095,20 @@ function findFile(fileId: string): { run: BackupRun; file: BackupFile } | null {
   return null;
 }
 
+// ---------------------------------------------------------------------------------------------- test hooks
+if (typeof window !== 'undefined') {
+  (window as unknown as Record<string, unknown>).__autoCropMock = {
+    failNextSave: (code: ErrorCode) => {
+      forcedFailure = code;
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------------------------- export
 export const mockImpl: BackendImpl = {
   api,
   imageUrl: mockImageUrl,
+  cropImageUrl: mockCropImageUrl,
   async on<K extends keyof Events>(event: K, cb: (payload: Events[K]) => void): Promise<Unlisten> {
     listeners[event].add(cb);
     return () => {

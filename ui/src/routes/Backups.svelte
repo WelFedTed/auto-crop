@@ -4,12 +4,72 @@
   import { onMount } from 'svelte';
   import { api } from '../lib/backend.ts';
   import Icon from '../lib/components/Icon.svelte';
+  import RestoreDialog from '../lib/components/RestoreDialog.svelte';
   import { formatBytes, formatDate, formatDateTime, isPast } from '../lib/format.ts';
   import { href, navigate, router } from '../lib/router.svelte.ts';
   import { routePath } from '../lib/routes.ts';
   import { store } from '../lib/store.svelte.ts';
   import { errorMessage, RETENTION_OPTIONS, S } from '../lib/strings.ts';
-  import type { BackupFile, BackupRun, BackupsView, RestoreMode, RestoreOutcome } from '../lib/types.ts';
+  import type { BackupFile, BackupRun, BackupsView, DerivedAction, DerivedFile, RestoreMode, RestoreOutcome } from '../lib/types.ts';
+
+  /** The restore dialog: for one split scan, or for every split scan of a run. */
+  let dialog = $state.raw<{ title: string; files: DerivedFile[]; file: BackupFile | null; run: BackupRun | null } | null>(null);
+  let dialogBusy = $state(false);
+
+  const isSplit = (f: BackupFile): boolean => f.kind === 'OneToN';
+
+  function askRestore(file: BackupFile): void {
+    dialog = { title: S.restoreDialog.title(file.name), files: file.derived, file, run: null };
+  }
+
+  function askRestoreRun(run: BackupRun): void {
+    const files = run.files.filter((f) => isSplit(f) && !f.restored).flatMap((f) => f.derived);
+    dialog = { title: S.restoreDialog.title(run.name), files, file: null, run };
+  }
+
+  async function confirmRestore(action: DerivedAction): Promise<void> {
+    const d = dialog;
+    if (!d) return;
+    dialogBusy = true;
+    try {
+      if (d.file) {
+        const o = await api.restoreFileDerived(d.file.id, 'auto', action);
+        dialog = null;
+        if (o.needsChoice) {
+          asking = mark(asking, d.file.id, true);
+        } else if (o.ok) {
+          const kept = o.derived.filter((x) => x.state !== 'removed').length;
+          const removed = o.derived.filter((x) => x.state === 'removed').length;
+          const restoredName = o.restored ?? d.file.name;
+          notice = {
+            kind: 'ok',
+            text:
+              S.restoreDialog.result(restoredName, kept, removed) + (restoredName !== d.file.name ? ` ${S.restoreDialog.occupied(restoredName)}` : ''),
+          };
+          store.announce(notice.text);
+        } else notice = { kind: 'warn', text: `${d.file.name}: ${errorMessage(o.error)}` };
+      } else if (d.run) {
+        const outcomes = await api.restoreRunDerived(d.run.id, action);
+        dialog = null;
+        const ok = outcomes.filter((o) => o.ok).length;
+        const choice = outcomes.filter((o) => o.needsChoice).length;
+        notice = { kind: outcomes.length - ok - choice > 0 || choice > 0 ? 'warn' : 'ok', text: S.backups.restoredRun(ok, choice, outcomes.length - ok - choice) };
+        store.announce(notice.text);
+        if (choice > 0) {
+          const pending = new Set(asking);
+          for (const f of d.run.files) if (f.changedSinceSaved && !f.restored) pending.add(f.id);
+          asking = pending;
+        }
+      }
+      await Promise.all([load(), store.refreshItems()]);
+    } catch (e) {
+      console.error(e);
+      dialog = null;
+      notice = { kind: 'warn', text: S.toasts.backendError };
+    } finally {
+      dialogBusy = false;
+    }
+  }
 
   let view = $state.raw<BackupsView | null>(null);
   let loading = $state(true);
@@ -58,6 +118,10 @@
   }
 
   async function restore(file: BackupFile, mode: RestoreMode): Promise<void> {
+    if (isSplit(file) && mode === 'auto') {
+      askRestore(file);
+      return;
+    }
     busy = mark(busy, file.id, true);
     try {
       const o = await api.restoreFile(file.id, mode);
@@ -85,6 +149,11 @@
   }
 
   async function restoreRun(run: BackupRun): Promise<void> {
+    // A run with split scans asks about the files made from them first (Keep or Remove).
+    if (run.files.some((f) => isSplit(f) && !f.restored)) {
+      askRestoreRun(run);
+      return;
+    }
     busy = mark(busy, run.id, true);
     try {
       const outcomes: RestoreOutcome[] = await api.restoreRun(run.id);
@@ -242,14 +311,28 @@
                   <div class="frow">
                     <span class="fthumb"><Icon name="image" size={20} /></span>
                     <div class="finfo">
-                      <div class="fname mono">{f.name} <span class="fnote" class:warn={f.changedSinceSaved && !f.restored} class:okay={f.restored}>{fileNote(f)}</span></div>
+                      <div class="fname mono">
+                        {isSplit(f) ? S.backups.splitRunLine(f.name, f.derived.length) : f.name}
+                        {#if isSplit(f)}<span class="badge accent splitbadge">{S.backups.splitBadge}</span>{/if}
+                        <span class="fnote" class:warn={f.changedSinceSaved && !f.restored} class:okay={f.restored}>{fileNote(f)}</span>
+                      </div>
                       <div class="fpath mono" title={f.displayPath}>{f.displayPath}</div>
+                      {#if isSplit(f)}
+                        <ul class="derived" aria-label={S.backups.derivedHeading(f.derived.length)}>
+                          {#each f.derived as d (d.name)}
+                            <li class={d.state}>
+                              <span class="mono">{d.name}</span>
+                              <span class="ds">{formatBytes(d.bytes)} · {S.backups.derivedState[d.state]}</span>
+                            </li>
+                          {/each}
+                        </ul>
+                      {/if}
                     </div>
                     {#if f.restored}
                       <span class="badge good"><Icon name="good" size={14} stroke={2} /> {S.backups.restored}</span>
                     {:else}
                       <button type="button" class="btn btn-sm btn-primary" disabled={busy.has(f.id) || expired} onclick={() => restore(f, 'auto')}>
-                        {S.backups.restore}
+                        {isSplit(f) ? S.backups.restoreSplit : S.backups.restore}
                       </button>
                     {/if}
                   </div>
@@ -275,6 +358,15 @@
     <button type="button" class="btn btn-sm" onclick={() => navigate('/settings')}>{S.nav.settings}</button>
   </footer>
 </div>
+
+<RestoreDialog
+  open={dialog !== null}
+  title={dialog?.title ?? ''}
+  files={dialog?.files ?? []}
+  busy={dialogBusy}
+  onrestore={(a) => void confirmRestore(a)}
+  oncancel={() => (dialog = null)}
+/>
 
 <style>
   .top {
@@ -441,7 +533,7 @@
     overflow: hidden;
   }
 
-  .files li {
+  .files > li {
     padding: 10px 12px;
     border-bottom: 1px solid var(--line-soft);
     display: flex;
@@ -449,11 +541,11 @@
     gap: 8px;
   }
 
-  .files li:last-child {
+  .files > li:last-child {
     border-bottom: 0;
   }
 
-  .files li.changed {
+  .files > li.changed {
     background: var(--check-bg);
   }
 
@@ -498,6 +590,41 @@
 
   .fnote.okay {
     color: var(--good-fg);
+  }
+
+  .splitbadge {
+    margin: 0 4px;
+    font-family: var(--font-sans);
+  }
+
+  .derived {
+    list-style: none;
+    margin: 6px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 12px;
+  }
+
+  .derived li {
+    display: flex;
+    gap: 10px;
+    color: var(--text-2);
+  }
+
+  .derived .ds {
+    color: var(--text-3);
+  }
+
+  .derived li.changed .ds {
+    color: var(--check-fg);
+    font-weight: 600;
+  }
+
+  .derived li.missing,
+  .derived li.removed {
+    color: var(--text-3);
   }
 
   .fpath {

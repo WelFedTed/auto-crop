@@ -167,3 +167,27 @@ fn draw_crop_keeps_the_crops_an_image_already_has() {
     };
     assert_eq!(nothing.crops.len(), 1);
 }
+
+#[test]
+fn the_multi_item_samples_split_with_the_default_detector_and_wait_for_review() {
+    let root = tempfile::tempdir().unwrap();
+    let engine = Engine::new(AppPaths::under(root.path()));
+    let summary = engine.add_samples().unwrap();
+    let mut counts = std::collections::BTreeMap::new();
+    for id in summary.ids {
+        let v = engine.item_view(id).unwrap();
+        if !v.name.starts_with("scan_") {
+            continue;
+        }
+        let v = engine.analyse(id).unwrap();
+        assert_eq!(v.status, ItemStatus::Ready, "{}: {:?}", v.name, v.error);
+        let split = v.split.as_ref().unwrap();
+        // Held by default: nothing is saved over the scan until the person accepts the split.
+        assert!(!split.accepted, "{}", v.name);
+        counts.insert(v.name.clone(), v.crops.iter().filter(|c| c.include).count());
+    }
+    assert_eq!(counts.len(), 3, "{counts:?}");
+    assert!(counts["scan_album_page.jpg"] >= 4, "{counts:?}");
+    assert_eq!(counts["scan_two_photos.jpg"], 2, "{counts:?}");
+    assert_eq!(counts["scan_three_receipts.jpg"], 3, "{counts:?}");
+}

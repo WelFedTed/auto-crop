@@ -40,8 +40,8 @@
           <div class="drop-icon"><Icon name="upload" size={28} /></div>
           <div class="drop-title">{S.home.dropTitle}</div>
           <div class="drop-sub">{S.home.dropSub}</div>
-          <div class="formats mono">{S.home.formats}</div>
-          <div class="formats-note">{S.home.formatsNote}</div>
+          <div class="formats mono" data-formats>{S.home.formats(store.launch?.inputExtensions)}</div>
+          <div class="formats-note">{S.home.formatsNote(store.launch?.inputExtensions)}</div>
         </div>
 
         <div class="buttons">

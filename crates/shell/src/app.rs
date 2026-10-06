@@ -577,6 +577,24 @@ pub fn run() {
             purge_now,
             open_backups_folder,
         ])
+        .setup(|app| {
+            // "Open with" and `AutoCrop.exe file-or-folder ...`: paths on the command line are opened like a
+            // drop. They are opened here, in Rust, before the webview asks for its list of items.
+            let paths: Vec<PathBuf> = std::env::args_os()
+                .skip(1)
+                .map(PathBuf::from)
+                .filter(|p| p.exists())
+                .collect();
+            if !paths.is_empty()
+                && let Some(shared) = app.try_state::<Shared>()
+            {
+                let summary = shared.engine.open_paths(&paths, true);
+                shared
+                    .engine
+                    .spawn_analysis(summary.ids, notifier(app.handle()));
+            }
+            Ok(())
+        })
         .on_window_event(|window, event| {
             // Drag-and-drop runs here, in Rust: paths are registered and the webview only ever
             // sees opaque ids (PLAN 8.6.4).

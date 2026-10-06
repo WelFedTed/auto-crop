@@ -7,6 +7,7 @@
 
 import { applyH, solveHomography, type H, type Pt as PxPt } from './homography.ts';
 import { insetQuad, type Quad } from './quad.ts';
+import { mulberry32 } from './rng.ts';
 import type { Edit, Side } from './types.ts';
 
 export interface SceneSpec {
@@ -26,16 +27,7 @@ export interface SceneSpec {
   seed: number;
 }
 
-export function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+export { mulberry32 };
 
 function makeCanvas(w: number, h: number): HTMLCanvasElement {
   const c = document.createElement('canvas');
@@ -376,4 +368,232 @@ export function defaultEdit(q: Quad): Edit {
 
 export function failedPlaceholderEdit(): Edit {
   return defaultEdit(insetQuad(0.05));
+}
+
+// ------------------------------------------------------------------------------------------ bed scans
+// Several items on a scanner bed (the multi-item mock scenes): photos and receipts on a light bed, some touching,
+// a speck of dust the detector rejects. Each item is drawn through the same homography as the single scenes.
+
+export interface BedItem {
+  quad: Quad;
+  kind: 'photo' | 'receipt';
+  hue: number;
+  /** Items with the same group touch: the detector finds one cluster crop for them and flags it. */
+  group?: number;
+  score: number;
+}
+
+export interface BedSpec {
+  w: number;
+  h: number;
+  bg: string;
+  items: BedItem[];
+  /** Specks of dust the detector looks at and rejects (excluded candidates). */
+  dust: Quad[];
+  seed: number;
+}
+
+/** A rotated rectangle given in pixels around a normalised centre, as a normalised quad TL TR BR BL. */
+export function rotatedBox(W: number, H: number, cx: number, cy: number, wpx: number, hpx: number, deg: number): Quad {
+  const th = (deg * Math.PI) / 180;
+  const c = Math.cos(th);
+  const s = Math.sin(th);
+  const pts: [number, number][] = [
+    [-wpx / 2, -hpx / 2],
+    [wpx / 2, -hpx / 2],
+    [wpx / 2, hpx / 2],
+    [-wpx / 2, hpx / 2],
+  ];
+  return pts.map(([x, y]) => ({ x: (cx * W + x * c - y * s) / W, y: (cy * H + x * s + y * c) / H })) as Quad;
+}
+
+function circlePts(cx: number, cy: number, r: number, n = 18): PxPt[] {
+  return Array.from({ length: n }, (_, i) => ({ x: cx + r * Math.cos((i / n) * 2 * Math.PI), y: cy + r * Math.sin((i / n) * 2 * Math.PI) }));
+}
+
+export function drawBed(spec: BedSpec): HTMLCanvasElement {
+  const c = makeCanvas(spec.w, spec.h);
+  const g = c.getContext('2d', { willReadFrequently: true })!;
+  const rnd = mulberry32(spec.seed * 31 + 7);
+  g.fillStyle = spec.bg;
+  g.fillRect(0, 0, spec.w, spec.h);
+  for (let i = 0; i < 40; i++) {
+    g.fillStyle = rnd() < 0.5 ? 'rgba(0,0,0,0.018)' : 'rgba(255,255,255,0.05)';
+    g.fillRect(0, rnd() * spec.h, spec.w, 1 + rnd() * 2);
+  }
+  spec.items.forEach((it, idx) => {
+    const quad: PxPt[] = it.quad.map((p) => ({ x: p.x * spec.w, y: p.y * spec.h }));
+    g.save();
+    g.shadowColor = 'rgba(0,0,0,0.3)';
+    g.shadowBlur = 8;
+    g.shadowOffsetX = 2;
+    g.shadowOffsetY = 4;
+    fillPoly(g, quad, it.kind === 'receipt' ? '#f7f5ef' : '#ffffff');
+    g.restore();
+    const lw = 100 * (Math.hypot(quad[1].x - quad[0].x, quad[1].y - quad[0].y) / Math.max(1, Math.hypot(quad[3].x - quad[0].x, quad[3].y - quad[0].y)));
+    const lh = 100;
+    const H = solveHomography(
+      [
+        { x: 0, y: 0 },
+        { x: lw, y: 0 },
+        { x: lw, y: lh },
+        { x: 0, y: lh },
+      ],
+      quad,
+    );
+    const poly = (pts: PxPt[], style: string) =>
+      fillPoly(
+        g,
+        pts.map((p) => applyH(H, p)),
+        style,
+      );
+    const rect = (x: number, y: number, w: number, h: number, style: string) =>
+      poly(
+        [
+          { x, y },
+          { x: x + w, y },
+          { x: x + w, y: y + h },
+          { x, y: y + h },
+        ],
+        style,
+      );
+    if (it.kind === 'photo') {
+      const m = 3.5;
+      rect(m, m, lw - 2 * m, lh - 2 * m, `hsl(${it.hue} 55% 72%)`);
+      rect(m, lh * 0.62, lw - 2 * m, lh * 0.38 - m, `hsl(${(it.hue + 45) % 360} 38% 36%)`);
+      poly(circlePts(lw * 0.24, lh * 0.26, lh * 0.11), '#fff3b8');
+      poly(
+        [
+          { x: lw * 0.4, y: lh * 0.62 },
+          { x: lw * 0.62, y: lh * 0.28 },
+          { x: lw * 0.86, y: lh * 0.62 },
+        ],
+        `hsl(${(it.hue + 20) % 360} 30% 46%)`,
+      );
+      // tally marks so each photo is recognisable
+      for (let k = 0; k <= idx % 4; k++) rect(lw * 0.12 + k * 7, lh * 0.7, 3.6, 12, 'rgba(255,255,255,0.85)');
+    } else {
+      const inner = lw - 14;
+      rect(lw / 2 - inner * 0.3, 8, inner * 0.6, 4.2, 'rgba(38,42,52,0.78)');
+      for (let y = 22, i = 0; y < 86; y += 4.2, i++) {
+        rect(7, y, inner * (0.4 + ((i * 37) % 30) / 100), 1.6, 'rgba(38,42,52,0.7)');
+        rect(lw - 7 - inner * 0.17, y, inner * 0.17, 1.6, 'rgba(38,42,52,0.7)');
+      }
+    }
+  });
+  for (const d of spec.dust) {
+    fillPoly(
+      g,
+      d.map((p) => ({ x: p.x * spec.w, y: p.y * spec.h })),
+      'rgba(70,64,58,0.8)',
+    );
+  }
+  return c;
+}
+
+export interface BedDetection {
+  quad: Quad;
+  score: number;
+  reasons: { code: 'TOUCHING_ITEMS' | 'ITEMS_TOO_CLOSE' }[];
+}
+
+/** What the detector would find: one crop per item, one flagged cluster crop per touching group. */
+export function bedDetections(spec: BedSpec): BedDetection[] {
+  const out: BedDetection[] = [];
+  const done = new Set<number>();
+  spec.items.forEach((it, i) => {
+    if (done.has(i)) return;
+    if (it.group === undefined) {
+      out.push({ quad: it.quad, score: it.score, reasons: [] });
+      return;
+    }
+    const members = spec.items.map((x, k) => ({ x, k })).filter((m) => m.x.group === it.group);
+    members.forEach((m) => done.add(m.k));
+    const xs = members.flatMap((m) => m.x.quad.map((p) => p.x));
+    const ys = members.flatMap((m) => m.x.quad.map((p) => p.y));
+    const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+    out.push({
+      quad: [
+        { x: x0, y: y0 },
+        { x: x1, y: y0 },
+        { x: x1, y: y1 },
+        { x: x0, y: y1 },
+      ],
+      score: 0.82,
+      reasons: [{ code: 'TOUCHING_ITEMS' }],
+    });
+  });
+  return out;
+}
+
+/** The single-item reading of a bed: one crop around everything on it (what "Treat as one item" gives). */
+export function bedSingle(spec: BedSpec): Quad {
+  const pts = spec.items.flatMap((i) => i.quad);
+  const [x0, x1] = [Math.min(...pts.map((p) => p.x)) - 0.02, Math.max(...pts.map((p) => p.x)) + 0.02];
+  const [y0, y1] = [Math.min(...pts.map((p) => p.y)) - 0.02, Math.max(...pts.map((p) => p.y)) + 0.02];
+  const c = (v: number) => Math.min(1, Math.max(0, v));
+  return [
+    { x: c(x0), y: c(y0) },
+    { x: c(x1), y: c(y0) },
+    { x: c(x1), y: c(y1) },
+    { x: c(x0), y: c(y1) },
+  ];
+}
+
+/** A named bed layout of the mock samples. */
+export function bedLayout(kind: 'albums' | 'receipts' | 'two' | 'locked'): BedSpec {
+  const W = 1500;
+  const H = 1100;
+  const box = (cx: number, cy: number, w: number, h: number, deg: number) => rotatedBox(W, H, cx, cy, w, h, deg);
+  const bg = '#e9e9e4';
+  switch (kind) {
+    case 'albums':
+      return {
+        w: W,
+        h: H,
+        bg,
+        seed: 3,
+        items: [
+          { quad: box(0.26, 0.27, 540, 390, 3), kind: 'photo', hue: 205, score: 0.985 },
+          { quad: box(0.74, 0.26, 560, 380, -2), kind: 'photo', hue: 25, score: 0.98 },
+          { quad: box(0.23, 0.75, 380, 440, 1.5), kind: 'photo', hue: 120, score: 0.99 },
+          { quad: box(0.6, 0.76, 330, 430, 0), kind: 'photo', hue: 330, group: 1, score: 0.95 },
+          { quad: box(0.835, 0.76, 330, 430, 0), kind: 'photo', hue: 275, group: 1, score: 0.95 },
+        ],
+        dust: [
+          [
+            { x: 0.455, y: 0.5 },
+            { x: 0.47, y: 0.5 },
+            { x: 0.47, y: 0.52 },
+            { x: 0.455, y: 0.52 },
+          ],
+        ],
+      };
+    case 'receipts':
+      return {
+        w: W,
+        h: H,
+        bg,
+        seed: 5,
+        items: [
+          { quad: box(0.2, 0.5, 300, 900, 2), kind: 'receipt', hue: 0, score: 0.985 },
+          { quad: box(0.5, 0.5, 300, 860, -1.5), kind: 'receipt', hue: 0, score: 0.99 },
+          { quad: box(0.8, 0.5, 300, 920, 1), kind: 'receipt', hue: 0, score: 0.987 },
+        ],
+        dust: [],
+      };
+    case 'two':
+    case 'locked':
+      return {
+        w: W,
+        h: H,
+        bg,
+        seed: kind === 'two' ? 8 : 9,
+        items: [
+          { quad: box(0.27, 0.5, 560, 760, 2), kind: 'photo', hue: kind === 'two' ? 190 : 45, score: 0.99 },
+          { quad: box(0.73, 0.5, 560, 760, -2), kind: 'photo', hue: kind === 'two' ? 300 : 160, score: 0.985 },
+        ],
+        dust: [],
+      };
+  }
 }

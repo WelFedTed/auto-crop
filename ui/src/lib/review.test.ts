@@ -82,7 +82,7 @@ test('counts, filters and needs-review honour decisions and edits', () => {
     withConfidence(4, 0.7, null, [], { edited: true }), // check, edited
     withConfidence(5, 0.3, 'failed'), // failed
     item(6, { status: 'analysing', confidence: null, edit: null }),
-    withConfidence(7, 0.99, null, [], { saved: { backupId: 'r/1', output: 'a.jpg', copy: false } }),
+    withConfidence(7, 0.99, null, [], { saved: { backupId: 'r/1', output: 'a.jpg', copy: false, outputs: [] } }),
   ];
   const list = classify(items, 'strict', { 3: 'accepted', 1: 'skipped' });
   const c = countsOf(list);
@@ -117,7 +117,7 @@ test('sort: failed, then check lowest first, then good, analysing last; name sor
 });
 
 test('Save all writes Good, accepted and edited; never skipped, flagged, or saved-and-clean', () => {
-  const saved = { backupId: 'r/1', output: 'a.jpg', copy: false };
+  const saved = { backupId: 'r/1', output: 'a.jpg', copy: false, outputs: [] };
   const items = [
     withConfidence(1, 0.99), // good -> yes
     withConfidence(2, 0.8), // check unreviewed -> no
@@ -163,7 +163,7 @@ test('tile label announces status, reason and saved state', () => {
   assert.equal(tileLabel(x), 'IMG_07, needs review, edge unclear on the right side, not saved');
   const [acc] = classify([w], 'strict', { 7: 'accepted' });
   assert.ok(tileLabel(acc).includes('accepted'));
-  const [good] = classify([withConfidence(8, 0.99, null, [], { name: 'G', saved: { backupId: null, output: 'G', copy: true } })], 'strict', {});
+  const [good] = classify([withConfidence(8, 0.99, null, [], { name: 'G', saved: { backupId: null, output: 'G', copy: true, outputs: [] } })], 'strict', {});
   assert.equal(tileLabel(good), 'G, good, saved');
   const [busy] = classify([item(9, { name: 'B', status: 'analysing', confidence: null, edit: null })], 'strict', {});
   assert.equal(tileLabel(busy), 'B, still analysing');
