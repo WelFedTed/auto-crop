@@ -33,6 +33,7 @@ pub mod guard;
 #[cfg(any(test, feature = "fixtures"))]
 pub mod hostile;
 pub mod jpeg_lossless;
+pub mod jpeg_meta;
 mod limits;
 // The pinned-header readers shared with build.rs; included here so the version gate has unit tests.
 #[cfg(feature = "heif")]
