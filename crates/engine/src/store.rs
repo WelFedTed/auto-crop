@@ -257,6 +257,18 @@ pub(crate) fn apply_attrs(path: &Path, attrs: Option<u32>) {
     let _ = (path, a);
 }
 
+/// Makes `dir` readable by its owner only (mode 0700) on Unix; Windows keeps the user-only ACL that
+/// `%LOCALAPPDATA%` already gives. Best effort: a store somewhere else keeps what it has.
+fn make_private(dir: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(dir, fs::Permissions::from_mode(0o700));
+    }
+    #[cfg(not(unix))]
+    let _ = dir;
+}
+
 fn sync_file(path: &Path) -> std::io::Result<()> {
     fs::OpenOptions::new().write(true).open(path)?.sync_all()
 }
@@ -397,6 +409,9 @@ impl Store {
         fs::create_dir_all(&dir)
             .map_err(|e| ErrKind::from_io(&e))
             .map_err(|_| ErrKind::BackupFailed)?;
+        // Originals are private data: the store and its entries are the owner's alone.
+        make_private(&self.dir);
+        make_private(&dir);
         let result = (|| -> Result<Manifest> {
             let file_name = format!("original.{}", req.format_ext);
             let dest = dir.join(&file_name);

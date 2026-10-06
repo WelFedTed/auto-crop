@@ -47,9 +47,11 @@ whose target is free), else rolls back to the scan and its backup.
 
 ## Open (not covered, or covered only in part)
 
-* **Kills per OS.** The suite kills the child at every protocol step (about 26 per scenario). The
-  gate asks for at least 500 kills per OS at random instants (M10.64): a randomised loop belongs in
-  the nightly job and has not been written.
+* **Kills per OS.** The suite kills the child at every protocol step (about 26 per scenario), and
+  `tests/kill_loop.rs` now kills a child running real saves, re-saves and conversions at random
+  instants (500 kills on every run, 1,000 in the ignored nightly test; the single-item and the
+  conversion paths run on the same journal, see `docs/safety-threat-model.md`). The loop runs on the
+  three OSes in CI; the numbers measured on Windows are in that document.
 * **Power loss.** There is no `FaultFs` model of un-fsynced data and directory entries. The protocol
   fsyncs the temps, the backup, the journal and (Unix) the folder, but the claim is untested against
   a loss model.

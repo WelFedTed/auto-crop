@@ -16,7 +16,7 @@ use crate::scan::{GroupOut, crop_views};
 use crate::settings::Settings;
 use crate::store::{BackupKind, BackupState, Manifest, Store};
 use crate::util::{blake3_hex, display_name, new_id, now_secs, rfc3339, unix_ms};
-use auto_crop_codecs::{Format, decode, encode};
+use auto_crop_codecs::{Format, encode};
 use auto_crop_core::{
     Confidence, EditState, Forced, History, Origin, QuadWarp, SplitPolicy, SplitState,
 };
@@ -797,7 +797,17 @@ impl Engine {
                 ErrKind::from_io(&e)
             }
         })?;
-        let decoded = decode(&bytes).map_err(codec_err)?;
+        // A JPEG is reduced inside the decoder (DCT scaling), so a proxy costs a fraction of a full
+        // decode (M2.84); other formats come back at full size and are resized as before.
+        let decoded = auto_crop_codecs::decode_scaled(
+            &bytes,
+            auto_crop_core::ports::Want::Scaled {
+                min_edge: DISPLAY_EDGE,
+            },
+            &self.options().limits(),
+        )
+        .map_err(codec_err)?
+        .decoded;
         let p = Arc::new(resize_to_fit(&decoded.raster, DISPLAY_EDGE));
         lock(&self.inner.proxies).put(id, p.clone());
         Ok(p)
@@ -1086,6 +1096,12 @@ impl Engine {
             let target = PathBuf::from(&m.original_path);
             let dir = target.parent().ok_or(ErrKind::Internal)?.to_path_buf();
             let mtime = UNIX_EPOCH + Duration::from_millis(m.original_mtime_ms.max(0) as u64);
+            // A restore writes the original again (and may keep what is there): it needs room too.
+            crate::space::preflight(&crate::space::Need::new(
+                &dir,
+                orig_bytes.len() as u64,
+                Some((self.inner.store.dir(), orig_bytes.len() as u64)),
+            ))?;
             let current = fs::read(&target).ok().map(|b| blake3_hex(&b));
             let output_hash = m.outputs.first().map(|o| o.blake3.clone());
             let already_original = current.as_deref() == Some(m.original_blake3.as_str());

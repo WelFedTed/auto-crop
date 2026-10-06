@@ -15,6 +15,28 @@
   calls for it (explicit settings that are never persisted, an engine without start-up housekeeping, saves
   grouped into a named run, a JPEG quality and a crop margin per run, removing one backup).
 
+- **Saving one image now follows the full safe-write protocol** (it was a shorter early version in 0.0.1 and
+  0.0.2). The save writes a journal first, backs the original up (a reflink, a hardlink or a re-checked copy),
+  writes the new file beside the old one, re-reads and re-decodes it, then swaps it in (`ReplaceFileW` on
+  Windows, retried when an antivirus or indexer holds the file). If the program is killed at any moment, the next
+  start finishes the save or puts the original back, and removes stray temporary files. The free-space check
+  runs before anything is written, a read-only file or a cloud placeholder is refused without being read or
+  changed, and a file another program edited meanwhile is never overwritten. A kill-at-random-instants test
+  (500 kills on every run, 1,000 nightly) and a restore matrix check this. See
+  [docs/safety-threat-model.md](docs/safety-threat-model.md).
+- **JPEG output is written by the codecs crate**, not the stand-in encoder: the quality follows the source's
+  own (Balanced is the source's quality plus 5, between 80 and 95), EXIF is kept (Orientation is set to 1, the
+  size updated, the thumbnail removed), the ICC profile and pixel density are kept byte for byte, and
+  `strip_location` removes GPS, XMP and IPTC. A crop that falls on the JPEG block grid, and turns and flips, are
+  done **without re-encoding** (the lossless path, with the safe-Rust transform; libjpeg-turbo with the
+  `turbojpeg` feature); the picture then does not lose a generation, and may be up to 16 pixels larger than
+  asked.
+- **BMP files open**, and `Engine::convert_items` replaces a BMP by its PNG (a HEIC by its JPEG with the
+  `heif` build) after a verified backup; Restore returns the original and moves the converted file into the
+  backup.
+- Known gaps in this part: there is no `library.db` (the backup manifests are the index), file identity and
+  extended attributes are not carried over, and power loss (data never written to disk) is not modelled.
+
 ## 0.0.2 (2026-10-05), pre-release, Windows only
 
 A second early test build. Like 0.0.1 it is **not** the CLI-only v0.1.0 of [ROADMAP.md](ROADMAP.md)

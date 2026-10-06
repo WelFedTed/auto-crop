@@ -526,3 +526,70 @@ fn a_symlinked_file_is_replaced_at_its_target_and_the_link_stays_valid() {
     );
     assert_eq!(fs::read(&link).unwrap(), fs::read(&real).unwrap());
 }
+
+/// M2.22 matrix: all 8 EXIF orientations, JPEG on both paths and PNG, come out upright with the
+/// tag reset (or absent), and a second save of the output (processing it again) changes nothing
+/// about its orientation.
+#[test]
+fn eight_orientations_by_three_paths_all_come_out_upright() {
+    for tag in 1u16..=8 {
+        let jpeg = {
+            let mut spec = JpegSpec::new(128, 96);
+            spec.sampling = (2, 2);
+            spec.exif_orientation = Some(tag);
+            spec.build()
+        };
+        let png = auto_crop_codecs::fixtures::png_with_exif(64, 48, tag);
+        for (name, bytes, lossless) in [
+            ("lossless.jpg", &jpeg, true),
+            ("pixels.jpg", &jpeg, false),
+            ("plain.png", &png, false),
+        ] {
+            let e = env();
+            e.engine.set_options(EngineOptions {
+                lossless_jpeg: lossless,
+                ..EngineOptions::default()
+            });
+            let truth = auto_crop_codecs::decode(bytes).unwrap().raster; // upright, turned once
+            let v = open(&e, name, bytes);
+            assert_eq!(
+                (v.width, v.height),
+                (truth.width, truth.height),
+                "{name} {tag}"
+            );
+            let v = crop(&e, &v, [0.0, 0.0, 1.0, 1.0], 0, 0.0);
+            let out = e.engine.save_items(&[v.id], SaveTarget::Replace, "r", &nop);
+            assert!(out[0].ok, "{name} tag {tag}: {:?}", out[0]);
+            assert_eq!(
+                out[0].notices.contains(&"jpeg.lossless".to_owned()),
+                lossless,
+                "{name} tag {tag}: which path ran"
+            );
+            let saved = fs::read(e.dir.join(name)).unwrap();
+            let probe = auto_crop_codecs::probe(&saved).unwrap();
+            assert_eq!(
+                probe.orientation, 1,
+                "{name} tag {tag}: the tag is reset once"
+            );
+            let got = auto_crop_codecs::decode(&saved).unwrap().raster;
+            assert_eq!(
+                (got.width, got.height),
+                (truth.width, truth.height),
+                "{name} tag {tag}"
+            );
+            let exact = name.ends_with(".png");
+            for y in (3..truth.height - 3).step_by(3) {
+                for x in (3..truth.width - 3).step_by(3) {
+                    let (a, b) = (truth.pixel(x, y), got.pixel(x, y));
+                    let d: i32 = (0..3)
+                        .map(|c| (i32::from(a[c]) - i32::from(b[c])).abs())
+                        .sum();
+                    assert!(
+                        d <= if exact { 0 } else { 48 },
+                        "{name} tag {tag} at ({x},{y}): {a:?} vs {b:?}"
+                    );
+                }
+            }
+        }
+    }
+}
