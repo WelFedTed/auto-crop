@@ -39,7 +39,7 @@ auto-crop-imgproc = { path = "../crates/imgproc" }
 # network, no I/O beyond the OS call); it is already in the lock through the std ecosystem.
 getrandom = "0.3"
 auto-crop-infer = { path = "../crates/infer" }
-sysinfo = { version = "0.37", default-features = false, features = ["system"] }
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 
 [dev-dependencies]
 tempfile = "3"

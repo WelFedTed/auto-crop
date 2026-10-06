@@ -32,7 +32,7 @@ serde_json.workspace = true
 # Ctrl+C and termination signals set the batch cancel token (M2.49). MIT OR Apache-2.0, no network.
 ctrlc = { version = "3", features = ["termination"] }
 # Same version and features as the engine: RAM and CPU for `doctor`, nothing more.
-sysinfo = { version = "0.37", default-features = false, features = ["system"] }
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 
 [dev-dependencies]
 tempfile = "3"
