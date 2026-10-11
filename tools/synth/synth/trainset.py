@@ -35,6 +35,8 @@ EVAL_SEEDS = frozenset(
         31415926,
         20261002,
         0x5EED_A070_C20B_0001,
+        0x5A0C_0C01,  # curved-smoke
+        0x5A0C_0C02,  # curved-full
     }
 )
 

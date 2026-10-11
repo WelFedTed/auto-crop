@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
-from . import backgrounds, camera, degrade, occluders, page as pagemod
+from . import backgrounds, camera, curved, degrade, occluders, page as pagemod
 from . import rng as R
 from .plan import ImageSpec, SceneSpec
 
@@ -54,6 +54,22 @@ def _curl(rng, tex: tuple[int, int]) -> camera.Curl:
     kind = ["cylinder", "edge", "corner"][int(rng.integers(3))]
     short = float(min(tex))
     return camera.Curl(kind, float(rng.uniform(0.07, 0.20)) * short, float(rng.uniform(0, 2 * math.pi)), float(rng.uniform(0.25, 0.7)))
+
+
+def _bent_camera(spec, kind: str, tex: tuple[int, int], pose, rng, max_edge: int):
+    """Camera and bend of a curved-boundary page: the amplitude is calibrated so that the page's
+    curvature in the picture matches the planned bucket (`curved.calibrate`)."""
+    brng = R.stream(spec.seed, "bend")
+    first = curved.draw_bend(brng, kind, tex)
+    jitter = float(brng.uniform(0.8, 1.25))
+    pitch, yaw, roll = pose
+
+    def make_cam(b):
+        return camera.fit(tex, pitch, yaw, roll, curved.fresh(rng), max_edge, False, b, outline=24)
+
+    bend, _ = curved.calibrate(tex, make_cam, first, curved.BUCKET_TARGET[spec.curvature], jitter)
+    # The real camera consumes the stream as the flat path does.
+    return camera.fit(tex, pitch, yaw, roll, rng, max_edge, False, bend, outline=24), bend
 
 
 def _shadow_field(rng, h: int, w: int, centre: np.ndarray) -> np.ndarray:
@@ -117,7 +133,11 @@ def render_image(assets: SceneAssets, spec: ImageSpec, max_edge: int, geometry_o
     pitch, yaw, roll = _pose(spec, rng)
     tex_wh = (assets.page.ink.shape[1], assets.page.ink.shape[0])
     curl = _curl(rng, tex_wh) if spec.curl == "curled" else None
-    cam = camera.fit(tex_wh, pitch, yaw, roll, rng, max_edge, spec.framing == "partial", curl)
+    bend_kind = getattr(spec, "bend", "")
+    if bend_kind:  # curved-boundary suites (`curved.py`); the default path below is untouched
+        cam, curl = _bent_camera(spec, bend_kind, tex_wh, (pitch, yaw, roll), rng, max_edge)
+    else:
+        cam = camera.fit(tex_wh, pitch, yaw, roll, rng, max_edge, spec.framing == "partial", curl)
     cw, ch = cam.canvas
     rgb, alpha, shade = camera.render(cam, assets.texture)
     quad_px = cam.quad_px()
@@ -130,10 +150,13 @@ def render_image(assets: SceneAssets, spec: ImageSpec, max_edge: int, geometry_o
         "pitch_deg": pitch,
         "yaw_deg": yaw,
         "roll_deg": roll,
-        "curl": None if curl is None else curl.kind,
+        "curl": None if curl is None or bend_kind else curl.kind,
         "visible_fraction": camera.visible_fraction(quad_px, (cw, ch)),
         "backend": degrade.backend_name(),
     }
+    if bend_kind:
+        meta["curves"], meta["curvature_pct"] = curved.truth_curves(cam, quad)
+        meta["bend"] = {k: (round(v, 4) if isinstance(v, float) else v) for k, v in vars(curl).items()}
     if geometry_only:
         bgf = np.full_like(bg, 90.0)
         out = bgf * (1 - alpha[..., None]) + rgb * alpha[..., None]

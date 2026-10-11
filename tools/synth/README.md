@@ -40,6 +40,27 @@ Tags: `count` (2, 3, 4, 5-6, 7-8), `separation` of the closest pair (`separated`
 
 Not rendered: hands and fingers, glare, items stacked in more than one layer, curl, text-bearing photos, real scanner banding. White-on-white is covered only as white-bordered prints and white receipts on a white lid. Smoke: 160 scenes at 640 px, JPEG, 4.5 MB; full: 1,200 at 800 px. Develop on one seed and check on others (`--seed N --name NAME --out DIR`); the same seed gives identical bytes at any `--jobs` (tested).
 
+## Curved-boundary suites (`curved-smoke`, `curved-full`)
+
+Pages whose EDGES are curved, for developing and measuring the automatic curve fitter (`imgproc::curves_fit`, [docs/dev/curved-pages.md](../../docs/dev/curved-pages.md)). `cargo xtask synth --suite curved-smoke` (150 images, 512 px, about 8 MB) or `curved-full` (1,200), or `--curved` (with `--suite smoke|full`). The default suites are untouched: `smoke` and `smoke-c` regenerate to the same manifest and image hashes as before this mode existed (checked: manifest SHA-256 `2c9a7c04...` and `3ceea663...`, every image byte), the changes to `camera.py`, `plan.py`, `scene.py` and `suite.py` are additive hooks that only the curved suites reach, and `tests/test_curved.py` checks the default plan's tags.
+
+`synth/curved.py`: a `Bend` displaces the flat page in 3-D and the same camera renders it (`camera.fit` frames the whole outline, not only the corners; `camera.render` inverts the map by Newton steps as for curl; the lighting follows the slope):
+
+| `bend` | What |
+|---|---|
+| `cylinder` | bent about an axis: parabolic lift, with the in-plane compression of an inextensible sheet (arc length is kept; tested) |
+| `wave` | a sine lift across the page, same compression |
+| `corner` | one end lifts quadratically (a corner curl), same compression |
+| `bow` | a hand-held receipt: the long edges are pulled into arcs IN the page plane (the two long edges bow by different amounts: a banana), the short edges bow slightly, plus a gentle cylinder lift |
+
+The amplitude is calibrated per image (at most four rounds, `curved.calibrate`) so that the curvature IN THE PICTURE reaches a planned bucket; an outline that would cross itself is eased off until it does not. Pose ranges, desks, lighting, blur, noise, formats, EXIF and colour spaces are those of the default suites; framing is always full and `curl` is replaced by the bend.
+
+The ground truth is analytic: the four edges of the texture rectangle are projected point by point through the same camera, then reduced to Catmull-Rom control points of the shared spec (centripetal, alpha 0.5, first and last point = the quad corners) by greedy insertion until the spline is within 0.25 px of the projected edge (at most 32 points). The row carries `curves` right after `quad` (only the edges that are bent; an absent edge is straight), the measured `curvature_pct` of the four edges (largest distance from the chord in percent of the chord: top, right, bottom, left), `curvature_planned`, and the `bend` parameters. `auto-crop-eval validate-manifest` accepts the manifests (the same rules as the golden labels).
+
+Tags: the usual ones without `curl`, plus `bend` (`cylinder` 25%, `wave` 20%, `corner` 15%, `bow` 40%) and `curvature`, the MEASURED bucket of the page's largest edge curvature (`slight` under 0.6%, `mild` 0.6 to 1.5%, `moderate` 1.5 to 3.5%, `strong` from 3.5%); the plan aims at mild 34%, moderate 36%, strong 30%, but the tag is what was rendered (a cylinder seen flat-on cannot reach its bucket, so `slight` exists too). `aspect` is weighted to receipts and documents (document 30%, receipt 40%, long 23%, strip 7%). Seeds `0x5A0C0C01` and `0x5A0C0C02` are reserved against the training mode.
+
+Honest limits: the shapes are plausible, not a physical model of paper (the bow stretches the sheet; a cylinder is exactly developable but real paper also wrinkles inside); the fitter under test and the generator both assume edges that are smooth arcs; there is no hand, finger or crumple. A synthetic number says how the fitter works on such pages and detects regressions; it says little about real photographs.
+
 ## Manifest
 
 `id`, `image`, `scene_id`, `split`, `width`, `height` (of the EXIF-oriented picture), `quad` (TL, TR, BR, BL of the upright page, normalised, clockwise, y down, may leave the frame), `tags` are the harness fields. Extra fields, ignored by the harness: `scene_seed`, `image_seed`, `exif_orientation`, `rotation_deg`, `pitch_deg`, `yaw_deg`, `crop_box`, `item_count`, `visible_fraction`, `page_mm`, `page_aspect`, `jpeg_quality`, `background {kind, licence}`, `clutter_objects`, `degrade_backend`, `licence`, `source`, `truth`. Splits are by scene hash (30% `dev`, 70% `test`); a scene's page, background and seed never cross.

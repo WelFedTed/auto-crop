@@ -60,6 +60,24 @@ def _truth(assets: scene.SceneAssets, spec: plan.ImageSpec, quad: np.ndarray, me
     }
 
 
+def _with_curves(row: dict, meta: dict, spec) -> dict:
+    """The row of a curved-boundary page: ``curves`` right after ``quad`` (only the bent edges; an
+    absent edge is straight), the measured curvature of every edge and the bend that made it. The
+    ``curvature`` tag is the MEASURED bucket (the plan only aims at one)."""
+    from . import curved
+
+    out = {}
+    for k, v in row.items():
+        out[k] = v
+        if k == "quad" and meta["curves"]:
+            out["curves"] = meta["curves"]
+    out["curvature_pct"] = meta["curvature_pct"]  # top, right, bottom, left
+    out["curvature_planned"] = spec.curvature
+    out["bend"] = meta["bend"]
+    out["tags"] = {**out["tags"], "curvature": curved.bucket_of(max(meta["curvature_pct"]))}
+    return out
+
+
 def _render_scene(task):
     """Worker: render every image of one scene and write its files; returns manifest rows."""
     sc, imgs, out, max_edge, truth_mode, suite, *rest = task
@@ -111,6 +129,8 @@ def _render_scene(task):
             "licence": LICENCE,
             "source": "tools/synth",
         }
+        if "curves" in meta:  # curved-boundary suites only (`curved.py`)
+            row = _with_curves(row, meta, spec)
         if extras:
             row["train_hand"] = meta.get("hand")
         if truth_mode != "none":
@@ -144,13 +164,16 @@ def generate(
     overrides: dict | None = None,
     _worker=None,
     extras: dict | None = None,
+    planner=None,
 ) -> dict:
-    """Write a suite under ``out``. Returns a summary dict (also written as ``suite.json``)."""
+    """Write a suite under ``out``. Returns a summary dict (also written as ``suite.json``).
+
+    ``planner`` replaces ``plan.build`` (the curved-boundary suites, ``curved.build``)."""
     out = Path(out)
     for stale in ("images", "truth"):  # files of an earlier run would otherwise linger in the suite
         shutil.rmtree(out / stale, ignore_errors=True)
     (out / "images").mkdir(parents=True, exist_ok=True)
-    scenes, images = plan.build(name, seed, count, overrides)
+    scenes, images = (planner or plan.build)(name, seed, count, overrides)
     extra_task = (extras,) if extras else ()  # only the training mode adds a 7th element
     tasks = [(sc, imgs, str(out), max_edge, truth, name, *extra_task) for sc, imgs in _group_by_scene(images)]
     jobs = jobs or min(os.cpu_count() or 1, 8)

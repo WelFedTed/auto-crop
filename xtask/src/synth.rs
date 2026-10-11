@@ -3,6 +3,8 @@
 
 //! `cargo xtask synth`, `synth-setup`, `synth-check` and `check-splits` (ROADMAP M1.30-M1.35).
 //!
+//! * `synth --suite curved-smoke|curved-full` (or `synth --curved`) writes pages with CURVED edges, with
+//!   ground-truth boundary `curves` in the manifest (Python generator only).
 //! * `synth --suite smoke|full|multi-smoke|multi-full [--generator python|rust] ...` writes a suite under
 //!   `target/synth/<suite>` (never committed). The default generator is the Python tool in
 //!   `tools/synth` (Augraphy behind a seam, known-text pages, pinhole camera, EXIF and colour-space
@@ -56,6 +58,20 @@ fn value_of<'a>(args: &'a [String], flag: &str) -> Option<&'a String> {
 /// Arguments for the chosen generator: `--suite` is required, `--out` defaults to
 /// `target/synth/<suite>` (the Rust stand-in gets `<suite>-rust` so the two never mix).
 pub fn generator_args(generator: Generator, args: &[String]) -> Result<Vec<String>, String> {
+    // `--curved` alone (or with `--suite smoke|full`) names the curved-boundary suite.
+    let mut args: Vec<String> = args.to_vec();
+    if args.iter().any(|a| a == "--curved") {
+        args.retain(|a| a != "--curved");
+        match value_of(&args, "--suite").cloned() {
+            None => args.extend(["--suite".to_owned(), "curved-smoke".to_owned()]),
+            Some(s) if s == "smoke" || s == "full" => {
+                let i = args.iter().position(|a| a == "--suite").unwrap_or(0);
+                args[i + 1] = format!("curved-{s}");
+            }
+            Some(_) => {}
+        }
+    }
+    let args = &args[..];
     let suite = value_of(args, "--suite").ok_or("synth needs --suite smoke|full")?;
     let mut out: Vec<String> = args.to_vec();
     if value_of(args, "--out").is_none() {
@@ -177,6 +193,14 @@ pub fn run_synth(args: &[String]) -> Result<(), String> {
     {
         return Err(
             "the multi-item suites (multi-smoke, multi-full) come from the Python generator only"
+                .to_owned(),
+        );
+    }
+    if generator == Generator::Rust
+        && value_of(&full, "--suite").is_some_and(|s| s.starts_with("curved-"))
+    {
+        return Err(
+            "the curved-boundary suites (curved-smoke, curved-full) come from the Python generator only"
                 .to_owned(),
         );
     }
@@ -323,6 +347,34 @@ mod tests {
         );
         let e =
             run_synth(&s(&["--generator", "rust", "--suite", "multi-full"])).expect_err("rejected");
+        assert!(e.contains("Python generator only"), "{e}");
+    }
+
+    #[test]
+    fn curved_suites_are_python_only_and_the_flag_names_them() {
+        let a = generator_args(Generator::Python, &s(&["--curved"])).expect("valid");
+        assert_eq!(
+            a,
+            s(&[
+                "--suite",
+                "curved-smoke",
+                "--out",
+                "target/synth/curved-smoke"
+            ])
+        );
+        let a =
+            generator_args(Generator::Python, &s(&["--curved", "--suite", "full"])).expect("valid");
+        assert_eq!(
+            a,
+            s(&[
+                "--suite",
+                "curved-full",
+                "--out",
+                "target/synth/curved-full"
+            ])
+        );
+        let e = run_synth(&s(&["--generator", "rust", "--suite", "curved-full"]))
+            .expect_err("rejected");
         assert!(e.contains("Python generator only"), "{e}");
     }
 

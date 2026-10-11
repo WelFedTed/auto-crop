@@ -8,7 +8,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import GENERATOR, multi_item, plan
+from . import GENERATOR, curved, multi_item, plan
 
 SUBCOMMANDS = ("check-geometry", "check-ocr", "variants", "quotas", "licences", "contact-sheet")
 
@@ -21,10 +21,13 @@ def _generate_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--suite",
-        choices=sorted(plan.SUITES) + sorted(multi_item.SUITES),
+        choices=sorted(plan.SUITES) + sorted(multi_item.SUITES) + sorted(curved.SUITES),
         help="preset: smoke (200 images) or full (5,200); multi-smoke (160) or multi-full (1,200) are the "
-        "multi-item scenes (several photos or receipts per picture, manifest `items`)",
+        "multi-item scenes (several photos or receipts per picture, manifest `items`); curved-smoke (150) "
+        "or curved-full (1,200) are pages with curved edges (manifest `curves`)",
     )
+    p.add_argument("--curved", action="store_true",
+                   help="curved-boundary pages: the same as --suite curved-smoke (or curved-full with --suite full)")
     p.add_argument("--seed", type=lambda s: int(s, 0), help="suite seed (default: the preset's)")
     p.add_argument("--count", type=int, help="number of images (default: the preset's)")
     p.add_argument("--name", help="id prefix and suite name (default: the preset or `synth`)")
@@ -50,8 +53,12 @@ def run_generate(argv: list[str]) -> int:
     import os
 
     a = _generate_parser().parse_args(argv)
+    if a.curved and (a.suite or "smoke") in ("smoke", "full"):
+        a.suite = "curved-" + (a.suite or "smoke")
     if (a.suite or "") in multi_item.SUITES or (a.name or "").startswith("multi"):
         return run_generate_multi(a)
+    if (a.suite or "") in curved.SUITES:
+        return run_generate_curved(a)
     preset = plan.SUITES.get(a.suite or "", {})
     if a.train:
         from . import trainset
@@ -74,6 +81,30 @@ def run_generate(argv: list[str]) -> int:
     s = suite.generate(Path(a.out), name, seed, count, max_edge, a.jobs, a.truth, overrides=overrides, extras=extras)
     print(
         f"wrote {s['count']} images ({s['image_bytes'] / 1e6:.1f} MB) in {s['scenes']} scenes and "
+        f"manifest.jsonl to {a.out} in {s['seconds']}s [{GENERATOR}, {s['degrade_backend']}, "
+        f"seed {seed}, manifest sha256 {s['manifest_sha256'][:16]}...]"
+    )
+    return 0
+
+
+def run_generate_curved(a) -> int:
+    import os
+
+    from . import suite
+
+    preset = curved.SUITES[a.suite]
+    seed = a.seed if a.seed is not None else preset["seed"]
+    count = a.count if a.count is not None else preset["count"]
+    name = a.name or a.suite
+    max_edge = a.max_edge if a.max_edge is not None else preset["max_edge"]
+    if a.backend == "builtin":
+        os.environ["SYNTH_BACKEND"] = "builtin"
+    overrides = {**preset.get("overrides", {}), **plan.pins_to_overrides(a.pin)}
+    s = suite.generate(
+        Path(a.out), name, seed, count, max_edge, a.jobs, a.truth, overrides=overrides, planner=curved.build
+    )
+    print(
+        f"wrote {s['count']} curved-boundary images ({s['image_bytes'] / 1e6:.1f} MB) in {s['scenes']} scenes and "
         f"manifest.jsonl to {a.out} in {s['seconds']}s [{GENERATOR}, {s['degrade_backend']}, "
         f"seed {seed}, manifest sha256 {s['manifest_sha256'][:16]}...]"
     )

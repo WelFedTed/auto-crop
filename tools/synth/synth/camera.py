@@ -93,6 +93,10 @@ class Camera:
         """Centred page coordinates (texture px) to canvas edge coordinates, with curl."""
         wt, ht = self.tex
         z = -self.curl.lift(x, y, wt, ht) if self.curl else 0.0 * x
+        if self.curl is not None and hasattr(self.curl, "shift"):
+            # A curved-boundary bend (`curved.Bend`) also moves points inside the page plane.
+            dx, dy = self.curl.shift(x, y, wt, ht)
+            x, y = x + dx, y + dy
         r = self.rot
         px = r[0, 0] * x + r[0, 1] * y + r[0, 2] * z
         py = r[1, 0] * x + r[1, 1] * y + r[1, 2] * z
@@ -154,6 +158,7 @@ def fit(
     max_edge: int,
     partial: bool,
     curl: Curl | None = None,
+    outline: int = 0,
 ) -> Camera:
     """A camera that frames the page: full (all corners inside) or partial (corners cut off)."""
     wt, ht = tex
@@ -164,6 +169,16 @@ def fit(
     def centred_quad(cam_s, cx, cy):
         cam = Camera(np.eye(3), (1, 1), tex, r, d, cam_s, (cx, cy), pitch, yaw, roll, curl)
         pts = np.array([[0, 0], [wt, 0], [wt, ht], [0, ht]], dtype=np.float64)
+        if outline > 0:  # curved boundaries: frame the whole outline, `outline` samples per edge
+            u = np.linspace(0.0, 1.0, outline, endpoint=False)
+            pts = np.concatenate(
+                [
+                    np.c_[u * wt, np.zeros(outline)],
+                    np.c_[np.full(outline, wt), u * ht],
+                    np.c_[wt - u * wt, np.full(outline, ht)],
+                    np.c_[np.zeros(outline), ht - u * ht],
+                ]
+            )
         u, v = cam.project(pts[:, 0] - wt / 2, pts[:, 1] - ht / 2)
         return np.c_[u, v]
 
@@ -266,7 +281,7 @@ def render(cam: Camera, tex_rgb: np.ndarray, ss: int = SS):
         gx, gy, ex, ey = _flat_inverse_grid(cam, 1)
         x, y = ex - wt / 2, ey - ht / 2
         hh = 0.5
-        for _ in range(5):
+        for _ in range(getattr(cam.curl, "newton_iters", 5)):
             u, v = cam.project(x, y)
             ux, vx = cam.project(x + hh, y)
             uy, vy = cam.project(x, y + hh)

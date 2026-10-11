@@ -115,10 +115,13 @@ class ImageSpec:
     exif: int
     colorspace: str
     jpeg_quality: int
+    # Curved-boundary suites only (`curved.py`); empty for every other suite.
+    bend: str = ""
+    curvature: str = ""
 
     def tags(self) -> dict[str, str]:
         s = self.scene
-        return {
+        tags = {
             "lighting": self.lighting,
             "clutter": self.clutter,
             "tilt": self.tilt,
@@ -135,6 +138,11 @@ class ImageSpec:
             "exif": str(self.exif),
             "colorspace": self.colorspace,
         }
+        if self.bend:  # a curved-boundary page has a bend instead of a curl
+            tags.pop("curl")
+            tags["bend"] = self.bend
+            tags["curvature"] = self.curvature
+        return tags
 
 
 def balanced(rng, n: int, weights: dict[str, float]) -> list[str]:
