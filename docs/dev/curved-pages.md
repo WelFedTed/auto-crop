@@ -216,6 +216,74 @@ exact render.
 * The CLI does not read curves (`--curves FILE` is out of scope). `render --edit` of a state with a curved
   crop ignores that crop.
 
+## Suggestion API (automatic curves)
+
+Today a person bends each edge by hand. `Engine::suggest_curves` proposes the four curves from the picture
+(`crates/imgproc/src/curves_fit.rs`, classical, no weights, offline). **It only proposes**: nothing is recorded,
+cached or applied, so a straight page is never changed by it; the person (or the UI on their click) applies the
+result with `set_curves`, which is the one way a crop becomes curved. Numbers and caveats:
+[docs/perf/curve-fit-baseline.md](../perf/curve-fit-baseline.md).
+
+### Calls
+
+| Call | What it does |
+|---|---|
+| `suggest_curves(id, crop) -> Result<Option<CurveSuggestion>>` | Fits the crop's outline (a quad with its fine angle baked in, or the corners of a curved crop) in the display proxy. `Ok(None)` while the image is not ready; `Err(NoCrop)` for an unknown crop or one without an outline; the usual `Err` for an unknown image. 5 to 25 ms of one thread (release, 512 px of work picture: about 8 ms; a large photo is reduced to 640 px first): call it from a worker, on demand. |
+| `curve_hint(id, crop) -> Result<Option<CurveHint>>` | `suggest_curves` reduced to `{curvature, looksCurved}` for a chip. **Computed on demand, not during analysis**: the task allowed an additive `curveHint` in the crop view only if it cost under 3 ms per image at the detection proxy; the fit costs 5 to 10 ms (measured), so there is no `curveHint` field in `CropView` and analysis is unchanged. |
+
+`CurveSuggestion` (serde camelCase; edge arrays are in the order top, right, bottom, left):
+
+| Field | Meaning |
+|---|---|
+| `quad` | The four corners TL, TR, BR, BL, normalised. They may differ from the crop's by a few pixels: the fit intersects the fitted end tangents of the two edges at each corner and moves it by at most 4% of the shorter side. They ARE the end points of `curves`. |
+| `curves` | A `CurveWarp`: 2 to 9 points per edge, `validate()` has passed, carries the crop's `quarterTurns` and `mirror`. Pass it as it is to `set_curves` (the engine refuses corner edits on a curved crop, so corners and curves travel together). Edges that are not bent by more than the fit's noise (under 2 px of the chord, or no better supported by edge evidence than a straight line) come back straight (two points). |
+| `confidence[4]` | 0..1 per edge, the mean station confidence (contrast above the picture's own texture level). Low where a finger, a hard shadow or a desk that matches the paper hides the edge; those stretches are bridged by interpolation. |
+| `curvature[4]` | The CURVATURE score: the largest distance of the fitted edge from its chord, in percent of the chord length (0 for an edge left straight). |
+| `bulge[4]` | The same deviation in percent of the page's SHORTER side (a short edge is noisy in percent of its own length). |
+| `supportGain[4]` | How much better the fitted curve is backed by edge evidence than the best straight line through the same search windows (0 = no better, about 1 = a full-contrast edge's worth at every station). This is what keeps flat pages flat. |
+| `maxCurvature` | The largest `curvature` among the edges that pass every `looksCurved` gate (0 if none). |
+| `looksCurved` | Some edge passes all of: `confidence >= 0.7`, chord length >= 80 px of the 640 px working picture, deviation >= 3 px, `supportGain >= 0.35`, `curvature >= 1.0`. |
+| `fellBack` | The fit was refused (non-finite or degenerate input, a result that fails `CurveWarp::validate`, a bend over 35% of the shorter side, an area change beyond 0.6..1.6): `curves` are the crop's straight edges, confidences and curvatures are 0. |
+
+The UI is expected to show the suggestion as a PREVIEW (the `curve-result` route flattens any `CurveWarp` without
+committing it), let the person accept or discard it, and only then call `set_curves` (`gesture` as for any edit,
+so it is one undo step). `looksCurved` is a hint for a chip, not a decision: see the real-photo caveat in the
+baseline (on the owner's labelled receipts it fires on pages that were labelled straight far more often than on
+the synthetic suites).
+
+### How the fit works
+
+1. The fit works on a picture of at most 640 px on the long edge. For each of the four chords it lays 48 to 64
+   stations; at each station it samples the colour along the chord's normal (three points one pixel apart along the
+   edge averaged), over a window of about +-6% of the shorter side (more for a long edge: 3.5% of its length,
+   at most 25% of the shorter side), never beyond the frame.
+2. **Edge response** at offset `d`: the colour distance (Euclidean over R, G, B, in grey levels) between the mean of
+   `d-3..d-1` and of `d+1..d+3`, times "the near side is paper" (a Gaussian of the distance of the near colour from the
+   paper colour) times "the far side is not paper" (colours 6 and 11 px beyond must not match the paper). **Paper** is
+   a model from inside the quad: the bright end (pale paper) or dark end (dark paper; decided by comparing the page's
+   dominant colour with the colour just outside) of a band deeper inside than the window reaches, pooled over 17
+   neighbouring stations, so dense text, a title bar or a shadow across the page do not become the paper; a local
+   colour more than 1.8 times brighter or 2.6 times dimmer than the page's dominant colour is refused.
+3. **Viterbi** over the stations: one offset per station, a cost of -contrast (saturated at 40 grey levels), a slope
+   penalty (6 per squared slope) and a weak pull to the chord. If more than 10% of the stations sit at the window's
+   edge the window is re-centred on the result and the search repeated (4 passes at most).
+4. Per station confidence from the contrast above the picture's texture floor; stretches below 0.3 are bridged
+   linearly; an edge with under 25% reliable stations is left straight. A robust (Tukey) degree-5 polynomial trend pulls
+   isolated detours back; a [1 2 1] smoothing removes jitter.
+5. Corners refined, polylines simplified (Ramer-Douglas-Peucker at 0.4% of the shorter side, then points are
+   added where the Catmull-Rom spline strays more than 1.5 tolerances, 9 points at most), validated, curvature scored.
+
+The fit does not know about the page's inside: a wrinkle inside the page, a fold, curvature that the four edges do not
+show. It follows the strongest paper-to-not-paper edge near the chord, so a quad that is wrong by more than a few
+windows cannot be repaired by it, and an object abutting the page can lead it astray.
+
+### Thresholds
+
+The five `looksCurved` gates are constants in `curves_fit.rs` (`LOOKS_CURVED_*`). They were chosen on the DEV split of
+synthetic suites only (flat `smoke`, `smoke-b`, `smoke-c` and the curved suite), one gate at a time, with a margin:
+no flat page of the dev split passed at `supportGain >= 0.3`; the shipped 0.35 and confidence 0.7 sit one step
+above. They were never tuned on the owner's real files. See the baseline for the numbers on the held-out splits.
+
 ## The editor (shell and UI)
 
 `crates/shell`: the commands `curve_from_quad(id, crop)`, `set_curves(id, crop, curves, phase, label, gesture)`
