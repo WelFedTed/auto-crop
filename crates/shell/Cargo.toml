@@ -29,6 +29,9 @@ tauri = { version = "=2.12.1", default-features = false, features = ["wry", "com
 tauri-plugin-dialog = { version = "2", optional = true }
 getrandom = { version = "0.3", optional = true }
 
+[dev-dependencies]
+tempfile = "3"
+
 [build-dependencies]
 tauri-build = { version = "2", optional = true }
 

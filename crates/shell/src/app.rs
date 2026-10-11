@@ -3,6 +3,7 @@
 
 //! The Tauri side: commands, the `acimg` scheme, pickers and drag-and-drop.
 
+use auto_crop_engine::curved::CurveSuggestion;
 use auto_crop_engine::{
     AppPaths, CurveWarp, Cut, DerivedAction, Edit, Engine, ErrKind, ItemView, Notify, OpenSummary,
     Pt, RestoreMode, RestoreOutcome, RevertTo, SaveOutcome, SaveTarget, SessionStep, Settings,
@@ -231,6 +232,20 @@ fn set_curves(
     shared
         .engine
         .set_curves(id, crop, &curves, phase == "live", &label, gesture)
+}
+
+/// The engine's PROPOSAL of four curves for one crop (`Engine::suggest_curves`). It records and applies
+/// nothing: the UI shows it as a preview and, on the person's click, passes `curves` whole to
+/// `set_curves`. `None` while the image is not ready. The fit takes 5 to 25 ms of one thread, so it
+/// runs on the blocking pool like the other engine calls that compute, never on the main thread.
+#[tauri::command]
+async fn suggest_curves(
+    shared: State<'_, Shared>,
+    id: u32,
+    crop: u32,
+) -> Cmd<Option<CurveSuggestion>> {
+    let engine = shared.engine.clone();
+    blocking(move || engine.suggest_curves(id, crop)).await?
 }
 
 /// A curved crop becomes the straight quad through its corners.
@@ -619,6 +634,7 @@ pub fn run() {
             set_crop_edit,
             curve_from_quad,
             set_curves,
+            suggest_curves,
             clear_curves,
             add_crop,
             remove_crop,
