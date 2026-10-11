@@ -53,7 +53,10 @@ def render_targets(quad: np.ndarray, size: int = IN_SIZE, stride: int = 4) -> di
     heat[1] = cv2.resize(big.astype(np.float32), (s, s), interpolation=cv2.INTER_AREA)
     # centre
     c = quad.mean(axis=0)
-    ccx, ccy = c[0] / stride - 0.5, c[1] / stride - 0.5
+    # A page whose centre lies outside the frame (a long receipt cut by the picture) still gets a
+    # centre target: on the nearest border cell, so the decoder always finds a centre peak and the
+    # offsets (cell -> corners) reach the corners beyond the frame.
+    ccx, ccy = float(np.clip(c[0] / stride - 0.5, 0, s - 1)), float(np.clip(c[1] / stride - 0.5, 0, s - 1))
     off = np.zeros((8, s, s), dtype=np.float32)
     off_mask = np.zeros((s, s), dtype=np.float32)
     if 0 <= round(ccx) < s and 0 <= round(ccy) < s:
@@ -69,6 +72,47 @@ def render_targets(quad: np.ndarray, size: int = IN_SIZE, stride: int = 4) -> di
                     off[:, y, x] = ((quad - cell) / OFFSET_UNIT).reshape(-1)
                     off_mask[y, x] = 1.0
     return {"heat": heat, "off": off, "off_mask": off_mask}
+
+
+def _refit(m: np.ndarray, quad: np.ndarray, rng: np.random.Generator, size: int) -> np.ndarray:
+    """Zoom so that the page's bounding box fills the canvas (0.9 to 1.04 of the long side), a few
+    percent off centre: the full-frame receipt of a hand-held phone photo, with corners at or just
+    past the border. Skipped when the page is degenerate."""
+    q = apply_h(m, quad)
+    lo, hi = q.min(axis=0), q.max(axis=0)
+    ext = float(max(hi[0] - lo[0], hi[1] - lo[1]))
+    if not np.isfinite(ext) or ext < 4.0:
+        return m
+    k = float(rng.uniform(0.9, 1.04)) * size / ext
+    mid = (lo + hi) / 2
+    jit = rng.uniform(-0.03, 0.03, size=2) * size
+    t0 = np.array([[1, 0, -mid[0]], [0, 1, -mid[1]], [0, 0, 1]], dtype=np.float64)
+    sc = np.diag([k, k, 1.0])
+    t1 = np.array([[1, 0, size / 2 + jit[0]], [0, 1, size / 2 + jit[1]], [0, 0, 1]], dtype=np.float64)
+    return t1 @ sc @ t0 @ m
+
+
+def _random_occluder(img: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+    """A skin-toned or plain blob (finger-like capsule or ellipse) laid over the picture at a random
+    place, with soft edges: robustness to fingers and objects hiding an edge or a corner. The label
+    is NOT changed (the page's true corners), like the generator's hands."""
+    h, w = img.shape[:2]
+    m = np.zeros((h, w), dtype=np.float32)
+    p0 = rng.uniform(0, 1, 2) * [w, h]
+    ang = rng.uniform(0, 2 * math.pi)
+    ln = rng.uniform(0.08, 0.3) * max(h, w)
+    p1 = p0 + ln * np.array([math.cos(ang), math.sin(ang)])
+    wid = int(rng.uniform(0.04, 0.10) * max(h, w))
+    cv2.line(m, tuple(int(v) for v in p0), tuple(int(v) for v in p1), 1.0, max(wid, 2), cv2.LINE_AA)
+    cv2.circle(m, tuple(int(v) for v in p1), max(wid // 2, 1), 1.0, -1, cv2.LINE_AA)
+    m = cv2.GaussianBlur(m, (0, 0), 0.8)
+    if rng.random() < 0.7:  # skin tones
+        base = np.array([rng.uniform(150, 250), rng.uniform(100, 205), rng.uniform(70, 175)], dtype=np.float32)
+    else:
+        base = rng.uniform(20, 240, size=3).astype(np.float32)
+    shade = 0.85 + 0.25 * cv2.GaussianBlur(m, (0, 0), max(2.0, wid / 3))
+    out = img.astype(np.float32) * (1 - m[..., None]) + np.clip(base * shade[..., None], 0, 255) * m[..., None]
+    return np.clip(out, 0, 255).astype(np.uint8)
 
 
 def _random_matrix(rng: np.random.Generator, w: int, h: int, size: int) -> tuple[np.ndarray, bool]:
@@ -137,13 +181,14 @@ def prep(x: torch.Tensor) -> torch.Tensor:
 
 
 class TrainSet(Dataset):
-    def __init__(self, manifests: list[str], stride: int = 4, size: int = IN_SIZE, seed: int = 0, limit: int | None = None, augment: bool = True):
+    def __init__(self, manifests: list[str], stride: int = 4, size: int = IN_SIZE, seed: int = 0, limit: int | None = None, augment: bool = True, refit_p: float = 0.0, occ_p: float = 0.0):
         self.rows = []
         for m in manifests:
             self.rows += read_manifest(m)
         if limit:
             self.rows = self.rows[:limit]
         self.stride, self.size, self.seed, self.augment = stride, size, seed, augment
+        self.refit_p, self.occ_p = refit_p, occ_p
         self.epoch = 0
 
     def __len__(self):
@@ -160,6 +205,8 @@ class TrainSet(Dataset):
         quad = np.asarray(r["quad"], dtype=np.float64) * [w, h]
         if self.augment:
             m, mirror = _random_matrix(rng, w, h, self.size)
+            if self.refit_p > 0 and rng.random() < self.refit_p:
+                m = _refit(m, quad, rng, self.size)
         else:
             m, mirror = letterbox_matrix(w, h, self.size), False
         canvas = warp_to_canvas(img, m, self.size)
@@ -168,6 +215,8 @@ class TrainSet(Dataset):
             q = q[::-1]  # keep clockwise
         q = canonical_quad(q)
         if self.augment:
+            if self.occ_p > 0 and rng.random() < self.occ_p:
+                canvas = _random_occluder(canvas, rng)
             canvas = _photometric(canvas, rng)
         t = render_targets(q, self.size, self.stride)
         return to_tensor(canvas), torch.from_numpy(t["heat"]), torch.from_numpy(t["off"]), torch.from_numpy(t["off_mask"])

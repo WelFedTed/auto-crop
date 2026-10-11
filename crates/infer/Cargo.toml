@@ -16,6 +16,8 @@ publish.workspace = true
 # never found on a search path); `rten` is pure Rust and needs no runtime library.
 ort = ["dep:ort"]
 rten = ["dep:rten", "dep:rten-tensor"]
+# PROTOTYPE of the learned page-corner detector's pre- and post-processing (ADR 0010); pure Rust.
+learned = []
 
 [dependencies]
 sha2 = "0.10"
@@ -29,3 +31,7 @@ rten-tensor = { version = "=0.26.0", optional = true }
 
 [lints.rust]
 unsafe_code = "forbid"
+
+[[example]]
+name = "net_parity"
+required-features = ["rten"]

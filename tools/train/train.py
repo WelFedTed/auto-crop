@@ -73,6 +73,9 @@ def main(argv=None) -> int:
     ap.add_argument("--overfit", type=int, default=0, help="train on N images without augmentation, then report corner error")
     ap.add_argument("--max-steps", type=int, default=0)
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--refit-p", type=float, default=0.0, help="share of samples zoomed so the page fills the canvas (full-frame photos)")
+    ap.add_argument("--occ-p", type=float, default=0.0, help="share of samples with a random finger-like occluder blob")
+    ap.add_argument("--head", type=int, default=64, help="channels of the head")
     ap.add_argument("--init", help="start from the EMA weights of this checkpoint (a continued run; the schedule restarts)")
     a = ap.parse_args(argv)
 
@@ -81,7 +84,7 @@ def main(argv=None) -> int:
     torch.manual_seed(a.seed)
     torch.backends.cudnn.benchmark = True
     dev = "cuda"
-    model = CornerNet(width=a.width, out_stride=a.stride).to(dev).to(memory_format=torch.channels_last)
+    model = CornerNet(width=a.width, out_stride=a.stride, head=a.head).to(dev).to(memory_format=torch.channels_last)
     if a.init:
         sd = torch.load(a.init, map_location="cpu", weights_only=False)["ema"]
         model.load_state_dict(sd)
@@ -90,8 +93,14 @@ def main(argv=None) -> int:
     print(f"params {n_par}", flush=True)
 
     overfit = a.overfit > 0
-    ds = TrainSet(a.train, a.stride, a.size, a.seed, limit=a.overfit or None, augment=not overfit)
-    dl = DataLoader(ds, batch_size=a.batch if not overfit else min(a.batch, 32), shuffle=True, num_workers=a.workers if not overfit else 2, drop_last=not overfit, persistent_workers=True, prefetch_factor=4, pin_memory=True, worker_init_fn=_worker_init)
+    ds = TrainSet(a.train, a.stride, a.size, a.seed, limit=a.overfit or None, augment=not overfit, refit_p=a.refit_p, occ_p=a.occ_p)
+    if overfit:
+        # No augmentation: the samples are deterministic, so render them once and train from memory.
+        cached = [ds[i] for i in range(len(ds))]
+        batch = tuple(torch.stack([c[k] for c in cached]) for k in range(4))
+        dl = [batch]
+    else:
+        dl = DataLoader(ds, batch_size=a.batch, shuffle=True, num_workers=a.workers, drop_last=True, persistent_workers=True, prefetch_factor=4, pin_memory=True, worker_init_fn=_worker_init)
     opt = torch.optim.AdamW(model.parameters(), lr=a.lr, weight_decay=a.wd)
     log = (out / "log.jsonl").open("a", encoding="utf8")
     t0 = time.time()

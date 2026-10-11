@@ -23,6 +23,8 @@
 //! have the shape and operator mix of a MobileNetV3-class corner net, so latency, size and backend
 //! agreement mean something and accuracy means nothing. No M4 claim is made here.
 
+#[cfg(feature = "learned")]
+pub mod corner;
 pub mod model;
 pub mod runtime;
 

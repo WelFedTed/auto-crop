@@ -36,7 +36,7 @@ from model import CornerNet  # noqa: E402
 def load_model(ckpt: str, device="cuda"):
     c = torch.load(ckpt, map_location="cpu", weights_only=False)
     a = c["args"]
-    m = CornerNet(width=a.get("width", 1.0), out_stride=a.get("stride", 4))
+    m = CornerNet(width=a.get("width", 1.0), out_stride=a.get("stride", 4), head=a.get("head", 64))
     m.load_state_dict(c["ema"])
     return m.to(device).to(memory_format=torch.channels_last).eval(), a
 

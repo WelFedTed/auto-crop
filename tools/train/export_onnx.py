@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
 # SPDX-FileCopyrightText: 2026 Auto Crop contributors
-"""Export a checkpoint to ONNX (opset 17, fp32, static 1x3x256x256) and check parity with ONNX Runtime.
+"""Export a checkpoint to ONNX (opset 17, fp32, static 1x3xSxS (S = the checkpoint's input size, 256 or 384)) and check parity with ONNX Runtime.
 
     python export_onnx.py --ckpt target/train/run1/best.pt --out target/models/corner-net.onnx
 
@@ -27,9 +27,10 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--ckpt", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--size", type=int, default=256)
+    ap.add_argument("--size", type=int, default=0, help="input size (default: the checkpoint's)")
     a = ap.parse_args(argv)
-    model, _ = load_model(a.ckpt, device="cpu")
+    model, margs = load_model(a.ckpt, device="cpu")
+    a.size = a.size or margs.get("size", 256)
     model = model.float().to(memory_format=torch.contiguous_format).eval()
     x = torch.rand(1, 3, a.size, a.size) * 2 - 1
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)

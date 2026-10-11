@@ -60,6 +60,17 @@ class TargetTests(unittest.TestCase):
         self.assertGreater(canonical_iou(q, dec["quad"]), 0.97)
         self.assertEqual(dec["feats"]["n_matched"], 4)
 
+    def test_a_page_centre_outside_the_frame_gets_a_border_centre_target_that_reaches_the_corners(self):
+        # A long page cut by the frame: the centre (and two corners) lie beyond the right edge.
+        q = canonical_quad(np.array([[150.0, 60.0], [420.0, 60.0], [420.0, 100.0], [150.0, 100.0]]))
+        t = render_targets(q, 256, 4)
+        cy, cx = np.unravel_index(int(np.argmax(t["heat"][2])), t["heat"][2].shape)
+        self.assertEqual((cx, cy), (63, 20))  # right border cell on the page's row
+        self.assertEqual(float(t["heat"][2].max()), 1.0)
+        cell = np.array([(cx + 0.5) * 4, (cy + 0.5) * 4])
+        got = t["off"][:, cy, cx].reshape(4, 2) * 32.0 + cell
+        np.testing.assert_allclose(got, q, atol=1e-4)
+
 
 if __name__ == "__main__":
     unittest.main()

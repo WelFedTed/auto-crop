@@ -50,7 +50,7 @@ jobs:
         shell: bash
     env:
       HAS_ORT: ${{ matrix.ort }}
-      INFER_FEATURES: ${{ matrix.ort && 'ort,rten' || 'rten' }}
+      INFER_FEATURES: ${{ matrix.ort && 'ort,rten,learned' || 'rten,learned' }}
       ENGINE_FEATURES: ${{ matrix.ort && 'standin-ort,standin-rten,standin-canny' || 'standin-rten,standin-canny' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

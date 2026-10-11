@@ -19,7 +19,7 @@ gen() { # name seed count
   "../../$PY" -m synth --train --name "$1" --seed "$2" --count "$3" --truth none --jobs "$JOBS" --out "../../$OUT/$1"
 }
 [ -f "../../$OUT/val/manifest.jsonl" ] || gen val "$((0x7A1E1001))" 1000
-for k in 1 2 3 4; do
+for k in 1 2 3 4 5 6; do
   [ -f "../../$OUT/train$k/manifest.jsonl" ] || gen "train$k" "$((0x7A1E0000 + k))" 5000
 done
 [ -f "../../$OUT/test-train-mode/manifest.jsonl" ] || gen test-train-mode "$((0x7E570001))" 1000

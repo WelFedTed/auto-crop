@@ -19,10 +19,10 @@ target/train-venv/Scripts/python -m pip install --require-hashes --no-deps -r to
 
 ## Data
 
-The generator (`tools/synth`, its own environment: `cargo xtask synth-setup`, or `python -m venv target/synth-venv` and the hashed lock) has a **training mode**, `python -m synth --train`: failure-biased quotas (long and strip receipts, textured desks, partial frames, curl, any rotation), four extra desk textures (planks, marble, terrazzo, carpet), and a hand (thumb, grip, two thumbs) that holds the page and may hide an edge or a corner; the ground truth stays the page's true corners. Evaluation suites are unchanged byte for byte (tested) and the training seeds are refused if they equal an evaluation seed.
+The generator (`tools/synth`, its own environment: `cargo xtask synth-setup`, or `python -m venv target/synth-venv` and the hashed lock) has a **training mode**, `python -m synth --train`: failure-biased quotas (long and strip receipts, textured desks, partial frames, curl, any rotation), four extra desk textures (planks, marble, terrazzo, carpet), and a hand (thumb, grip, two thumbs) that holds the page and may hide an edge or a corner; the ground truth stays the page's true corners. Evaluation suites are unchanged byte for byte (tested) and the training seeds are refused if they equal an evaluation seed. The second cycle (ADR 0010 update) adds, still only in training mode and from random streams of their own: 30% partial frames that may cut away up to 60% of the page, "tight" pages that fill the picture (corners within a few percent of the border), white-on-white desks (the desk pulled to within a few grey levels of the paper), photo prints with a white mat (truth = the whole print) and 50% hands.
 
 ```
-tools/train/gen_data.sh 10      # val (1,000), train1..4 (4 x 5,000), test-train-mode (1,000) -> target/synth/  (about 30 min)
+tools/train/gen_data.sh 10      # val (1,000), train1..6 (6 x 5,000), test-train-mode (1,000) -> target/synth/  (about 60 min; the second cycle used train1..4)
 tools/train/gen_eval.sh 4       # smoke, smoke-b, smoke-c, mid-d, full from the default generator (eval only; full is 5,200 images)
 ```
 
@@ -44,6 +44,10 @@ Hybrids (classical answer plus candidates come from `cargo run --release -p auto
 $T tools/train/hybrid.py --manifest M --learned learned.jsonl --classical classical.jsonl --out-dir target/preds/hyb --thr 0.9
 $T tools/train/slices.py learned=target/res/a.json classical=target/res/b.json --axes aspect framing background
 ```
+
+Second-cycle options of `train.py`: `--size 384` (input resolution; the ADR 0010 first cycle used 256), `--refit-p` (share of samples zoomed so the page fills the canvas), `--occ-p` (share with a random finger-like blob over the picture). A page whose centre lies outside the canvas gets its centre target on the nearest border cell, so the decoder always finds a centre and the offsets reach corners beyond the frame.
+
+Real photographs (EVALUATION ONLY, never training, tuning or checkpoint choice): `real_manifest.py` turns the owner's golden labels (`_data/golden/labels`, single-item, not assisted) into a harness manifest kept inside `_data/`; `boot.py` gives bootstrap and exact intervals and paired differences from harness result files; `parity.py` checks an exported ONNX net against PyTorch on 64 or more letterboxed images through the Rust backends (`crates/infer/examples/net_parity.rs`, features `ort`, `rten`, `learned`).
 
 `train.py --overfit 64` is the M4.14 overfit check (no augmentation, same images; reports mean corner error at 256 px). `viz_samples.py` and `contact_sheet.py` draw augmented samples and quads for a quick look.
 

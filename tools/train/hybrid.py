@@ -18,6 +18,8 @@ variant, each scorable with ``auto-crop-eval run --predictor jsonl:FILE``:
                        at the threshold (the long receipts the classical detector has no candidate for)
   agree                good only if classical-good and learned agree (IoU >= 0.9); otherwise the learned
                        answer held, or the classical one when only it exists
+  agree_l              as agree, but the answer given when both agree is the LEARNED quad (the learned
+                       corners are accepted only when the classical evidence concurs; else Check)
 
 Only ids, quads and scores are read; no image is opened.
 """
@@ -51,7 +53,7 @@ def iou(a, b, wh) -> float:
 
 
 def build(manifest: list[dict], learned: dict, classical: dict, thr: float) -> dict[str, list[dict]]:
-    outs: dict[str, list[dict]] = {k: [] for k in ("classical", "learned", "fallback", "snap", "snap_solo", "agree")}
+    outs: dict[str, list[dict]] = {k: [] for k in ("classical", "learned", "fallback", "snap", "snap_solo", "agree", "agree_l")}
     for m in manifest:
         i = m["id"]
         wh = np.array([m["width"], m["height"]], dtype=float)
@@ -97,12 +99,16 @@ def build(manifest: list[dict], learned: dict, classical: dict, thr: float) -> d
             v = iou(lq, C["quad"], wh)
             if C.get("state") == "good" and v >= 0.9:
                 outs["agree"].append(rec(C["quad"], "good", min(lconf, float(C.get("confidence") or 1.0)), "agree"))
+                outs["agree_l"].append(rec(lq, "good", min(lconf, float(C.get("confidence") or 1.0)), "agree"))
             else:
                 outs["agree"].append(rec(lq, "check", lconf, "disagree-learned"))
+                outs["agree_l"].append(rec(lq, "check", lconf, "disagree-learned"))
         elif lq is not None:
             outs["agree"].append(rec(lq, "check", lconf, "learned-only"))
+            outs["agree_l"].append(rec(lq, "check", lconf, "learned-only"))
         else:
             outs["agree"].append(rec(C.get("quad"), "check" if C.get("quad") else "failed", C.get("confidence"), "classical-held"))
+            outs["agree_l"].append(rec(C.get("quad"), "check" if C.get("quad") else "failed", C.get("confidence"), "classical-held"))
     return outs
 
 

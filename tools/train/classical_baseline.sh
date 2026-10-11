@@ -12,6 +12,6 @@ THREADS="${THREADS:-2}"
 mkdir -p target/res target/preds
 for s in "$@"; do
   m="target/synth/$s/manifest.jsonl"
-  target/release/auto-crop-eval run --manifest "$m" --predictor detector --threads "$THREADS" --out "target/res/$s-classical.json" --suite "$s" > "target/res/$s-classical.txt"
-  RAYON_NUM_THREADS="$THREADS" target/release/examples/dump_classical "$m" "target/preds/$s-classical.jsonl" 8
+  "${EVAL_BIN:-target/release/auto-crop-eval}" run --manifest "$m" --predictor detector --threads "$THREADS" --out "target/res/$s-classical.json" --suite "$s" > "target/res/$s-classical.txt"
+  RAYON_NUM_THREADS="$THREADS" "${DUMP_BIN:-target/release/examples/dump_classical}" "$m" "target/preds/$s-classical.jsonl" 8
 done
