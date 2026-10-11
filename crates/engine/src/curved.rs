@@ -20,11 +20,13 @@ use crate::engine::{Engine, lock};
 use crate::error::{ErrKind, Result};
 use crate::memory::job_weight;
 use crate::scan::{CropImage, labelled};
-use auto_crop_core::{CurveWarp, EditState, Geometry, GestureId, ItemId, ItemsError, QuadWarp};
+use auto_crop_core::{CurveWarp, EditState, Geometry, GestureId, ItemId, ItemsError, Pt, QuadWarp};
 use auto_crop_imgproc::Raster;
 use auto_crop_imgproc::cancel::{Cancel, NeverCancel};
 use auto_crop_imgproc::curved::{output_size, render_curved_cancellable};
+use auto_crop_imgproc::curves_fit::fit_curves;
 use auto_crop_imgproc::render::{Limits, RenderError, render_quad_cancellable};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -80,6 +82,42 @@ impl PageShape {
             RenderError::Cancelled => ErrKind::Cancelled,
         })
     }
+}
+
+/// A proposed curved outline for one crop (`Engine::suggest_curves`). It is a PROPOSAL: nothing is
+/// applied until the caller passes `curves` to `Engine::set_curves`, and the suggestion never
+/// changes a straight page by itself. Edge arrays are in the order top, right, bottom, left.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CurveSuggestion {
+    /// The four corners TL, TR, BR, BL (normalised), possibly moved a little from the crop's own
+    /// by the fit. They are the end points of `curves`.
+    pub quad: [Pt; 4],
+    /// The fitted boundary curves (2 to 9 points per edge), carrying the crop's quarter turns and
+    /// mirror. curves.validate() has passed. Straight edges when ell_back.
+    pub curves: CurveWarp,
+    /// Per edge confidence 0..1 (mean station confidence).
+    pub confidence: [f32; 4],
+    /// Per edge largest deviation of the fitted curve from its chord, percent of the chord length.
+    pub curvature: [f32; 4],
+    /// The same deviation as a percentage of the page's shorter side.
+    pub bulge: [f32; 4],
+    /// Per edge how much better the curve is backed by edge evidence than the best straight line.
+    pub support_gain: [f32; 4],
+    /// The curvature of the most curved confident edge (the number the 'looks curved' chip can show).
+    pub max_curvature: f32,
+    /// The page looks curved: the engine suggests offering the curve (never applies it).
+    pub looks_curved: bool,
+    /// The fit was refused and `curves` are the crop's straight edges.
+    pub fell_back: bool,
+}
+
+/// The two numbers a chip needs (`Engine::curve_hint`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CurveHint {
+    pub curvature: f32,
+    pub looks_curved: bool,
 }
 
 /// The weight a save of a curved page asks of a [`crate::memory::MemoryBudget`]: the ordinary job
@@ -187,6 +225,63 @@ impl Engine {
         };
         let bytes = crate::engine::jpeg(&out, quality)?;
         Ok((Arc::new(bytes), "image/jpeg"))
+    }
+
+    /// Fits curved boundaries to one crop (`docs/dev/curved-pages.md`, "Suggestion API"): the four
+    /// edges of the crop's outline are searched for in the display proxy
+    /// (`auto_crop_imgproc::curves_fit::fit_curves`) and the result is returned for the caller to
+    /// show and, if the person agrees, apply with [`Engine::set_curves`]. That is the only way it
+    /// ever changes the crop: this call records nothing, caches nothing and never touches the
+    /// crop, so a straight page stays straight.
+    ///
+    /// The crop must be a quad or a curved page (a curved one is fitted from its corners).
+    /// `Ok(None)` while the image is not ready; `Err` for an unknown image or crop and for a crop
+    /// without an outline. A few milliseconds to a few tens of one thread: call it from a worker, on
+    /// demand (it was not cheap enough to run for every image during analysis).
+    pub fn suggest_curves(&self, id: u32, crop: u32) -> Result<Option<CurveSuggestion>> {
+        let item = self.item(id).ok_or(ErrKind::Internal)?;
+        let (outline, turns, mirror) = {
+            let it = lock(&item);
+            if it.status != crate::api::ItemStatus::Ready {
+                return Ok(None);
+            }
+            let st = it.history.as_ref().ok_or(ErrKind::Internal)?.current();
+            let c = st.item(ItemId(crop)).ok_or(ErrKind::NoCrop)?;
+            match &c.geometry {
+                Geometry::Quad(q) => {
+                    let b = q.with_fine_baked(it.dims.0, it.dims.1);
+                    (b.corners, b.quarter_turns % 4, b.mirror)
+                }
+                Geometry::Curved(cw) => (cw.corners(), cw.quarter_turns % 4, cw.mirror),
+                _ => return Err(ErrKind::NoCrop),
+            }
+        };
+        let proxy = self.proxy(id)?;
+        let fit = fit_curves(&proxy, outline);
+        let mut curves = fit.curves;
+        curves.quarter_turns = turns;
+        curves.mirror = mirror;
+        Ok(Some(CurveSuggestion {
+            quad: fit.quad,
+            curves,
+            confidence: fit.confidence,
+            curvature: fit.curvature,
+            bulge: fit.bulge,
+            support_gain: fit.support_gain,
+            max_curvature: fit.max_curvature,
+            looks_curved: fit.looks_curved,
+            fell_back: fit.fell_back,
+        }))
+    }
+
+    /// [`Engine::suggest_curves`] reduced to the numbers of a chip (`None` while the image is not
+    /// ready). Computed on demand, not during analysis: the fit costs more than the 3 ms the
+    /// analysis could afford per image.
+    pub fn curve_hint(&self, id: u32, crop: u32) -> Result<Option<CurveHint>> {
+        Ok(self.suggest_curves(id, crop)?.map(|s| CurveHint {
+            curvature: s.max_curvature,
+            looks_curved: s.looks_curved,
+        }))
     }
 
     /// The weight a save of image `id` asks of a memory budget: the plain job weight for a quad,
