@@ -93,28 +93,29 @@ Notes. (1) The geometry of the synthetic suites barely moves (the rules change w
 
 ## Update 2026-10-12 (second): a learned detector on the same real photographs and on the synthetic suites, against the classical one
 
-Aggregates only; the private pictures and labels (`_data/`, B21) are evaluation data and nothing here was tuned on them. Detector: `main` at `1bb9c50` (`detect.rs` unchanged by this update). Harness: `auto-crop-eval run`, canonical-warp IoU, failure = IoU < 0.90, no quad counts as a failure, Windows 11 x86-64, release build.
+Aggregates only; the private pictures and labels (`_data/`, B21) are evaluation data and nothing here was tuned on them. Harness: `auto-crop-eval run`, canonical-warp IoU, failure = IoU < 0.90, no quad counts as a failure, Windows 11 x86-64, release build. The classical detector is given at `1bb9c50` (before the section above) and at `0d03275` (after it, re-measured here with my rebased HEAD `316ffb0`; the numbers equal the ones in the section above). The learned net is a from-scratch study result (ADR 0010 update), not a shipping detector; its answers are not clipped to the frame (the labels may lie outside it).
 
-**Real photographs, 17 single-item exact labels** (12 receipt-long, 3 flatbed-single, 2 general-photo; 7 flagged partial-frame; the 13 multi-item or assisted labels need a multi-quad scorer and are left out; the labels may lie outside the frame and the answers are not clipped):
+**Real photographs, the same 17 single-item exact labels** (12 receipt-long, 3 flatbed-single, 2 general-photo; 7 flagged partial-frame; the 13 multi-item or assisted labels need a multi-quad scorer and are left out):
 
 | Detector | Mean IoU (95% bootstrap) | Failure | Auto-accepted (silent failures) | IoU >= .95 / .90-.95 / .80-.90 / .50-.80 / < .50 |
 |---|---|---|---|---|
-| classical (1 of 17 gave no quad) | 0.624 (0.43-0.80) | 11 of 17 = 64.7% (exact 38-86%) | 4 (3 silent; one-sided 95% bound 98.7%) | 6 / 0 / 2 / 3 / 6 |
-| learned, candidate B (from scratch, ADR 0010 update) | 0.797 (0.69-0.88) | 10 of 17 = 58.8% (33-82%) | 0 (0) | 4 / 3 / 4 / 4 / 2 |
-| learned, candidate C | 0.783 (0.68-0.87) | 12 of 17 = 70.6% (44-90%) | 1 (0) | 4 / 1 / 5 / 5 / 2 |
+| classical `1bb9c50` | 0.624 (0.43-0.80) | 11 of 17 = 64.7% (exact 38-86%) | 4 (3) | 6 / 0 / 2 / 3 / 6 |
+| classical `0d03275` | 0.686 (0.50-0.85) | 9 of 17 = 52.9% (28-77%) | 2 (0) | 8 / 0 / 1 / 3 / 5 |
+| learned B | 0.797 (0.69-0.88) | 10 of 17 = 58.8% (33-82%) | 0 (0) | 4 / 3 / 4 / 4 / 2 |
+| learned C | 0.783 (0.68-0.87) | 12 of 17 = 70.6% (44-90%) | 1 (0) | 4 / 1 / 5 / 5 / 2 |
 
-Classical by slice (n too small to gate; descriptive): receipt-long (12) mean IoU 0.497, failure 83%; flatbed-single (3) 0.900 and 33%; general-photo (2) 0.972 and 0%; partial-frame (7) 0.338 and 86%; the one curved page failed. The classical detector's auto-accepted answers on these photographs are 3 wrong in 4: its confidence is not usable as an accept rule on real pictures, which matches ECE 0.51 and AUROC 0.76 here (ECE 0.20, AUROC 0.88 on the 5,200-image synthetic suite). The paired difference learned minus classical is +0.16 to +0.17 in mean IoU and -6 to +6 points in failure rate, every interval including zero: **17 images cannot separate them** (ADR 0010 update has the intervals, the learned net's slices and what can and cannot be concluded).
+Paired difference learned minus the new classical: mean IoU +0.11 (B) and +0.10 (C), failure rate +5.9 and +17.6 points, every interval including zero (for example mean IoU B -0.10 to +0.32): **17 images cannot separate them**, and the learned net's failure rate is not lower. The learned net has fewer gross misses (2 images below IoU 0.5 against 5) and does best on long receipts (mean IoU 0.86 to 0.89 against 0.585) and pages cut by the frame (0.85 against 0.48), worst on flat documents (3 images: 0.51 against 0.90). ADR 0010 update has the intervals, the hybrids and what can and cannot be concluded.
 
-**Synthetic suites, classical against the learned net (candidate C), same harness and the default generator** (the classical column re-measures the 2026-10-04 results below and gives the same numbers, except `test-train-mode`, which is new):
+**Synthetic suites, classical against the learned net (candidate C), default generator** (the classical columns match the sections above):
 
-| Suite | Classical mean IoU / failure | Learned C mean IoU / failure | Learned auto-accepted (silent) |
-|---|---|---|---|
-| full (5,200) | 0.6965 / 40.5% | 0.9380 / 18.2% | 2,603 (9; one-sided 95% bound 0.60%) |
-| mid-d (1,000) | 0.689 / 43.4% | 0.934 / 20.1% | 480 (3) |
-| smoke, smoke-b, smoke-c | 0.696, 0.725, 0.705 / 41.5, 40.5, 42.5% | 0.929, 0.937, 0.932 / 24.0, 19.0, 20.0% | 87 (2), 96 (0), 99 (0) |
-| test-train-mode (1,000; new harder generator with hands, mats, tight and white-on-white pages) | 0.500 / 65.3% | 0.874 / 41.5% | 242 (7) |
+| Suite | Classical `1bb9c50` mean IoU / failure | Classical `0d03275` | Learned C mean IoU / failure | Learned auto-accepted (silent) |
+|---|---|---|---|---|
+| full (5,200) | 0.6965 / 40.5% | 0.6979 / 40.1% | 0.9380 / 18.2% | 2,603 (9; one-sided 95% bound 0.60%) |
+| mid-d (1,000) | 0.689 / 43.4% | 0.690 / 43.0% | 0.934 / 20.1% | 480 (3) |
+| smoke, smoke-b, smoke-c | 0.696, 0.725, 0.705 / 41.5, 40.5, 42.5% | 0.700, 0.726, 0.710 / 41.5, 40.5, 41.5% | 0.929, 0.937, 0.932 / 24.0, 19.0, 20.0% | 87 (2), 96 (0), 99 (0) |
+| test-train-mode (1,000; new harder generator with hands, mats, tight and white-on-white pages) | 0.500 / 65.3% | 0.500 / 65.4% | 0.874 / 41.5% | 242 (7) |
 
-The classical detector's synthetic numbers are unchanged by this update; the learned numbers are a study result (ADR 0010), not a shipping detector, and synthetic data still never backs a real-world claim (B6).
+Synthetic data still never backs a real-world claim (B6).
 
 ## Update 2026-10-04: long thin receipts and pages whose short ends are faint, cut or hidden
 
