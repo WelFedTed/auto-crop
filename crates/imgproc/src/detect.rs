@@ -30,7 +30,10 @@ use crate::scale::resize_to_fit;
 use auto_crop_core::{Confidence, Forced, Pt, Reason, ReasonCode, Side};
 
 mod edges;
+#[cfg(test)]
+mod real_cases;
 mod strip;
+mod surround;
 use edges::Field;
 
 /// Below this score the detector reports no quad at all (a Failed item).
@@ -422,6 +425,9 @@ struct Candidate {
     mean_support: f64,
     /// Built from two long edges with colour-confirmed ends (see `strip`).
     from_strip: bool,
+    /// One side runs through the desk (see `side_stats`): the candidate is known to be wrong, so
+    /// it must not count as a rival of, or a container for, a better one.
+    off_page: bool,
 }
 
 fn side_of(i: usize) -> Side {
@@ -437,6 +443,8 @@ struct SideStat {
     strength: f64,
     /// Samples that fall on or beyond the frame border and so cannot be judged.
     blind: usize,
+    /// The side runs through one uniform non-paper region (see `CHROMA_FAR`).
+    off_page: bool,
 }
 
 /// Samples per side when scoring a candidate.
@@ -447,14 +455,32 @@ const PROBE_OFFSET: f64 = 6.0;
 const PAPER_MATCH: f32 = 4.0;
 /// A side is thrown out when more than this share of its samples is an edge with paper beyond it.
 const PAPER_EDGE_SHARE: f64 = 0.3;
+/// Per-side colour model. A side is off the page when the colour just inside it (median over the
+/// side) is not page colour AND is the same colour as just outside it: the side then runs through
+/// one uniform non-paper region (wood grain, a printed pattern), where an aligned gradient proves
+/// nothing. "Colour" here is the chromaticity (each channel over the sum of the three), so a
+/// shadow, which darkens paper without changing its hue, does not count as a different colour; the
+/// medians are taken over the side, so grain, which changes brightness, cancels. Chromaticities
+/// differing by more than `CHROMA_FAR` in some channel are different colours, by less than
+/// `CHROMA_SAME` the same.
+const CHROMA_FAR: f32 = 0.05;
+const CHROMA_SAME: f32 = 0.03;
+/// Colours darker than this (sum of the channels) have no stable chromaticity: no verdict.
+const CHROMA_MIN_SUM: f32 = 90.0;
+/// Samples with both probe colours needed before the model is used.
+const MIN_COLOUR_SAMPLES: usize = 8;
 /// Mean edge strength (in edge thresholds) below which the contrast is called low.
 const LOW_STRENGTH: f64 = 1.8;
 /// Aspect ratio above which the outline is held for a look (a thin strip is still a candidate).
 const ODD_ASPECT: f64 = 20.0;
+/// Score of the whole frame offered as the page when nothing in the picture is desk (held).
+const FULL_FRAME_SCORE: f32 = 0.8;
 /// Highest score of a strip candidate (see `strip`): held for review, ranked below a clean quad.
 const STRIP_SCORE_CAP: f32 = 0.8;
 /// A strip candidate competes at this share of its rank: it wins only against clearly worse ones.
 const STRIP_RANK_FACTOR: f64 = 0.85;
+/// A strip candidate scoring at least this, away from a clean chosen quad, holds that quad.
+const STRIP_RIVAL_SCORE: f32 = 0.75;
 /// Every side needs at least this edge support for the result to be eligible for auto-accept.
 const GOOD_SIDE_SUPPORT: f64 = 0.9;
 /// A different, bigger quad scoring at least this much makes the choice ambiguous.
@@ -502,6 +528,29 @@ fn paper_colour(f: &Field, q: &[P; 4]) -> [f32; 3] {
     })
 }
 
+/// Per-channel median of three lists of values.
+fn median3(mut v: [Vec<f32>; 3]) -> [f32; 3] {
+    std::array::from_fn(|c| {
+        let l = &mut v[c];
+        l.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        l.get(l.len() / 2).copied().unwrap_or(0.0)
+    })
+}
+
+/// The chromaticity of a colour, `None` when it is too dark to have a stable one.
+fn chroma(c: [f32; 3]) -> Option<[f32; 3]> {
+    let sum = c[0] + c[1] + c[2];
+    (sum >= CHROMA_MIN_SUM).then(|| c.map(|v| v / sum))
+}
+
+/// Largest channel difference of two chromaticities.
+fn chroma_gap(a: [f32; 3], b: [f32; 3]) -> f32 {
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| (x - y).abs())
+        .fold(0.0, f32::max)
+}
+
 /// Edge evidence along the side `a`-`b` (clockwise on screen, so its outward normal is on the
 /// left of the direction of travel in y-up terms, `(dy, -dx)` here).
 ///
@@ -521,6 +570,8 @@ fn side_stats(f: &Field, a: P, b: P, paper: [f32; 3]) -> SideStat {
     let (w, h) = (f.w as f64, f.h as f64);
     let (mut counted, mut blind) = (0usize, 0usize);
     let (mut pos, mut neg, mut contra) = (0usize, 0usize, 0usize);
+    let mut in_cols: [Vec<f32>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+    let mut out_cols: [Vec<f32>; 3] = [Vec::new(), Vec::new(), Vec::new()];
     let mut strength = 0.0f64;
     for s in 0..SAMPLES {
         let t = 0.05 + 0.9 * s as f64 / (SAMPLES - 1) as f64;
@@ -530,6 +581,14 @@ fn side_stats(f: &Field, a: P, b: P, paper: [f32; 3]) -> SideStat {
             continue;
         }
         counted += 1;
+        let inward = (p.0 - n.0 * PROBE_OFFSET, p.1 - n.1 * PROBE_OFFSET);
+        let outward = (p.0 + n.0 * PROBE_OFFSET, p.1 + n.1 * PROBE_OFFSET);
+        if let (Some(i), Some(o)) = (f.colour(inward), f.colour(outward)) {
+            for c in 0..3 {
+                in_cols[c].push(i[c]);
+                out_cols[c].push(o[c]);
+            }
+        }
         let mut best = 0.0f32;
         let mut signed = 0.0f32;
         for o in -2i32..=2 {
@@ -562,14 +621,24 @@ fn side_stats(f: &Field, a: P, b: P, paper: [f32; 3]) -> SideStat {
     }
     let all = pos + neg;
     let contradicted = counted > 0 && contra as f64 > PAPER_EDGE_SHARE * counted as f64;
+    let off_page = in_cols[0].len() >= MIN_COLOUR_SAMPLES && {
+        let (inside, outside) = (chroma(median3(in_cols)), chroma(median3(out_cols)));
+        match (inside, outside, chroma(paper)) {
+            (Some(i), Some(o), Some(p)) => {
+                chroma_gap(i, p) > CHROMA_FAR && chroma_gap(i, o) < CHROMA_SAME
+            }
+            _ => false,
+        }
+    };
     SideStat {
-        support: if counted == 0 || contradicted {
+        support: if counted == 0 || contradicted || off_page {
             0.0
         } else {
             pos.max(neg) as f64 / counted as f64
         },
         strength: if all == 0 { 0.0 } else { strength / all as f64 },
         blind,
+        off_page,
     }
 }
 
@@ -714,6 +783,7 @@ fn evaluate(quad_raw: [P; 4], f: &Field, strip: Option<&[strip::End; 2]>) -> Can
         weakest_side,
         mean_support,
         from_strip: strip.is_some(),
+        off_page: sides.iter().any(|s| s.off_page),
     }
 }
 
@@ -737,6 +807,7 @@ fn rival_side(best: &Candidate, others: &[Candidate]) -> Option<usize> {
     let best_area = crate::geometry::polygon_area(&best.quad).abs();
     let rival = others.iter().find(|o| {
         !o.from_strip
+            && !o.off_page
             && (o.score >= RIVAL_SCORE || o.mean_support >= RIVAL_MEAN_SUPPORT)
             && o.forced != Some(Forced::Failed)
             && crate::geometry::polygon_area(&o.quad).abs() > RIVAL_AREA_RATIO * best_area
@@ -767,7 +838,7 @@ fn rival_side(best: &Candidate, others: &[Candidate]) -> Option<usize> {
 }
 
 /// All scored candidates for `src` and the proxy size they live in.
-fn gather(src: &Raster) -> (Vec<Candidate>, usize, usize) {
+fn gather(src: &Raster) -> (Vec<Candidate>, Field) {
     let proxy = resize_to_fit(src, PROXY_EDGE);
     let field = Field::new(&proxy, FIELD_SIGMA, EDGE_FLOOR, EDGE_CEIL, EDGE_NOISE_GAIN);
     let (w, h) = (field.w, field.h);
@@ -830,7 +901,7 @@ fn gather(src: &Raster) -> (Vec<Candidate>, usize, usize) {
             cands.push(evaluate(quad, &field, None));
         }
     }
-    (cands, w, h)
+    (cands, field)
 }
 
 /// One scored candidate, for diagnostics.
@@ -849,7 +920,8 @@ pub fn trace(src: &Raster) -> Vec<TraceCandidate> {
     if src.width < 16 || src.height < 16 {
         return Vec::new();
     }
-    let (cands, w, h) = gather(src);
+    let (cands, field) = gather(src);
+    let (w, h) = (field.w, field.h);
     let mut out: Vec<TraceCandidate> = cands
         .iter()
         .map(|c| TraceCandidate {
@@ -966,7 +1038,8 @@ pub fn detect(src: &Raster) -> Detection {
     if src.width < 16 || src.height < 16 {
         return failed(0.0);
     }
-    let (mut cands, w, h) = gather(src);
+    let (mut cands, field) = gather(src);
+    let (w, h) = (field.w, field.h);
     // A candidate that could never be answered (implausible, or under the Failed score) does not
     // compete: it must not push a usable one off the top.
     let viable = |c: &Candidate| c.score >= MIN_QUAD_SCORE && c.forced != Some(Forced::Failed);
@@ -1035,6 +1108,25 @@ pub fn detect(src: &Raster) -> Detection {
             side: Some(side_of(k)),
         });
     }
+    // A clean quad that would be accepted while a long thin page stands elsewhere in the picture
+    // (a strip candidate, never auto-accepted itself): the clean quad may be a distractor.
+    if c.forced.is_none()
+        && !c.from_strip
+        && cands.iter().any(|o| {
+            o.from_strip
+                && o.score >= STRIP_RIVAL_SCORE
+                && o.forced != Some(Forced::Failed)
+                && overlap_share(&o.quad, &c.quad) < 0.5
+                && overlap_share(&c.quad, &o.quad) < 0.5
+                && surround::stands_out_of_surround(&field, &c, o)
+        })
+    {
+        c.forced = Some(Forced::Check);
+        c.reasons.push(Reason {
+            code: ReasonCode::DetectorsDisagree,
+            side: None,
+        });
+    }
     if c.forced.is_none() && holds_several(&c, &cands) {
         c.forced = Some(Forced::Check);
         c.reasons.push(Reason {
@@ -1042,7 +1134,30 @@ pub fn detect(src: &Raster) -> Detection {
             side: Some(side_of(c.weakest_side)),
         });
     }
+    // What the colours around the quad say about it (see `surround`): a patch of a bigger page is
+    // never Good, and when nothing in the picture is desk the page is the whole frame; a picture
+    // inside a border of the page's own colour has two plausible outlines.
     let (wf, hf) = (w as f64, h as f64);
+    if let Some(s) = surround::surround(&field, &c.quad) {
+        c.forced.get_or_insert(Forced::Check);
+        c.reasons.insert(
+            0,
+            Reason {
+                code: ReasonCode::DetectorsDisagree,
+                side: None,
+            },
+        );
+        if s.fills_frame {
+            c.quad = [(0.0, 0.0), (wf, 0.0), (wf, hf), (0.0, hf)];
+            c.score = c.score.min(FULL_FRAME_SCORE);
+        }
+    } else if c.forced.is_none() && surround::inner_picture(&field, &c, &cands).is_some() {
+        c.forced = Some(Forced::Check);
+        c.reasons.push(Reason {
+            code: ReasonCode::DetectorsDisagree,
+            side: None,
+        });
+    }
     Detection {
         quad: Some(std::array::from_fn(|i| {
             Pt::new(c.quad[i].0 / wf, c.quad[i].1 / hf)
@@ -1248,7 +1363,11 @@ mod tests {
         s.background = [214, 210, 202];
         s.paper = [232, 229, 222];
         let faint = detect(&render_scene(&s));
-        assert!(faint.confidence.score < clean.confidence.score);
+        // Both are found, and faint is not scored meaningfully above clean. (It used to be strictly
+        // below: the grain of the desk pulled the clean scene's top side 1% above the paper, which
+        // held it as low contrast; the colour model now keeps the side on the paper edge, so the
+        // two score alike and a hair apart.)
+        assert!(faint.confidence.score <= clean.confidence.score + 0.01);
     }
 
     #[test]
@@ -1356,6 +1475,7 @@ mod tests {
             weakest_side,
             mean_support: f64::from(score),
             from_strip: false,
+            off_page: false,
         }
     }
 
