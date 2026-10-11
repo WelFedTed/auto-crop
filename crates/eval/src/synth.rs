@@ -45,16 +45,18 @@ impl SuiteSpec {
     /// `smoke`: 200 images for the per-PR gate. `full`: 5,184 images (48 x 108, so every tag value
     /// is exactly balanced) for the nightly suite.
     pub fn named(name: &str) -> Option<Self> {
-        let (count, max_edge) = match name {
-            "smoke" => (200, 480),
-            "full" => (5184, 480),
+        let (count, max_edge, seed) = match name {
+            "smoke" => (200, 480, 0x5EED_A070_C20B_0001),
+            "full" => (5184, 480, 0x5EED_A070_C20B_0001),
+            // Scenes modelled on failures seen on real photographs (see `synth_real`).
+            "real-cases" => (240, 480, 0x5EED_A070_C20B_0002),
             _ => return None,
         };
         Some(Self {
             name: name.to_owned(),
             count,
             max_edge,
-            seed: 0x5EED_A070_C20B_0001,
+            seed,
         })
     }
 }
@@ -404,6 +406,9 @@ pub struct Generated {
 
 /// Writes `images/*` and `manifest.jsonl` under `out`.
 pub fn generate(spec: &SuiteSpec, out: &Path) -> Result<Generated, String> {
+    if spec.name == "real-cases" {
+        return crate::synth_real::generate(spec, out);
+    }
     let images = out.join("images");
     std::fs::create_dir_all(&images)
         .map_err(|e| format!("cannot create {}: {e}", images.display()))?;

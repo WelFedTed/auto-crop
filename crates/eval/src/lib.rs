@@ -38,6 +38,7 @@ pub mod selfcheck;
 pub mod splits;
 pub mod stats;
 pub mod synth;
+pub mod synth_real;
 pub mod variants;
 
 #[cfg(test)]

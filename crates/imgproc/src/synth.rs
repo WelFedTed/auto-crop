@@ -251,6 +251,109 @@ pub fn render_scene(s: &Scene) -> Raster {
     box_blur(&img, s.blur_radius)
 }
 
+/// Normalised corners TL, TR, BR, BL.
+pub type SceneCorners = [(f64, f64); 4];
+
+/// A sheet of `kind` laid through the normalised `corners` on a desk given by `desk(x, y)` (grey
+/// levels per channel, before noise), with a mild lighting gradient across the sheet and `noise`
+/// grey levels of noise everywhere. Unlike [`render_scene`] the desk is any function, so textures
+/// such as [`wood_desk`] can be used; the corners may lie outside the frame (a sheet that fills it).
+pub fn compose_on_desk(
+    (w, h): (u32, u32),
+    corners: [(f64, f64); 4],
+    kind: PaperKind,
+    paper: [u8; 3],
+    seed: u64,
+    noise: f32,
+    desk: &dyn Fn(u32, u32) -> [f32; 3],
+) -> Raster {
+    let sheet = paper_texture(kind, paper, [58, 62, 74], seed);
+    let (pw, ph) = (f64::from(sheet.width), f64::from(sheet.height));
+    let quad: [(f64, f64); 4] =
+        std::array::from_fn(|i| (corners[i].0 * f64::from(w), corners[i].1 * f64::from(h)));
+    let rect = [(0.0, 0.0), (pw, 0.0), (pw, ph), (0.0, ph)];
+    let to_paper = homography(quad, rect).expect("a plain quad");
+    let mut rng = Rng::new(seed ^ 0xFACE);
+    let mut img = Raster::new(w, h);
+    for y in 0..h {
+        for x in 0..w {
+            let (u, v) =
+                apply(&to_paper, f64::from(x) + 0.5, f64::from(y) + 0.5).unwrap_or((-1.0, -1.0));
+            let mut px = if u >= 0.0 && v >= 0.0 && u < pw && v < ph {
+                let t = 1.0 - 0.06 * ((f64::from(x) / f64::from(w)) as f32);
+                bilinear(&sheet, u, v).map(|c| c * t)
+            } else {
+                desk(x, y)
+            };
+            for c in &mut px {
+                *c += (rng.unit() + rng.unit() + rng.unit() - 1.5) * noise;
+            }
+            img.set_pixel(x, y, px.map(|c| c.round().clamp(0.0, 255.0) as u8));
+        }
+    }
+    img
+}
+
+/// A wood-like desk for [`compose_on_desk`]: `base` colour with strong, long grain lines (a random
+/// walk down the rows, so each line is a few pixels thick and runs across the picture, amplitude
+/// about `grain` grey levels) and a slow blotchy variation.
+pub fn wood_desk(h: u32, seed: u64, grain: f32, base: [f32; 3]) -> impl Fn(u32, u32) -> [f32; 3] {
+    let mut rng = Rng::new(seed);
+    let mut rows = vec![0.0f32; h as usize + 1];
+    let mut g = 0.0f32;
+    for r in &mut rows {
+        g = 0.72 * g + (rng.unit() - 0.5) * grain * 1.6;
+        *r = g;
+    }
+    let phase = f64::from(rng.unit()) * 6.0;
+    move |x, y| {
+        let slow = ((f64::from(x) * 0.011 + f64::from(y) * 0.004 + phase).sin() as f32) * 7.0;
+        let k = 1.0 + (rows[y.min(h) as usize] + slow) / 130.0;
+        base.map(|c| c * k)
+    }
+}
+
+/// A black-and-white print: a black background, a white mat inset by `mat` (a share of the frame on
+/// every side) and inside it a grey picture inset by `pic` with soft shapes and noise. Returns the
+/// image and the normalised corners (TL, TR, BR, BL) of the mat and of the picture.
+pub fn matted_print(
+    (w, h): (u32, u32),
+    mat: f64,
+    pic: f64,
+    seed: u64,
+) -> (Raster, SceneCorners, SceneCorners) {
+    let mut rng = Rng::new(seed);
+    let (cx, cy) = (
+        0.35 + 0.2 * f64::from(rng.unit()),
+        0.35 + 0.2 * f64::from(rng.unit()),
+    );
+    let back = 185.0 + 30.0 * rng.unit();
+    let mut img = Raster::filled(w, h, [14, 14, 16]);
+    let (wf, hf) = (f64::from(w), f64::from(h));
+    for y in 0..h {
+        for x in 0..w {
+            let (fx, fy) = (f64::from(x) / wf, f64::from(y) / hf);
+            let in_mat = fx >= mat && fx < 1.0 - mat && fy >= mat && fy < 1.0 - mat;
+            let in_pic = fx >= pic && fx < 1.0 - pic && fy >= pic && fy < 1.0 - pic;
+            let n = (rng.unit() - 0.5) * 6.0;
+            let v = if in_pic {
+                let d = ((fx - cx) / 0.2).hypot((fy - cy) / 0.26);
+                let blob = (-d * d * 1.5).exp();
+                let patch = (-(((fx - 0.78) / 0.08).powi(2) + ((fy - 0.30) / 0.1).powi(2))).exp();
+                back - 150.0 * blob as f32 + 40.0 * patch as f32 + n * 2.0
+            } else if in_mat {
+                250.0 + n * 0.5
+            } else {
+                14.0 + n.abs()
+            };
+            let c = v.round().clamp(0.0, 255.0) as u8;
+            img.set_pixel(x, y, [c, c, c]);
+        }
+    }
+    let corners = |m: f64| [(m, m), (1.0 - m, m), (1.0 - m, 1.0 - m), (m, 1.0 - m)];
+    (img, corners(mat), corners(pic))
+}
+
 /// The corners of the scene in normalised coordinates, for tests and ground truth.
 pub fn corners_of(s: &Scene) -> [(f64, f64); 4] {
     s.corners

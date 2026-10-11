@@ -23,7 +23,7 @@ const HELP: &str = "\
 auto-crop-eval <command> [options]
 
 Commands:
-  synth --suite smoke|full --out DIR [--seed N] [--count N] [--max-edge N]
+  synth --suite smoke|full|real-cases --out DIR [--seed N] [--count N] [--max-edge N]
         Write a STAND-IN synthetic suite (images + manifest.jsonl) for the harness. Never commit it.
   run --manifest FILE --predictor SPEC --out FILE [--split dev|test|all] [--threads N]
       [--commit SHA] [--tier T] [--suite NAME] [--multi]
@@ -151,7 +151,7 @@ fn read(path: &str) -> Result<String, String> {
 fn cmd_synth(a: &Args) -> Result<ExitCode, String> {
     let name = a.required("--suite")?;
     let mut spec = synth::SuiteSpec::named(&name)
-        .ok_or_else(|| format!("unknown suite `{name}` (smoke|full)"))?;
+        .ok_or_else(|| format!("unknown suite `{name}` (smoke|full|real-cases)"))?;
     if let Some(s) = a.number::<u64>("--seed")? {
         spec.seed = s;
     }
