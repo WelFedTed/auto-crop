@@ -29,14 +29,24 @@ class SceneAssets:
     meta: dict = field(default_factory=dict)
 
 
-def build_scene(spec: SceneSpec) -> SceneAssets:
-    """Render the scene's page once; its photographs reuse it."""
+def build_scene(spec: SceneSpec, extras: dict | None = None) -> SceneAssets:
+    """Render the scene's page once; its photographs reuse it. ``extras`` is for the TRAINING mode
+    only: ``{"mat_p": p}`` turns a share of the document scenes into photo prints with a white mat
+    (drawn from a stream of its own; without extras nothing changes)."""
     rng = R.stream(spec.seed, "page")
     pg = pagemod.render(rng, spec.aspect, spec.paper)
     c0 = None if spec.ink == "normal" else float(rng.uniform(0.10, 0.60))
     rgb, used = degrade.compose_page(pg, rng, c0)
     tex = degrade.page_texture(rgb, spec.seed, rng, fancy=bool(rng.random() < 0.10))
-    return SceneAssets(spec, pg, tex, used, c0)
+    meta: dict = {}
+    if extras and extras.get("mat_p", 0.0) > 0.0 and spec.aspect == "document":
+        from . import trainset
+
+        mrng = R.stream(spec.seed, "train-mat")
+        if mrng.random() < float(extras["mat_p"]):
+            tex = trainset.apply_mat(tex, mrng)
+            meta["mat"] = True
+    return SceneAssets(spec, pg, tex, used, c0, meta)
 
 
 def _pose(spec: ImageSpec, rng) -> tuple[float, float, float]:
@@ -137,7 +147,10 @@ def render_image(assets: SceneAssets, spec: ImageSpec, max_edge: int, geometry_o
     if bend_kind:  # curved-boundary suites (`curved.py`); the default path below is untouched
         cam, curl = _bent_camera(spec, bend_kind, tex_wh, (pitch, yaw, roll), rng, max_edge)
     else:
-        cam = camera.fit(tex_wh, pitch, yaw, roll, rng, max_edge, spec.framing == "partial", curl)
+        tight = False
+        if extras and extras.get("tight_p", 0.0) > 0.0 and spec.framing != "partial":
+            tight = bool(R.stream(spec.seed, "train-tight").random() < float(extras["tight_p"]))
+        cam = camera.fit(tex_wh, pitch, yaw, roll, rng, max_edge, spec.framing == "partial", curl, tight=tight, wide_partial=bool(extras and extras.get("wide_partial")))
     cw, ch = cam.canvas
     rgb, alpha, shade = camera.render(cam, assets.texture)
     quad_px = cam.quad_px()
@@ -168,6 +181,13 @@ def render_image(assets: SceneAssets, spec: ImageSpec, max_edge: int, geometry_o
         target = np.array(assets.page.paper_rgb, dtype=np.float32) * float(rng.uniform(0.86, 0.95))
         m = float(rng.uniform(0.80, 0.93))
         bg = np.clip(target[None, None, :] * m + bg * (1 - m), 0, 255)
+    if extras and extras.get("wow_p", 0.0) > 0.0:
+        from . import trainset
+
+        wrng = R.stream(spec.seed, "train-wow")
+        if wrng.random() < float(extras["wow_p"]):
+            bg = trainset.desk_towards_paper(bg, assets.page.paper_rgb, wrng)
+            meta["white_on_white"] = True
     if spec.clutter != "none":
         clutter_kinds = backgrounds.add_clutter(bg, brng, spec.clutter, avoid=quad_px)
     centre = quad_px.mean(axis=0)
@@ -195,6 +215,10 @@ def render_image(assets: SceneAssets, spec: ImageSpec, max_edge: int, geometry_o
     if hand is not None:
         occluders.draw_hand(comp, hand, "front", hrng)
         meta["hand"] = hand["kind"]
+    if extras:
+        meta["tight"] = bool(tight) if not bend_kind else False
+        if assets.meta.get("mat"):
+            meta["mat"] = True
     out = comp * light
     out = np.clip(out + 0.5, 0, 255).astype(np.uint8)
 

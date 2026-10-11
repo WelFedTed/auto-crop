@@ -159,8 +159,14 @@ def fit(
     partial: bool,
     curl: Curl | None = None,
     outline: int = 0,
+    tight: bool = False,
+    wide_partial: bool = False,
 ) -> Camera:
-    """A camera that frames the page: full (all corners inside) or partial (corners cut off)."""
+    """A camera that frames the page: full (all corners inside) or partial (corners cut off).
+
+    ``tight`` (training mode only) frames a page that fills the picture: the scale lets the page's
+    bounding box reach the frame, so corners sit within a few percent of the border or just outside.
+    ``wide_partial`` (training mode only) lets a partial frame cut away up to 60 percent of the page."""
     wt, ht = tex
     big = float(max(wt, ht))
     d = big * float(rng.uniform(1.9, 3.4))
@@ -191,8 +197,11 @@ def fit(
     fit_s = min(cw * (1 - 2 * margin) / bw, ch * (1 - 2 * margin) / bh)
     mid = np.array([(xs.max() + xs.min()) / 2, (ys.max() + ys.min()) / 2])
     for attempt in range(12):
-        if partial:
-            s = fit_s * float(rng.uniform(1.12, 1.45))
+        if tight and not partial:
+            s = fit_s * float(rng.uniform(1.0, 1.1))
+            shift = rng.uniform(-1, 1, size=2) * np.array([cw, ch]) * 0.015
+        elif partial:
+            s = fit_s * float(rng.uniform(1.12, 1.9 if wide_partial else 1.45))
             # Push the page off one or two sides of the frame.
             shift = rng.uniform(-1, 1, size=2) * np.array([cw, ch]) * 0.28
             if rng.random() < 0.5:
@@ -205,7 +214,10 @@ def fit(
         q = centred_quad(s, cx, cy)
         vis = visible_fraction(q, (cw, ch))
         inside = bool(np.all((q[:, 0] > 0.01 * cw) & (q[:, 0] < 0.99 * cw) & (q[:, 1] > 0.01 * ch) & (q[:, 1] < 0.99 * ch)))
-        if (not partial and inside) or (partial and 0.55 <= vis <= 0.93):
+        if tight and not partial:
+            if vis >= 0.97:
+                break
+        elif (not partial and inside) or (partial and (0.4 if wide_partial else 0.55) <= vis <= 0.93):
             break
     else:  # fall back to something valid rather than loop for ever
         if partial:

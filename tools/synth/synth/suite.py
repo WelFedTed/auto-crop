@@ -83,7 +83,7 @@ def _render_scene(task):
     sc, imgs, out, max_edge, truth_mode, suite, *rest = task
     extras = rest[0] if rest else None  # training mode only (`trainset`)
     out = Path(out)
-    assets = scene.build_scene(sc)
+    assets = scene.build_scene(sc, extras)
     rows = []
     for spec in imgs:
         img, quad, meta = scene.render_image(assets, spec, max_edge, extras=extras)
@@ -133,6 +133,7 @@ def _render_scene(task):
             row = _with_curves(row, meta, spec)
         if extras:
             row["train_hand"] = meta.get("hand")
+            row["train_extras"] = {k: True for k in ("tight", "mat", "white_on_white") if meta.get(k)}
         if truth_mode != "none":
             (out / "truth").mkdir(exist_ok=True)
             t = _truth(assets, spec, quad, meta)

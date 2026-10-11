@@ -47,6 +47,43 @@ class TrainModeTests(unittest.TestCase):
         self.assertIn("hand", meta)
         self.assertFalse(np.array_equal(base, hand))
 
+    def test_second_cycle_extras_leave_the_default_alone_and_keep_the_truth(self):
+        scenes, images = plan.build("t", 0x7A1E_0002, 24, trainset.overrides({"framing": {"full": 1.0}}))
+        none = {"hand_p": 0.0, "tight_p": 0.0, "mat_p": 0.0, "wow_p": 0.0}
+        n_tight = n_mat = n_wow = 0
+        for sc, spec in zip(scenes[::3], images[::3]):
+            base_assets = scene.build_scene(sc)
+            zero_assets = scene.build_scene(sc, none)
+            self.assertTrue(np.array_equal(base_assets.texture, zero_assets.texture))
+            base, q0, _ = scene.render_image(base_assets, spec, 160)
+            zero, q1, _ = scene.render_image(zero_assets, spec, 160, extras=none)
+            self.assertTrue(np.array_equal(base, zero) and np.array_equal(q0, q1))
+            on = {"hand_p": 0.0, "tight_p": 1.0, "mat_p": 1.0, "wow_p": 1.0}
+            assets = scene.build_scene(sc, on)
+            img, q, meta = scene.render_image(assets, spec, 160, extras=on)
+            self.assertTrue(np.isfinite(q).all())
+            self.assertTrue(meta["tight"] and meta["white_on_white"])
+            n_tight += meta["tight"]
+            n_wow += bool(meta.get("white_on_white"))
+            if sc.aspect == "document":
+                self.assertTrue(meta.get("mat"))
+                self.assertFalse(np.array_equal(assets.texture, base_assets.texture))
+                n_mat += 1
+            else:
+                self.assertTrue(np.array_equal(assets.texture, base_assets.texture))
+            # tight: the page's bounding box reaches (nearly) both a vertical and a horizontal limit
+            cw, ch = img.shape[1], img.shape[0]
+            lo, hi = q.min(axis=0), q.max(axis=0)
+            self.assertTrue(max((hi - lo)[0], (hi - lo)[1]) > 0.88)
+        self.assertGreater(n_tight + n_wow, 0)
+
+    def test_mat_is_a_picture_inside_a_white_border(self):
+        tex = np.full((120, 160, 3), 240, np.uint8)
+        out = trainset.apply_mat(tex, R.stream(3, "m"))
+        self.assertTrue(np.array_equal(out[0], tex[0]) and np.array_equal(out[:, 0], tex[:, 0]))
+        self.assertFalse(np.array_equal(out, tex))
+        self.assertGreater(float(out[40:80, 60:100].astype(float).std()), 3.0)
+
 
 if __name__ == "__main__":
     unittest.main()
