@@ -158,7 +158,7 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "auto-crop-cli"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "auto-crop-codecs",
  "auto-crop-core",
@@ -173,7 +173,7 @@ dependencies = [
 
 [[package]]
 name = "auto-crop-codecs"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "auto-crop-core",
  "auto-crop-imgproc",
@@ -191,7 +191,7 @@ dependencies = [
 
 [[package]]
 name = "auto-crop-core"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "proptest",
  "serde",
@@ -201,7 +201,7 @@ dependencies = [
 
 [[package]]
 name = "auto-crop-engine"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "auto-crop-codecs",
  "auto-crop-core",
@@ -228,7 +228,7 @@ dependencies = [
 
 [[package]]
 name = "auto-crop-eval"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "auto-crop-codecs",
  "auto-crop-core",
@@ -252,7 +252,7 @@ dependencies = [
 
 [[package]]
 name = "auto-crop-imgproc"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "auto-crop-core",
  "peak_alloc",
@@ -263,7 +263,7 @@ dependencies = [
 
 [[package]]
 name = "auto-crop-imgproc-bench"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "auto-crop-codecs",
  "auto-crop-imgproc",
@@ -279,7 +279,7 @@ dependencies = [
 
 [[package]]
 name = "auto-crop-infer"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "ort",
  "rten",
@@ -290,7 +290,7 @@ dependencies = [
 
 [[package]]
 name = "auto-crop-shell"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "auto-crop-engine",
  "getrandom 0.3.4",
@@ -6310,7 +6310,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "auto-crop-codecs",
  "auto-crop-core",

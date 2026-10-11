@@ -1,41 +1,83 @@
 # Changelog
 
-## Unreleased
+## 0.0.3 (2026-10-11), pre-release, Windows only
 
-- The package README no longer calls itself a private build once it is published as a pre-release.
-- **The `auto-crop` command line** (not in a release package yet; build it from source). `process` crops and
-  straightens images and, with no output option, replaces the originals after a verified backup; `--output`,
-  `--suffix` and `--copy` write new files instead, `--dry-run` writes nothing, `--manifest` and `--json` give a
-  versioned JSON run manifest. Results below the cut-off (`--triage strict|balanced|aggressive`, default strict),
-  failed detections and scans with several items that were not accepted (`--accept-splits`) are held: not written,
-  exit code 4. `analyze` reports the detection and the confidence without writing, `render` writes one crop to a
-  file without touching the source, `restore` (by file, backup id or run) and `backups list | show | purge`
-  work on the same backup store as the app, and `doctor` checks the machine (AVX2 floor, memory, decoders, the
-  store). Ctrl+C stops cleanly (exit 130). See [docs/cli.md](docs/cli.md). The engine gains a few small additive
-  calls for it (explicit settings that are never persisted, an engine without start-up housekeeping, saves
-  grouped into a named run, a JPEG quality and a crop margin per run, removing one backup).
+A third early test build. It is still **not** the CLI-only v0.1.0 of [ROADMAP.md](ROADMAP.md) milestone M2,
+the accuracy gates have not been measured on real photos, and the confidence score is an uncalibrated
+heuristic. Treat it as a preview, not as something to trust with irreplaceable files.
 
-- **Saving one image now follows the full safe-write protocol** (it was a shorter early version in 0.0.1 and
-  0.0.2). The save writes a journal first, backs the original up (a reflink, a hardlink or a re-checked copy),
-  writes the new file beside the old one, re-reads and re-decodes it, then swaps it in (`ReplaceFileW` on
-  Windows, retried when an antivirus or indexer holds the file). If the program is killed at any moment, the next
-  start finishes the save or puts the original back, and removes stray temporary files. The free-space check
-  runs before anything is written, a read-only file or a cloud placeholder is refused without being read or
-  changed, and a file another program edited meanwhile is never overwritten. A kill-at-random-instants test
-  (500 kills on every run, 1,000 nightly) and a restore matrix check this. See
-  [docs/safety-threat-model.md](docs/safety-threat-model.md).
-- **JPEG output is written by the codecs crate**, not the stand-in encoder: the quality follows the source's
-  own (Balanced is the source's quality plus 5, between 80 and 95), EXIF is kept (Orientation is set to 1, the
-  size updated, the thumbnail removed), the ICC profile and pixel density are kept byte for byte, and
+### What changed
+
+- **Curved pages.** A crop can be switched from Straight to **Curved**: each edge gets a handle you drag to bend it
+  (double-click or press-and-hold adds a point, Delete removes one, arrow keys nudge), and the page is flattened
+  from the four edge curves with one resample, with a live preview and a Flattened / Straight compare toggle. It
+  fixes bowed edges and perspective; wrinkles inside the page stay. A curved page is held for review until you
+  accept it (Save as copy works at once, Replace original only after Accept) and never takes the lossless JPEG
+  path. "Try sample images" has a curved receipt. On synthetic pages the flattened result matched the flat
+  original at SSIM 0.97 to 0.99. Corners, merge and cut are locked while a page is curved (use "Back to
+  straight" first). Nothing proposes curves by itself yet.
+- **Screens for scans with several photos or receipts.** An outline and an order chip for every item, a chip bar
+  (merge, cut, reorder by drag, Alt+Arrow or buttons, remove and restore), "Add as item", a "found N items,
+  held for review" banner with Accept split, split settings (Auto / Always / Never, Photos / Receipts, and an
+  Experimental auto-save toggle), a Backups view that lists derived files with Keep / Remove on restore, and
+  plain-language wording for all 34 error codes. Replace original needs the split to be accepted first; Save
+  as copy writes one file per item at once.
+- **Saving a single image follows the full safe-write protocol** (it was a shorter early version before). The
+  save writes a journal first, backs the original up (a reflink, a hardlink or a re-checked copy), writes the new
+  file beside the old one, re-reads and re-decodes it, then swaps it in (`ReplaceFileW` on Windows, retried when
+  an antivirus or indexer holds the file). If the program is killed at any moment, the next start finishes the
+  save or puts the original back, and removes stray temporary files. The free-space check runs before anything
+  is written, a read-only file or a cloud placeholder is refused without being read or changed, and a file
+  another program edited meanwhile is never overwritten. A kill-at-random-instants test (500 kills on every run,
+  1,000 nightly) and a restore matrix check this. See [docs/safety-threat-model.md](docs/safety-threat-model.md).
+- **A source that cannot be held whole in 8-bit RGB is never replaced in place** (16-bit, alpha, CMYK, animated
+  PNG): it opens, and "Save as copy" works. Before, an in-place save could have changed such a file's content
+  silently.
+- **JPEG output is written by the codecs crate**, not the stand-in encoder: the quality follows the source's own
+  (Balanced is the source's quality plus 5, between 80 and 95), EXIF is kept (Orientation is set to 1, the size
+  updated, the thumbnail removed), the ICC profile and pixel density are kept byte for byte, and
   `strip_location` removes GPS, XMP and IPTC. A crop that falls on the JPEG block grid, and turns and flips, are
-  done **without re-encoding** (the lossless path, with the safe-Rust transform; libjpeg-turbo with the
-  `turbojpeg` feature); the picture then does not lose a generation, and may be up to 16 pixels larger than
-  asked.
-- **BMP files open**, and `Engine::convert_items` replaces a BMP by its PNG (a HEIC by its JPEG with the
-  `heif` build) after a verified backup; Restore returns the original and moves the converted file into the
-  backup.
-- Known gaps in this part: there is no `library.db` (the backup manifests are the index), file identity and
-  extended attributes are not carried over, and power loss (data never written to disk) is not modelled.
+  done **without re-encoding** (safe-Rust transform; libjpeg-turbo with the `turbojpeg` feature); the picture
+  then does not lose a generation, and may be up to 16 pixels larger than asked.
+- **BMP files open.** The engine can replace a BMP by its PNG (a HEIC by its JPEG in the HEIC build) after a
+  verified backup, but no screen or command offers that yet.
+- **The `auto-crop` command line** is in the package: `process` crops and straightens images and, with no output
+  option, replaces the originals after a verified backup; `--output`, `--suffix` and `--copy` write new files
+  instead, `--dry-run` writes nothing, `--manifest` and `--json` give a versioned JSON run manifest. Results below
+  the cut-off (`--triage strict|balanced|aggressive`, default strict), failed detections and scans with several
+  items that were not accepted (`--accept-splits`) are held: not written, exit code 4. `analyze` reports the
+  detection without writing, `render` writes one crop without touching the source, `restore` and `backups list |
+  show | purge` use the same backup store as the app, and `doctor` checks the machine. Ctrl+C stops between files
+  (exit 130). See [docs/cli.md](docs/cli.md).
+- Edits are saved in format **v3** (v1 and v2 edits migrate without loss). A build older than 0.0.3 cannot read
+  edits saved by this one.
+- Decoding fixes found by fuzzing: a colour profile above its size limit, an unreadable saved state (an absurdly
+  large angle), and a size overflow in a HEIF header.
+
+### The package with HEIC, HEIF and AVIF
+
+As in 0.0.2, `AutoCrop-0.0.3-windows-x64.zip` contains the app, the command-line tool, three DLLs and a
+`libheif` plugin folder. HEIC and AVIF files are parsed **inside the app** (the sandboxed helper process of
+the plan does not exist yet), so use this build for your own files only. It is unsigned (Windows SmartScreen
+will warn). HEIC and AVIF files are open-only: Save as copy writes PNG (JPEG for HEIC).
+
+### Known limits
+
+- There is no library.db (the backup manifests are the index), file identity and extended attributes are not
+  carried over, and power loss (data never written to disk) is not modelled.
+- The classical detector still gets hand-held receipts and some long receipts wrong (they are held, not written);
+  on a second, independent set of synthetic scenes it fails about 40% of the time. Real-photo accuracy has not been
+  measured beyond a small indicative set. Curved edges are bent by hand.
+- Real touch input, screen readers, the native file dialog and drag-and-drop were not tested for the new screens;
+  the window was driven through WebView2 remote debugging on synthetic images.
+- No enhancement, no Convert command, no `--preset`. Windows 10/11 x64 only. English only.
+
+### Verification
+
+- Automated tests run on Windows, macOS and Ubuntu CI (core, kernels, detector, codecs, engine save and restore
+  invariants including fault injection and the kill loop, curved-page oracles, 147 UI tests, fuzz regressions).
+- Built in GitHub Actions, **unsigned**, with no build attestation or SBOM. Check the download against
+  `SHA256SUMS`.
 
 ## 0.0.2 (2026-10-05), pre-release, Windows only
 
