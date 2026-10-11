@@ -321,3 +321,46 @@ state machine of the handles (`curve-edit.test.ts`). Behaviour:
 * Try sample images writes `receipt_curved.jpg`: a receipt bent by an analytic model (`samples::curved_page_point`) whose
   edges are known exactly (`curved_sample_edges`); the plain detector gets its bottom edge wrong (Check, weak edge),
   which is a fair picture of what the editor is for.
+
+### Suggest curves (UI)
+
+The shell command `suggest_curves(id, crop)` (`async`, on the blocking pool like `redetect`: the fit is 5 to 25 ms but the
+main thread is never held) returns `Engine::suggest_curves` as it is (`CurveSuggestion | null` in `ui/src/lib/types.ts`;
+`null` while the image is not ready). `crates/shell/tests/suggest_json.rs` pins the wire shape on the real engine and
+`ui/src/lib/suggest.test.ts` pins it against the Rust struct and two real answers (`ui/src/lib/fixtures/`, regenerate with
+`AUTOCROP_REGEN_FIXTURES=1 cargo test -p auto-crop-shell --test suggest_json`). The browser mock answers with the curved
+sample's own edges (a weaker bottom edge, as the sample's detector flags it too) when the corners are near the page, and
+with a `fellBack` answer for any other page (`mock-suggest.ts`).
+
+* **Where.** A "Suggest curves" button sits in the curve bar in both modes. In Curved it asks at once; in Straight it first
+  runs `curve_from_quad` (one undo step, "Curve edges", and the first-use sheet if it has not been seen), then asks. If the
+  answer is "nothing to suggest" the page stays Curved with straight edges: Back to straight (or Undo) returns.
+* **Preview, never auto-applied.** The answer is a PREVIEW: the suggested outline in orange (a solid line with a dark casing,
+  so it is told apart from the dashed blue current outline by more than colour) over the picture, and the flattened page in the
+  inset (the `curve-result` route with the suggestion's curves as the query, bordered orange and captioned "Suggested").
+  "Apply" calls `set_curves` with the suggestion's `curves` WHOLE, `label` "Suggest curves", no gesture id: ONE undo step. The
+  crop is then an ordinary curved page, held for review until accepted, exactly as after a hand edit. "Dismiss" (or Esc) drops it
+  and records nothing. Apply is always available, including after a refused fit.
+* **Honest words** (`suggest.ts`, `strings.ts`): `fellBack`, or four edges that all came back straight, is "No clear curved edge
+  found: the page may be flat" (and the panel says there is nothing to suggest); an edge with `confidence < 0.7` is "Not sure about
+  the right edge: check it" (the edges are named, "any of the edges" for all four); a suggestion whose largest bend is under 1.5%
+  is "This edge is nearly straight: the suggestion may not help". The largest bend is the maximum of `curvature[]` and
+  `maxCurvature`: `maxCurvature` is 0 when no edge passes every `looksCurved` gate, which would otherwise call a clearly bent
+  edge nearly straight.
+* **Stale answers.** A suggestion belongs to (image, crop, the crop's render key). Switching crop or image, a committed edit, an
+  undo or a redo, and the start of a handle drag drop a loading or previewed suggestion (announced once: "The suggestion was
+  dropped because the page changed"); an answer for a request that was dismissed, replaced or dropped is ignored; Apply on a
+  picture that has changed does nothing. The state machine is `suggest.ts` (idle, loading, preview, applied, dismissed, error),
+  tested in `suggest.test.ts`.
+* **Accessibility.** The result is a `role="status"` `aria-live="polite"` region that is always in the page (empty when idle).
+  Focus moves to Apply when a preview arrives and back to the Suggest button after Apply or Dismiss. The spinner stops under
+  `prefers-reduced-motion`. The panel wraps at 375 px.
+* **No "looks curved" chip, badge or filter, on purpose.** `looksCurved` is not read anywhere in the UI (a test scans the
+  sources). On the owner's labelled receipts it fired on 13% of the pages labelled flat, and it fires on a flat page of the app's
+  own samples as well (`docs/perf/curve-fit-baseline.md`, "Real files"); it also misses about half of the pages that are curved by
+  1.5% or more even on synthetic data. Suggesting curves is something the person asks for.
+* **First use.** The first time Curved is entered (by the Curved button, or through Suggest curves from Straight) a one-time sheet
+  says what it fixes (bowed edges, perspective), what it does not (wrinkles and folds inside the page) and that nothing is written
+  until the page is accepted. "Got it" remembers it in the engine setting `curvedIntroAck` (`settings.toml`; the whole settings
+  object is sent back as for every setting; an older file loads as "not seen") and carries on; "Not now" changes nothing and the
+  sheet is shown again next time.
