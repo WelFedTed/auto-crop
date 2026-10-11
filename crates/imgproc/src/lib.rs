@@ -5,6 +5,7 @@
 
 pub mod cancel;
 pub mod curved;
+pub mod curves_fit;
 pub mod detect;
 pub mod geometry;
 pub mod homography;
