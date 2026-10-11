@@ -85,6 +85,15 @@ fn synth_run_compare_and_publish_end_to_end() {
     let summary = common("detector", &r1, "1");
     common("detector", &r8, "8");
     common("full-frame", &rf, "2");
+    // The curve-fit predictor runs on the same suite and, like the detector, is the same at any
+    // thread count.
+    let (c1, c8) = (dir.join("curves-1.json"), dir.join("curves-8.json"));
+    common("curves", &c1, "1");
+    common("curves", &c8, "8");
+    assert_eq!(
+        std::fs::read(&c1).expect("c1"),
+        std::fs::read(&c8).expect("c8")
+    );
     common("jitter:0.01", &rj, "2");
 
     // The detector actually finds pages on its own lineage of synthetic images.

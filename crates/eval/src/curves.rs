@@ -326,9 +326,90 @@ pub fn mean_boundary_distance(
     sa.iter().zip(&sb).map(|(p, q)| dist(*p, *q)).sum::<f64>() / sa.len() as f64
 }
 
+/// Symmetric mean boundary distance between two sampled boundaries (each sample's distance to the
+/// nearest sample of the other, averaged over both directions), in the units of the samples.
+/// Unlike [`mean_boundary_distance`] it does not need the two to start at the same corner, so it
+/// serves a prediction whose corner order is not the truth's.
+pub fn chamfer_distance(a: &[P], b: &[P]) -> f64 {
+    if a.is_empty() || b.is_empty() {
+        return f64::NAN;
+    }
+    let one_way = |from: &[P], to: &[P]| -> f64 {
+        from.iter()
+            .map(|p| to.iter().map(|q| dist(*p, *q)).fold(f64::MAX, f64::min))
+            .sum::<f64>()
+            / from.len() as f64
+    };
+    0.5 * (one_way(a, b) + one_way(b, a))
+}
+
+/// The horizontal intervals of `poly` (even-odd rule) on the scanline `y`, clipped to `0..width`.
+fn scan_intervals(poly: &[P], y: f64, width: f64) -> Vec<(f64, f64)> {
+    let mut xs: Vec<f64> = Vec::new();
+    let n = poly.len();
+    let mut j = n - 1;
+    for i in 0..n {
+        let (pi, pj) = (poly[i], poly[j]);
+        if (pi[1] > y) != (pj[1] > y) {
+            xs.push((pj[0] - pi[0]) * (y - pi[1]) / (pj[1] - pi[1]) + pi[0]);
+        }
+        j = i;
+    }
+    xs.sort_by(|p, q| p.partial_cmp(q).unwrap_or(std::cmp::Ordering::Equal));
+    xs.as_chunks::<2>()
+        .0
+        .iter()
+        .map(|c| (c[0].clamp(0.0, width), c[1].clamp(0.0, width)))
+        .collect()
+}
+
+fn interval_overlap(a: &[(f64, f64)], b: &[(f64, f64)]) -> f64 {
+    let mut s = 0.0;
+    for p in a {
+        for q in b {
+            s += (p.1.min(q.1) - p.0.max(q.0)).max(0.0);
+        }
+    }
+    s
+}
+
+/// Jaccard index of two (possibly concave) closed polygons given in pixels: the pixel rows of a
+/// `width` x `height` frame are scanned at their centres with the even-odd rule and the
+/// intervals are intersected exactly along x.
+pub fn raster_iou(a: &[P], b: &[P], width: u32, height: u32) -> f64 {
+    if a.len() < 3 || b.len() < 3 {
+        return 0.0;
+    }
+    let w = f64::from(width);
+    let (mut inter, mut area_a, mut area_b) = (0.0, 0.0, 0.0);
+    for y in 0..height {
+        let yc = f64::from(y) + 0.5;
+        let (ia, ib) = (scan_intervals(a, yc, w), scan_intervals(b, yc, w));
+        area_a += ia.iter().map(|p| p.1 - p.0).sum::<f64>();
+        area_b += ib.iter().map(|p| p.1 - p.0).sum::<f64>();
+        inter += interval_overlap(&ia, &ib);
+    }
+    let uni = area_a + area_b - inter;
+    if uni <= 0.0 { 0.0 } else { inter / uni }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chamfer_and_raster_iou_on_squares() {
+        let sq =
+            |s: f64, o: f64| -> Vec<P> { vec![[o, o], [o + s, o], [o + s, o + s], [o, o + s]] };
+        let a = sq(20.0, 5.0);
+        assert!((raster_iou(&a, &a, 40, 40) - 1.0).abs() < 1e-12);
+        // Shifted by half: intersection 10 x 20, union 600.
+        let b: Vec<P> = vec![[15.0, 5.0], [35.0, 5.0], [35.0, 25.0], [15.0, 25.0]];
+        assert!((raster_iou(&a, &b, 40, 40) - 200.0 / 600.0).abs() < 1e-9);
+        assert_eq!(chamfer_distance(&a, &a), 0.0);
+        let shifted: Vec<P> = a.iter().map(|p| [p[0] + 3.0, p[1]]).collect();
+        assert!((chamfer_distance(&a, &shifted) - 3.0).abs() < 1e-12);
+    }
 
     const Q: Quad = [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]];
 

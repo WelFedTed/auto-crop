@@ -20,6 +20,7 @@
 
 pub mod calib;
 pub mod compare;
+pub mod curve_fit_eval;
 pub mod curves;
 pub mod detector;
 pub mod geom;

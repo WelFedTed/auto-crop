@@ -31,6 +31,31 @@ pub fn harness(args: &[String]) -> Result<(), String> {
     }
 }
 
+/// `cargo xtask curves-eval MANIFEST [options]`: builds (release) and runs the curve-fitter
+/// evaluation (`crates/eval/examples/curves_eval.rs`); options are passed through.
+pub fn run_curves_eval(args: &[String]) -> Result<(), String> {
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
+    let status = Command::new(cargo)
+        .args([
+            "run",
+            "--quiet",
+            "--release",
+            "--package",
+            "auto-crop-eval",
+            "--example",
+            "curves_eval",
+            "--",
+        ])
+        .args(args)
+        .status()
+        .map_err(|e| format!("cannot run cargo: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("curves_eval exited with {status}"))
+    }
+}
+
 /// `cargo xtask eval <args>`: passes `<args>` to `auto-crop-eval`.
 pub fn run_eval(args: &[String]) -> Result<(), String> {
     harness(args)

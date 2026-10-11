@@ -112,6 +112,12 @@ Commands:
         receipts, pinhole camera, procedural backgrounds, Augraphy degradations, JPEG/PNG/TIFF/WebP,
         EXIF 1-8, sRGB and Display P3). --generator rust is the old STAND-IN writer in
         auto-crop-eval (output under target/synth/<suite>-rust).
+  synth --suite curved-smoke|curved-full   (or: synth --curved [--suite smoke|full])
+        Pages with CURVED edges (cylinder bend, wave, corner curl, hand-held receipt bow) with
+        ground-truth boundary `curves` in the manifest, next to `quad`. Python generator only.
+  curves-eval MANIFEST [--quad gt|detector] [--split dev|test|all] [--json OUT] [--csv OUT]
+        Evaluate the automatic curve fitter (imgproc::curves_fit) over a manifest: boundary
+        distance, IoU against the straight quad, looks_curved rates, ms per image.
   synth-setup
         Create target/synth-venv and install tools/synth/requirements.lock with
         --require-hashes (needs Python 3.12 or newer). Nothing else installs Python packages.
@@ -175,6 +181,7 @@ fn main() -> ExitCode {
         "label" => label::run(&rest),
         "golden" => golden_set::run(&rest),
         "eval" => eval::run_eval(&rest),
+        "curves-eval" => eval::run_curves_eval(&rest),
         "" | "help" | "--help" | "-h" => {
             print!("{HELP}");
             Ok(())

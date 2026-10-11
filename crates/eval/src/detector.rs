@@ -7,7 +7,8 @@
 
 use crate::multi::{MultiPrediction, MultiPredictor};
 use crate::predictor::{PredictError, PredictInput, Prediction, Predictor, Verdict};
-use auto_crop_core::Forced;
+use auto_crop_core::{Forced, Pt};
+use auto_crop_imgproc::curves_fit::fit_curves;
 use auto_crop_imgproc::detect::detect;
 use auto_crop_imgproc::items::{ItemsOptions, SplitProfile, detect_items};
 
@@ -54,6 +55,38 @@ impl Predictor for DetectorPredictor {
             confidence: Some(score.clamp(0.0, 1.0)),
             verdict: Some(verdict),
         })
+    }
+}
+
+/// The classical detector followed by the automatic curve fit (`imgproc::curves_fit`): the quad it
+/// reports is the fit's refined corner quad (the detector's own when the fit is refused), so the
+/// usual quad metrics show what the corner refinement does. The curves themselves are scored by
+/// the example `curves_eval`; verdicts and confidence are the detector's.
+#[derive(Default)]
+pub struct CurvesPredictor {
+    pub detector: DetectorPredictor,
+}
+
+impl Predictor for CurvesPredictor {
+    fn name(&self) -> String {
+        format!("curve-fit({})", self.detector.name())
+    }
+
+    fn predict(&self, input: &PredictInput) -> Result<Prediction, PredictError> {
+        let mut p = self.detector.predict(input)?;
+        let Some(q) = p.quad else {
+            return Ok(p);
+        };
+        let bytes =
+            std::fs::read(&input.image).map_err(|e| PredictError::Failed(format!("read: {e}")))?;
+        let decoded = auto_crop_codecs::decode(&bytes)
+            .map_err(|e| PredictError::Failed(format!("decode: {e}")))?;
+        let corners: [Pt; 4] = std::array::from_fn(|i| Pt::new(q[i][0], q[i][1]));
+        let fit = fit_curves(&decoded.raster, corners);
+        if !fit.fell_back {
+            p.quad = Some(std::array::from_fn(|i| [fit.quad[i].x, fit.quad[i].y]));
+        }
+        Ok(p)
     }
 }
 

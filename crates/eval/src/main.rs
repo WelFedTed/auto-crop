@@ -4,7 +4,7 @@
 //! `auto-crop-eval`: the accuracy harness command line. See `--help`.
 
 use auto_crop_eval::compare::{CompareConfig, Verdict, compare, render_text};
-use auto_crop_eval::detector::{DetectorPredictor, ItemsDetectorPredictor};
+use auto_crop_eval::detector::{CurvesPredictor, DetectorPredictor, ItemsDetectorPredictor};
 use auto_crop_eval::multi::{self, MultiOracle, MultiPredictor, MultiRunConfig};
 use auto_crop_eval::predictor::{FullFrame, Jittered, JsonLines, Oracle, Predictor};
 use auto_crop_eval::publish::{PublishableMetrics, check_no_leak};
@@ -28,7 +28,7 @@ Commands:
   run --manifest FILE --predictor SPEC --out FILE [--split dev|test|all] [--threads N]
       [--commit SHA] [--tier T] [--suite NAME] [--multi]
         Score a predictor. SPEC is one of: full-frame | oracle | detector[:GOOD_THRESHOLD] |
-        jitter:SHIFT[:SEED] | jsonl:PATH. Writes results JSON (local; per-image rows) and prints
+        curves (the detector, then the curve fit's refined corners) | jitter:SHIFT[:SEED] | jsonl:PATH. Writes results JSON (local; per-image rows) and prints
         an aggregate summary. Wall time goes to <out>.timings.json, never into the results.
         --multi scores several items per image (manifest `items`): item count, recall and precision
         at IoU 0.9, silent wrong splits, routing of touching/overlapping scans. SPEC is then
@@ -114,6 +114,7 @@ fn predictor_from_spec(spec: &str, m: &manifest::Manifest) -> Result<Box<dyn Pre
         ("full-frame", None) => Ok(Box::new(FullFrame)),
         ("oracle", None) => Ok(Box::new(Oracle::from_manifest(m))),
         ("detector", None) => Ok(Box::new(DetectorPredictor::default())),
+        ("curves", None) => Ok(Box::new(CurvesPredictor::default())),
         ("detector", Some(t)) => Ok(Box::new(DetectorPredictor {
             good_threshold: t
                 .parse()
