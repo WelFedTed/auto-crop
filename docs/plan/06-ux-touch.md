@@ -322,7 +322,7 @@ Pressing Undo on a saved image toasts "Edit undone. The file on disk is unchange
 | Code | Effect | Title (tile and chip) | Cause (under Why?) | Action |
 |---|---|---|---|---|
 | `NO_QUAD` | Failed | "Couldn't find the edges" | No page outline was found with enough confidence, so nothing was changed. | Draw crop; Try another outline (only if the detector gave more than one candidate); Skip |
-| `DETECTORS_DISAGREE` | Check | "Two possible outlines" | The two detection methods found different edges. | Try outline 2 of 3 |
+| `DETECTORS_DISAGREE` | Check | "Two possible outlines" | Another outline fits the picture too (the whole picture, or a print inside a border of paper). | Check the outline, or adjust it (until outline switching exists: "Try outline 2 of 3") |
 | `WEAK_EDGE` | Check | "Edge unclear on the {side} side" | That edge blends into the background or is partly hidden. | Adjust |
 | `PARTIAL_FRAME` | Check | "Content may be cut off" (on a scan item: "Cut off by the scan edge") | The page runs past the edge of the picture. | Adjust |
 | `ORIENT_UNSURE` | Check | "Check orientation" | It is unclear which way up the page is. | Rotate 90 L and R |
