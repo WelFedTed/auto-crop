@@ -72,6 +72,7 @@ export type ReasonCode =
   | 'ODD_ASPECT'
   | 'LOW_CONTRAST_EDGE'
   | 'IMPLAUSIBLE_QUAD' // forces Failed
+  | 'DETECTORS_DISAGREE' // another outline is as plausible (the whole picture, a print inside a border)
   // Multi-item scans (M10.13, M10.15). Each one holds the whole scan for review.
   | 'TOUCHING_ITEMS'
   | 'OVERLAPPING_ITEMS'

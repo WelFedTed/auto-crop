@@ -33,8 +33,8 @@ export const HOLD: Record<string, HoldCopy> = {
   },
   DETECTORS_DISAGREE: {
     title: 'Two possible outlines',
-    cause: 'The two detection methods found different edges.',
-    action: 'Try outline 2 of 3.',
+    cause: 'Another outline fits the picture too, for example the whole picture, or a print inside a border of paper.',
+    action: 'Check the outline, or adjust it.',
   },
   WEAK_EDGE: {
     title: 'Edge unclear on the {side} side',

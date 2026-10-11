@@ -32,6 +32,7 @@ const CONTRACT_CODES: Record<ReasonCode, true> = {
   ODD_ASPECT: true,
   LOW_CONTRAST_EDGE: true,
   IMPLAUSIBLE_QUAD: true,
+  DETECTORS_DISAGREE: true,
   TOUCHING_ITEMS: true,
   OVERLAPPING_ITEMS: true,
   ITEMS_TOO_CLOSE: true,

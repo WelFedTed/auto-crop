@@ -17,6 +17,10 @@ pub enum ReasonCode {
     OddAspect,
     LowContrastEdge,
     ImplausibleQuad,
+    /// Another outline is just as plausible as the one found (PLAN 4.9 `DETECTORS_DISAGREE`):
+    /// a patch of a page that fills the picture, or a print inside a border of paper. Additive:
+    /// older readers see an unknown code and the UI falls back to its generic hold copy.
+    DetectorsDisagree,
     // Multi-item splitting (PLAN 4.7, ROADMAP M10.13 and M10.15). Additive: older readers see an
     // unknown code and the UI falls back to its generic hold copy.
     /// Items touch (an unsupported cut): kept as one flagged cluster, never written.
@@ -76,6 +80,7 @@ mod tests {
             (ReasonCode::BedUncertain, "BED_UNCERTAIN"),
             (ReasonCode::AnalysisLimit, "ANALYSIS_LIMIT"),
             (ReasonCode::NoDocument, "NO_DOCUMENT"),
+            (ReasonCode::DetectorsDisagree, "DETECTORS_DISAGREE"),
             // The pre-existing codes keep their names.
             (ReasonCode::LowContrastEdge, "LOW_CONTRAST_EDGE"),
             (ReasonCode::PartialFrame, "PARTIAL_FRAME"),
