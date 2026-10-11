@@ -38,9 +38,10 @@ import {
   scaleToLongEdge,
   skinnyQuad,
 } from './mock-scene.ts';
-import { curveQuery, validateCurves } from './curve.ts';
+import { cornersOf, curveQuery, validateCurves } from './curve.ts';
 import { curvedDetectedQuad } from './curved-model.ts';
 import { gestureKey, pushEntry } from './history.ts';
+import { mockSuggestion } from './mock-suggest.ts';
 import type { BedSpec, SceneSpec } from './mock-scene.ts';
 import { cloneEdit, type Quad } from './quad.ts';
 import {
@@ -95,6 +96,7 @@ import type {
   ItemView,
   LaunchInfo,
   OpenSummary,
+  Pt,
   Reason,
   RedetectResult,
   RestoreMode,
@@ -137,6 +139,8 @@ interface MockItem {
   saved: { backupId: string | null; output: string; outputs: string[]; copy: boolean; sig: string } | null;
   groupSaved: boolean;
   openOnly: string | null;
+  /** The curved sample: the one page the mock's `suggestCurves` can see a curve on. */
+  curvedSample: boolean;
 }
 
 const items = new Map<number, MockItem>();
@@ -316,6 +320,7 @@ function newAnalysingItem(name: string): MockItem {
     saved: null,
     groupSaved: false,
     openOnly: null,
+    curvedSample: false,
   };
   items.set(id, m);
   return m;
@@ -453,6 +458,7 @@ async function analyseSample(m: MockItem, d: SampleDef, seed: number): Promise<v
     return;
   }
   if (d.curved) {
+    m.curvedSample = true;
     const src = drawCurvedScene();
     await finishAnalysis(
       m,
@@ -1065,6 +1071,21 @@ const api: Api = {
   async clearCurves(id, crop) {
     const m = ready(id);
     return commitOp(m, (b) => labelled('Straighten edges', b, crop), (s) => clearCurvesState(s, crop));
+  },
+  async suggestCurves(id, crop) {
+    const m = ready(id);
+    // The engine's fit takes a few milliseconds on a worker; the mock waits a little so the "looking" state shows.
+    await sleep(160);
+    const c = current(m).crops.find((x) => x.id === crop);
+    if (!c) throw 'NO_CROP';
+    // Asking records nothing: no history entry, no gen bump, the crop is untouched.
+    return mockSuggestion({
+      curvedSample: m.curvedSample,
+      corners: (c.curves ? cornersOf(c.curves) : c.quad) as [Pt, Pt, Pt, Pt],
+      quarterTurns: c.quarterTurns,
+      mirror: c.mirror,
+      size: [m.src?.width ?? 1000, m.src?.height ?? 1000],
+    });
   },
 };
 

@@ -17,6 +17,8 @@
     canStraighten,
     canReset,
     selectedLabel,
+    suggesting = false,
+    onsuggest,
     onmode,
     onview,
     onadd,
@@ -33,6 +35,10 @@
     canReset: boolean;
     /** What is selected, spoken and shown: "Top edge, point 2 of 3", or an invitation to select. */
     selectedLabel: string;
+    /** The engine is looking for the edges: the button stays (so focus is kept) but does nothing. */
+    suggesting?: boolean;
+    /** Ask for a suggestion; from Straight it switches to Curved first. */
+    onsuggest: () => void;
     onmode: (curved: boolean) => void;
     onview: (v: 'flattened' | 'straight') => void;
     onadd: () => void;
@@ -61,9 +67,32 @@
       <button type="button" aria-pressed={view === 'flattened'} title={S.curved.viewFlattenedHint} onclick={() => onview('flattened')}>{S.curved.flattened}</button>
       <button type="button" aria-pressed={view === 'straight'} title={S.curved.viewStraightHint} onclick={() => onview('straight')}>{S.curved.straightCrop}</button>
     </div>
+    <span class="sep" aria-hidden="true"></span>
+    <button
+      type="button"
+      class="cbtn suggest"
+      data-suggest-btn
+      aria-disabled={busy || suggesting ? 'true' : undefined}
+      aria-busy={suggesting ? 'true' : undefined}
+      title={S.suggest.buttonHint}
+      onclick={() => !busy && !suggesting && onsuggest()}
+    >
+      <Icon name="sparkle" size={15} stroke={2} /> {S.suggest.button}
+    </button>
     <span class="sr-only" role="status" data-curve-selected>{selectedLabel}</span>
   {:else}
     <span class="msg">{S.curved.curvedHint}</span>
+    <button
+      type="button"
+      class="cbtn suggest"
+      data-suggest-btn
+      aria-disabled={busy || suggesting ? 'true' : undefined}
+      aria-busy={suggesting ? 'true' : undefined}
+      title={S.suggest.buttonHintStraight}
+      onclick={() => !busy && !suggesting && onsuggest()}
+    >
+      <Icon name="sparkle" size={15} stroke={2} /> {S.suggest.button}
+    </button>
   {/if}
 </div>
 
@@ -128,6 +157,15 @@
 
   .cbtn:hover:not(:disabled) {
     background: rgba(255, 255, 255, 0.18);
+  }
+
+  .cbtn[aria-disabled='true'] {
+    opacity: 0.55;
+    cursor: default;
+  }
+
+  .cbtn.suggest {
+    border-color: #ff9f1c;
   }
 
   .cbtn:disabled {

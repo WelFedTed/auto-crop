@@ -23,6 +23,7 @@ export const defaultSettings = (patch: Partial<Settings> = {}): Settings => ({
   splitPolicy: 'auto',
   splitProfile: 'photos',
   autoSaveSplits: false,
+  curvedIntroAck: true,
   ...patch,
 });
 

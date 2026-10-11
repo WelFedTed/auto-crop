@@ -15,6 +15,7 @@ import type {
   CropImageKind,
   CurvePreviewKind,
   CurveSet,
+  CurveSuggestion,
   Cut,
   DerivedAction,
   Edit,
@@ -92,6 +93,7 @@ const tauriApi: Api = {
   setCurves: (id: number, crop: number, curves: CurveSet, phase: 'live' | 'end', label: string, gesture: number | null) =>
     invoke<ItemView>('set_curves', { id, crop, curves, phase, label, gesture }),
   clearCurves: (id: number, crop: number) => invoke<ItemView>('clear_curves', { id, crop }),
+  suggestCurves: (id: number, crop: number) => invoke<CurveSuggestion | null>('suggest_curves', { id, crop }),
 };
 
 export type Unlisten = () => void;
@@ -197,6 +199,7 @@ export const api: Api = {
   curveFromQuad: (id, crop) => impl.api.curveFromQuad(id, crop),
   setCurves: (id, crop, curves, phase, label, gesture) => impl.api.setCurves(id, crop, curves, phase, label, gesture),
   clearCurves: (id, crop) => impl.api.clearCurves(id, crop),
+  suggestCurves: (id, crop) => impl.api.suggestCurves(id, crop),
 };
 
 /** URL of an image of an item. `gen` is part of the URL so a committed change always reloads. */

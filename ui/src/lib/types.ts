@@ -28,6 +28,34 @@ export interface CurveSet {
   mirror: boolean;
 }
 
+/** One number per edge, in the order top, right, bottom, left. */
+export type EdgeNumbers = [number, number, number, number];
+
+/**
+ * The engine's PROPOSAL of curves for one crop (`Engine::suggest_curves`, docs/dev/curved-pages.md "Suggestion API").
+ * Nothing is applied by asking: the UI previews it and, on the person's click, passes `curves` WHOLE to `setCurves`.
+ * `looksCurved` is deliberately not used by the UI: on real receipts it fired on 13% of pages labelled flat
+ * (docs/perf/curve-fit-baseline.md), so no chip, badge or filter is built on it.
+ */
+export interface CurveSuggestion {
+  /** TL, TR, BR, BL: the end points of `curves`, possibly a few pixels from the crop's own corners. */
+  quad: [Pt, Pt, Pt, Pt];
+  /** 2 to 9 points per edge, valid, carrying the crop's turns and mirror. Pass it as it is to `setCurves`. */
+  curves: CurveSet;
+  /** 0..1 per edge: how well the edge was seen (low under a finger, a hard shadow, a desk the colour of the paper). */
+  confidence: EdgeNumbers;
+  /** Largest distance of the fitted edge from its chord, percent of the chord (0 for an edge left straight). */
+  curvature: EdgeNumbers;
+  /** The same deviation in percent of the page's shorter side. */
+  bulge: EdgeNumbers;
+  supportGain: EdgeNumbers;
+  /** The largest `curvature` among the edges that pass every `looksCurved` gate (0 if none does). */
+  maxCurvature: number;
+  looksCurved: boolean;
+  /** The fit was refused: `curves` are the crop's straight edges. */
+  fellBack: boolean;
+}
+
 /** Parameters of a crop. `quad` is TL, TR, BR, BL; `quarterTurns` is 0..3 (clockwise). */
 export interface Edit {
   quad: [Pt, Pt, Pt, Pt];
@@ -259,6 +287,8 @@ export interface Settings {
   splitProfile: SplitProfile;
   /** EXPERIMENTAL: save a split scan without a review when every item is Good. Off by default. */
   autoSaveSplits: boolean;
+  /** The one-time explanation of curved edges has been seen. */
+  curvedIntroAck: boolean;
 }
 
 export type SaveTarget = 'replace' | 'copy';
@@ -415,6 +445,11 @@ export interface Api {
   setCurves(id: number, crop: number, curves: CurveSet, phase: 'live' | 'end', label: string, gesture: number | null): Promise<ItemView>;
   /** A curved crop becomes the straight quad through its corners ("Back to straight"). */
   clearCurves(id: number, crop: number): Promise<ItemView>;
+  /**
+   * The engine's proposal of curves for a crop (5 to 25 ms on a worker). Records and applies nothing; `null` while the
+   * image is not ready. Applying is `setCurves` with the suggestion's `curves`.
+   */
+  suggestCurves(id: number, crop: number): Promise<CurveSuggestion | null>;
 }
 
 /** Events the shell emits (`@tauri-apps/api/event`). */

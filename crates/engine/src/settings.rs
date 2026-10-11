@@ -25,6 +25,8 @@ pub struct Settings {
     /// item is Good at the Strict cutoff. Off by default: a split replaces one file with several,
     /// so by default a split scan is held until the user accepts it.
     pub auto_save_splits: bool,
+    /// The one-time explanation shown the first time Curved edges is entered has been seen.
+    pub curved_intro_ack: bool,
 }
 
 impl Default for Settings {
@@ -36,6 +38,7 @@ impl Default for Settings {
             split_policy: SplitPolicy::Auto,
             split_profile: SplitProfile::Photos,
             auto_save_splits: false,
+            curved_intro_ack: false,
         }
     }
 }
@@ -50,6 +53,7 @@ struct Stored {
     split_policy: SplitPolicy,
     split_profile: SplitProfile,
     auto_save_splits: bool,
+    curved_intro_ack: bool,
 }
 
 impl Default for Stored {
@@ -67,6 +71,7 @@ impl From<Settings> for Stored {
             split_policy: s.split_policy,
             split_profile: s.split_profile,
             auto_save_splits: s.auto_save_splits,
+            curved_intro_ack: s.curved_intro_ack,
         }
     }
 }
@@ -80,6 +85,7 @@ impl From<Stored> for Settings {
             split_policy: s.split_policy,
             split_profile: s.split_profile,
             auto_save_splits: s.auto_save_splits,
+            curved_intro_ack: s.curved_intro_ack,
         }
     }
 }
@@ -129,6 +135,7 @@ mod tests {
             split_policy: SplitPolicy::Always,
             split_profile: SplitProfile::Receipts,
             auto_save_splits: true,
+            curved_intro_ack: true,
         };
         s.save(&paths).unwrap();
         assert_eq!(Settings::load(&paths), s);
@@ -161,6 +168,8 @@ mod tests {
             (s.split_policy, s.auto_save_splits),
             (SplitPolicy::Auto, false)
         );
+        // ... and so does one written before the curved-edges explanation existed.
+        assert!(!s.curved_intro_ack);
     }
 
     #[test]

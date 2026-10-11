@@ -11,6 +11,7 @@
     url,
     straight = false,
     live,
+    suggested = false,
     name,
   }: {
     /** The picture to show: a live preview, the committed crop image or the straight-crop preview. */
@@ -19,6 +20,8 @@
     straight?: boolean;
     /** A drag is in progress: the picture is the engine's live preview. */
     live: boolean;
+    /** The picture is the PREVIEW of the engine's suggested curves: nothing is applied yet. */
+    suggested?: boolean;
     name: string;
   } = $props();
 
@@ -35,19 +38,26 @@
   const loading = $derived(!!url && shown !== url && !failed);
 </script>
 
-<figure class="inset" data-flat-inset data-straight={straight ? '' : undefined} aria-label={straight ? S.curved.straightAlt : S.curved.flattenedAlt}>
+<figure
+  class="inset"
+  class:suggested
+  data-flat-inset
+  data-suggested={suggested ? '' : undefined}
+  data-straight={straight ? '' : undefined}
+  aria-label={suggested ? S.suggest.insetAlt : straight ? S.curved.straightAlt : S.curved.flattenedAlt}
+>
   <div class="canvas" class:loading>
     {#if url}
       <!-- the loader: the browser caches it, and a failed or cancelled request leaves the previous picture up -->
       <img class="loader" src={url} alt="" draggable="false" onload={() => (shown = url)} onerror={() => (failed = true)} />
     {/if}
     {#if shown}
-      <img class="full" src={shown} alt={straight ? S.curved.straightAlt : `${S.curved.flattenedAlt}: ${name}`} draggable="false" />
+      <img class="full" src={shown} alt={suggested ? `${S.suggest.insetAlt}: ${name}` : straight ? S.curved.straightAlt : `${S.curved.flattenedAlt}: ${name}`} draggable="false" />
     {/if}
   </div>
   <figcaption>
-    <span class="t">{straight ? S.curved.straightCrop : S.curved.flattened}</span>
-    <span class="s">{loading ? S.curved.drawing : live ? S.curved.previewWord : S.curved.renderedWord}</span>
+    <span class="t">{suggested ? S.suggest.insetTitle : straight ? S.curved.straightCrop : S.curved.flattened}</span>
+    <span class="s">{loading ? S.curved.drawing : suggested ? S.suggest.insetSub : live ? S.curved.previewWord : S.curved.renderedWord}</span>
   </figcaption>
 </figure>
 
@@ -65,6 +75,10 @@
     border: 1px solid #3a3f4b;
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
     pointer-events: none;
+  }
+
+  .inset.suggested {
+    border: 2px solid #ff9f1c;
   }
 
   @media (max-width: 600px) {

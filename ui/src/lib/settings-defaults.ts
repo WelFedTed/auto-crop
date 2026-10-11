@@ -16,6 +16,7 @@ export function defaultSettings(): Settings {
     splitPolicy: 'auto',
     splitProfile: 'photos',
     autoSaveSplits: false,
+    curvedIntroAck: false,
   };
 }
 

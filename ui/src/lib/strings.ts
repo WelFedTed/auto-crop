@@ -288,6 +288,12 @@ export function retentionText(days: number | null): string {
   return days === null ? 'until you delete them' : `${days} days`;
 }
 
+/** "top", "top and right", "top, right and bottom": the lower-case names of edges, for a sentence. */
+export function sideList(sides: readonly Side[]): string {
+  if (sides.length <= 1) return sides[0] ?? '';
+  return `${sides.slice(0, -1).join(', ')} and ${sides[sides.length - 1]}`;
+}
+
 export const S = {
   appName: 'Auto Crop',
   nav: {
@@ -785,6 +791,62 @@ export const S = {
       noArea: 'The outline has no area.',
       crossing: 'The edges would cross each other, so that change was not applied.',
     } satisfies Record<CurveProblem, string>,
+  },
+  // Suggest curves: the engine proposes the four edges from the picture; the person checks, applies or dismisses
+  // (docs/dev/curved-pages.md "Suggestion API"). The words are honest about what the fit does not know.
+  suggest: {
+    button: 'Suggest curves',
+    buttonHint: 'Auto Crop proposes the curved edges from the picture. Nothing changes until you press Apply.',
+    buttonHintStraight: 'Switches this page to Curved, then proposes the curved edges. Nothing else changes until you press Apply.',
+    panelLabel: 'Suggested curves',
+    loading: 'Looking for the edges…',
+    ready: 'Suggested curves ready. Check the orange outline and the flattened page, then Apply or Dismiss.',
+    nothing: 'Nothing to suggest for this page. Apply would leave the edges straight.',
+    guess: 'This is a guess from the picture. Look at the edges before you apply it.',
+    bendOf: (edges: Side[], pct: number) => {
+      const names = sideList(edges);
+      return `Bent: the ${names} ${edges.length === 1 ? 'edge' : 'edges'}, by up to ${pct.toFixed(1)}% of ${edges.length === 1 ? 'its' : 'their'} length.`;
+    },
+    // honesty fields of the answer
+    noCurve: 'No clear curved edge found: the page may be flat',
+    lowConfidence: (edges: Side[]) =>
+      edges.length >= 4 ? 'Not sure about any of the edges: check the whole outline' : `Not sure about the ${sideList(edges)} ${edges.length === 1 ? 'edge: check it' : 'edges: check them'}`,
+    nearlyStraight: (bentEdges: number) =>
+      bentEdges > 1 ? 'These edges are nearly straight: the suggestion may not help' : 'This edge is nearly straight: the suggestion may not help',
+    // actions
+    apply: 'Apply',
+    applyHint: 'Applies all four suggested edges as one step (Undo takes it back). The page stays held for review until you accept it.',
+    dismiss: 'Dismiss',
+    dismissHint: 'Throws the suggestion away. Nothing was changed. (Esc)',
+    retry: 'Try again',
+    label: 'Suggest curves',
+    insetTitle: 'Suggested',
+    insetAlt: 'Flattened page with the suggested curves',
+    insetSub: 'Preview',
+    // after
+    applied: 'Suggested curves applied. Undo takes them back. The page is held for review: check the flattened result, then accept.',
+    dismissed: 'Suggestion dismissed. Nothing was changed.',
+    stale: 'The suggestion was dropped because the page changed. Ask again if you still want one.',
+    asking: 'Looking for the edges.',
+    notReady: 'The picture is not ready yet. Try again in a moment.',
+    failed: 'Could not suggest curves for this page. Nothing was changed.',
+    appliedFailed: 'The suggested curves could not be applied, so nothing was changed.',
+    legendSuggested: 'Suggested outline',
+    legendCurrent: 'Current outline',
+  },
+  // The one-time sheet the first time Curved edges is entered.
+  curvedIntro: {
+    title: 'Before you bend the edges',
+    lead: 'Curved edges let you describe a page whose edges bow, like a crumpled receipt or a book page. Auto Crop then flattens it.',
+    fixesTitle: 'What it fixes',
+    fixes: 'Edges that bow in or out, and a page photographed at an angle.',
+    doesNotTitle: 'What it does not fix',
+    doesNot: 'Wrinkles and folds inside the page. If the four edges look straight, the page comes out as it would from a plain crop.',
+    safeTitle: 'Nothing is written yet',
+    safe: 'A curved page is held for review. The original is not replaced until you accept the page, and Save as copy always works. Undo takes back any step.',
+    go: 'Got it: bend the edges',
+    goSuggest: 'Got it: suggest curves',
+    notNow: 'Not now',
   },
   // Saving one scan from the editor (M10.43).
   save: {

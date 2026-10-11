@@ -46,6 +46,8 @@ pub fn base_settings(paths: &AppPaths, g: &Global) -> Settings {
         split_policy: SplitPolicy::Auto,
         split_profile: SplitProfile::Photos,
         auto_save_splits: false,
+        // A CLI run never shows the GUI's explanations.
+        curved_intro_ack: true,
         retention_days: stored.retention_days,
     }
 }

@@ -37,6 +37,7 @@
     trash: [p('M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12')],
     refresh: [p('M20 11a8 8 0 10-2.3 5.7'), p('M20 4v7h-7')],
     curve: [p('M3 17C7 5 17 5 21 17'), { t: 'circle', cx: 12, cy: 8.8, r: 1.9 }],
+    sparkle: [p('M10 4l1.9 5.1L17 11l-5.1 1.9L10 18l-1.9-5.1L3 11l5.1-1.9z'), p('M18.5 3v4M16.5 5h4M18.5 15v4M16.5 17h4')],
   } as const;
 
   export type IconName = keyof typeof ICONS;

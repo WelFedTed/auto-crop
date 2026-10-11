@@ -7,6 +7,7 @@
   import CropStage from '../lib/components/CropStage.svelte';
   import CurveBar from '../lib/components/CurveBar.svelte';
   import FlatInset from '../lib/components/FlatInset.svelte';
+  import FirstCurvedSheet from '../lib/components/FirstCurvedSheet.svelte';
   import FirstSplitSheet from '../lib/components/FirstSplitSheet.svelte';
   import FirstWriteSheet from '../lib/components/FirstWriteSheet.svelte';
   import Icon from '../lib/components/Icon.svelte';
@@ -15,6 +16,7 @@
   import ResultInset from '../lib/components/ResultInset.svelte';
   import Ruler from '../lib/components/Ruler.svelte';
   import ScanBanner from '../lib/components/ScanBanner.svelte';
+  import SuggestPanel from '../lib/components/SuggestPanel.svelte';
   import TierBadge from '../lib/components/TierBadge.svelte';
   import {
     addPointOnSelectedEdge,
@@ -51,6 +53,21 @@
   import { canAccept, defaultQueue, needsDrawCrop, nextToReview, reasonLine } from '../lib/review.ts';
   import { href, navigate } from '../lib/router.svelte.ts';
   import type { CutPreview, MenuEntry, StageCrop } from '../lib/stage-types.ts';
+  import {
+    initialSuggest,
+    previewOf,
+    suggestApply,
+    suggestApplyFailed,
+    suggestArrived,
+    suggestBegin,
+    suggestContextChanged,
+    suggestDismiss,
+    suggestFailed,
+    suggestReset,
+    suggestStale,
+    type SuggestCtx,
+    type SuggestState,
+  } from '../lib/suggest.ts';
   import { codeOf, store, type ScanSave } from '../lib/store.svelte.ts';
   import { FALLBACK_HOLD, S, errorMessage, holdAction, holdCause, holdTitle, noticeText } from '../lib/strings.ts';
   import type { Band, CropView, CurveSet, Cut, Edit, ItemView, Pt, SplitPolicy, SplitProfile } from '../lib/types.ts';
@@ -276,15 +293,128 @@
     }
   }
 
-  function enterCurved(): void {
+  /** The first time Curved is entered a short sheet explains it (settings.curvedIntroAck); `then` carries on after it. */
+  let introOpen = $state(false);
+  let introThen = $state<'none' | 'suggest'>('none');
+
+  function enterCurved(then: 'none' | 'suggest' = 'none'): void {
+    if (!sel || sel.curves) return;
+    if (!store.settings.curvedIntroAck) {
+      introThen = then;
+      introOpen = true;
+      return;
+    }
+    doEnterCurved(then);
+  }
+
+  function doEnterCurved(then: 'none' | 'suggest'): void {
     if (!sel || sel.curves) return;
     const cropId = sel.id;
     curveView = 'flattened';
     runOp(
       () => api.curveFromQuad(id, cropId),
-      () => say(S.curved.entered),
+      (v) => {
+        say(S.curved.entered);
+        // The suggestion is for the picture the page now has: its key is the one the new view carries.
+        const c = v.crops.find((x) => x.id === cropId);
+        if (then === 'suggest' && c) void askSuggestion({ item: id, crop: cropId, renderKey: c.renderKey });
+      },
     );
   }
+
+  function introGo(): void {
+    introOpen = false;
+    void store.updateSettings({ curvedIntroAck: true });
+    doEnterCurved(introThen);
+  }
+
+  // ---- suggest curves ----------------------------------------------------------------------------------------------
+  // The engine proposes; the person decides. Asking changes nothing. The suggestion is shown as a preview (an outline
+  // on the picture and the flattened page in the inset), and only Apply changes the crop: one `setCurves`, one undo step.
+  let sug = $state.raw<SuggestState>(initialSuggest());
+  const sugCtx = $derived<SuggestCtx | null>(sel ? { item: id, crop: sel.id, renderKey: sel.renderKey } : null);
+  const suggestion = $derived(previewOf(sug));
+  const suggesting = $derived(sug.phase.kind === 'loading');
+  /** The orange outline on the picture: only when the engine found a bend (a refused or all-straight fit has nothing to draw). */
+  const suggestedOutline = $derived<CurveSet | null>(sug.phase.kind === 'preview' && !sug.phase.notes.noCurve && curved ? sug.phase.suggestion.curves : null);
+
+  async function askSuggestion(ctx: SuggestCtx): Promise<void> {
+    const begun = suggestBegin(sug, ctx);
+    sug = begun.state;
+    if (!begun.ask) return;
+    const seq = begun.state.seq;
+    try {
+      const answer = await api.suggestCurves(ctx.item, ctx.crop);
+      sug = suggestArrived(sug, seq, sugCtx, answer);
+    } catch (e) {
+      console.error(e);
+      sug = suggestFailed(sug, seq, sugCtx, codeOf(e) ?? 'UNKNOWN');
+    }
+    if (sug.phase.kind === 'preview') void focusLater('[data-suggest-apply]');
+  }
+
+  /** The Suggest curves button: in Curved it asks now; in Straight it switches to Curved first. */
+  function suggestCurves(): void {
+    if (!sel) return;
+    if (!sel.curves) {
+      enterCurved('suggest');
+      return;
+    }
+    void askSuggestion({ item: id, crop: sel.id, renderKey: sel.renderKey });
+  }
+
+  async function focusLater(selector: string): Promise<void> {
+    await tick();
+    document.querySelector<HTMLElement>(selector)?.focus();
+  }
+
+  function dismissSuggestion(): void {
+    if (sug.phase.kind !== 'loading' && sug.phase.kind !== 'preview') {
+      sug = suggestReset(sug);
+      return;
+    }
+    sug = suggestDismiss(sug);
+    store.announce(S.suggest.dismissed);
+    void focusLater('[data-suggest-btn]');
+  }
+
+  function applySuggestion(): void {
+    const r = suggestApply(sug, sugCtx);
+    sug = r.state;
+    const fx = r.effect;
+    if (!fx) {
+      if (sug.staleDropped) store.announce(S.suggest.stale);
+      return;
+    }
+    // The curves go whole, as the engine made them (its corners are their end points), as ONE undo step.
+    const c = fx.curves;
+    curveSel = null;
+    enqueue(
+      async () => {
+        try {
+          return await api.setCurves(fx.item, fx.crop, c, 'end', fx.label, null);
+        } catch (e) {
+          sug = suggestApplyFailed(sug, codeOf(e) ?? 'UNKNOWN');
+          throw e;
+        }
+      },
+      null,
+      { crop: fx.crop, curves: c },
+    );
+    void focusLater('[data-suggest-btn]');
+  }
+
+  $effect(() => {
+    // The crop on screen or its picture changed (another crop, an edit, an undo): a suggestion for the old one is dropped.
+    const now = sugCtx;
+    untrack(() => {
+      const next = suggestContextChanged(sug, now);
+      if (next !== sug) {
+        sug = next;
+        if (next.staleDropped) store.announce(S.suggest.stale);
+      }
+    });
+  });
 
   function leaveCurved(): void {
     if (!sel?.curves) return;
@@ -302,6 +432,11 @@
   /** Throttles what the flattened preview is asked for while a handle is dragged (a request every ~90 ms). */
   function onCurvePreview(c: CurveSet | null): void {
     liveCurves = c;
+    if (c && (sug.phase.kind === 'loading' || sug.phase.kind === 'preview')) {
+      // Dragging a handle changes the page: the suggestion for the old outline is dropped (and said so).
+      sug = suggestStale(sug);
+      store.announce(S.suggest.stale);
+    }
     clearTimeout(liveTimer);
     if (!c) return; // the last picture stays up until the committed one has loaded
     const wait = Math.max(0, 90 - (performance.now() - liveLast));
@@ -839,6 +974,10 @@
         cancelTool();
         return;
       }
+      if (sug.phase.kind === 'loading' || sug.phase.kind === 'preview') {
+        dismissSuggestion();
+        return;
+      }
       if (curveSel) {
         curveSel = null;
         return;
@@ -912,6 +1051,8 @@
   const accepted = $derived(held ? !!item?.split?.accepted : decision === 'accepted');
   const flatUrl = $derived.by(() => {
     if (!curves || !sel) return '';
+    // A suggestion on offer: the inset flattens the SUGGESTED curves (the same preview route; nothing is committed).
+    if (suggestion) return curvePreviewUrl('result', id, sel.id, suggestion.curves);
     if (curveView === 'straight') return curvePreviewUrl(throttled ? 'thumb' : 'result', id, sel.id, resetCurves(throttled ?? curves));
     return throttled ? curvePreviewUrl('thumb', id, sel.id, throttled) : resultUrl;
   });
@@ -1039,6 +1180,7 @@
             oncurveselect={(h) => (curveSel = h)}
             oncurvepreview={onCurvePreview}
             oncurvecommit={commitCurves}
+            suggested={suggestedOutline}
             onsay={(t) => store.announce(t)}
           >
             {#if prevId !== null}
@@ -1054,7 +1196,7 @@
 
             {#if canEdit && shownEdit}
               {#if curved && !compare}
-                <FlatInset url={flatUrl} straight={curveView === 'straight'} live={!!throttled} name={item.name} />
+                <FlatInset url={flatUrl} straight={curveView === 'straight' && !suggestion} live={!!throttled} suggested={!!suggestion} name={item.name} />
               {:else}
                 <ResultInset {srcUrl} {resultUrl} edit={shownEdit} {busy} {compare} name={item.name} />
               {/if}
@@ -1088,6 +1230,8 @@
               canStraighten={!!curveState && !!curveSel && !edgeIsStraight(edgeOf(curveState.curves, curveSel.e))}
               canReset={!!curveState && !isStraightPage(curveState.curves)}
               selectedLabel={selectedText}
+              {suggesting}
+              onsuggest={suggestCurves}
               onmode={(on) => (on ? enterCurved() : leaveCurved())}
               onview={(v) => (curveView = v)}
               onadd={curveAdd}
@@ -1095,6 +1239,9 @@
               onstraighten={curveStraighten}
               onreset={curveReset}
             />
+          {/if}
+          {#if canEdit && tool === 'none'}
+            <SuggestPanel state={sug} busy={inflight > 0} onapply={applySuggestion} ondismiss={dismissSuggestion} onretry={suggestCurves} />
           {/if}
 
           {#if showLayer || noItems}
@@ -1232,7 +1379,7 @@
             {:else}
               <p class="plain">{S.curved.curvedHint}</p>
               <div class="btn-row">
-                <button type="button" class="btn" disabled={inflight > 0} onclick={enterCurved} data-bend-edges><Icon name="curve" size={16} stroke={2} /> {S.curved.curved}</button>
+                <button type="button" class="btn" disabled={inflight > 0} onclick={() => enterCurved()} data-bend-edges><Icon name="curve" size={16} stroke={2} /> {S.curved.curved}</button>
               </div>
             {/if}
             <p class="plain small" data-curved-limits>{S.curved.limits} {curved ? S.curved.limitsMore : ''}</p>
@@ -1381,6 +1528,7 @@
     onchoose={chooseMode}
     oncancel={() => (sheetOpen = false)}
   />
+  <FirstCurvedSheet open={introOpen} suggest={introThen === 'suggest'} ongo={introGo} oncancel={() => (introOpen = false)} />
   <FirstSplitSheet
     open={splitSheetOpen}
     count={planned.length}
