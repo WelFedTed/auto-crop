@@ -91,6 +91,31 @@ Notes. (1) The geometry of the synthetic suites barely moves (the rules change w
 - A print with a mat is held on every picture with a strong inner rectangle, correct or not.
 - A page whose edge is a printed border darker or lighter than the paper, with a desk of the same hue around it, has a side that looks off the page and is held (the safe direction, rare).
 
+## Update 2026-10-12 (second): a learned detector on the same real photographs and on the synthetic suites, against the classical one
+
+Aggregates only; the private pictures and labels (`_data/`, B21) are evaluation data and nothing here was tuned on them. Detector: `main` at `1bb9c50` (`detect.rs` unchanged by this update). Harness: `auto-crop-eval run`, canonical-warp IoU, failure = IoU < 0.90, no quad counts as a failure, Windows 11 x86-64, release build.
+
+**Real photographs, 17 single-item exact labels** (12 receipt-long, 3 flatbed-single, 2 general-photo; 7 flagged partial-frame; the 13 multi-item or assisted labels need a multi-quad scorer and are left out; the labels may lie outside the frame and the answers are not clipped):
+
+| Detector | Mean IoU (95% bootstrap) | Failure | Auto-accepted (silent failures) | IoU >= .95 / .90-.95 / .80-.90 / .50-.80 / < .50 |
+|---|---|---|---|---|
+| classical (1 of 17 gave no quad) | 0.624 (0.43-0.80) | 11 of 17 = 64.7% (exact 38-86%) | 4 (3 silent; one-sided 95% bound 98.7%) | 6 / 0 / 2 / 3 / 6 |
+| learned, candidate B (from scratch, ADR 0010 update) | 0.797 (0.69-0.88) | 10 of 17 = 58.8% (33-82%) | 0 (0) | 4 / 3 / 4 / 4 / 2 |
+| learned, candidate C | 0.783 (0.68-0.87) | 12 of 17 = 70.6% (44-90%) | 1 (0) | 4 / 1 / 5 / 5 / 2 |
+
+Classical by slice (n too small to gate; descriptive): receipt-long (12) mean IoU 0.497, failure 83%; flatbed-single (3) 0.900 and 33%; general-photo (2) 0.972 and 0%; partial-frame (7) 0.338 and 86%; the one curved page failed. The classical detector's auto-accepted answers on these photographs are 3 wrong in 4: its confidence is not usable as an accept rule on real pictures, which matches ECE 0.51 and AUROC 0.76 here (ECE 0.20, AUROC 0.88 on the 5,200-image synthetic suite). The paired difference learned minus classical is +0.16 to +0.17 in mean IoU and -6 to +6 points in failure rate, every interval including zero: **17 images cannot separate them** (ADR 0010 update has the intervals, the learned net's slices and what can and cannot be concluded).
+
+**Synthetic suites, classical against the learned net (candidate C), same harness and the default generator** (the classical column re-measures the 2026-10-04 results below and gives the same numbers, except `test-train-mode`, which is new):
+
+| Suite | Classical mean IoU / failure | Learned C mean IoU / failure | Learned auto-accepted (silent) |
+|---|---|---|---|
+| full (5,200) | 0.6965 / 40.5% | 0.9380 / 18.2% | 2,603 (9; one-sided 95% bound 0.60%) |
+| mid-d (1,000) | 0.689 / 43.4% | 0.934 / 20.1% | 480 (3) |
+| smoke, smoke-b, smoke-c | 0.696, 0.725, 0.705 / 41.5, 40.5, 42.5% | 0.929, 0.937, 0.932 / 24.0, 19.0, 20.0% | 87 (2), 96 (0), 99 (0) |
+| test-train-mode (1,000; new harder generator with hands, mats, tight and white-on-white pages) | 0.500 / 65.3% | 0.874 / 41.5% | 242 (7) |
+
+The classical detector's synthetic numbers are unchanged by this update; the learned numbers are a study result (ADR 0010), not a shipping detector, and synthetic data still never backs a real-world claim (B6).
+
 ## Update 2026-10-04: long thin receipts and pages whose short ends are faint, cut or hidden
 
 The Python suites showed the detector failing most on long and strip receipts (aspect 4:1 to 11:1), pages cut by the frame and look-alike desks; the owner's own photos showed the same (long receipts on wood or textured desks, receipts held in a hand where a table or banner inside the receipt was returned instead of the receipt). This change targets the first two without touching the constants the stand-in tuning chose. Base is commit `ec20442`; the head is this change. Same harness, same metrics, same machine (Windows 11, release build). **Aggregates only; the real-file numbers rest on approximate hand labels (see below).**

@@ -49,6 +49,8 @@ Second-cycle options of `train.py`: `--size 384` (input resolution; the ADR 0010
 
 Real photographs (EVALUATION ONLY, never training, tuning or checkpoint choice): `real_manifest.py` turns the owner's golden labels (`_data/golden/labels`, single-item, not assisted) into a harness manifest kept inside `_data/`; `boot.py` gives bootstrap and exact intervals and paired differences from harness result files; `parity.py` checks an exported ONNX net against PyTorch on 64 or more letterboxed images through the Rust backends (`crates/infer/examples/net_parity.rs`, features `ort`, `rten`, `learned`).
 
+`eval_suites.sh TAG CKPT CONF SUITE...` scores a checkpoint and its hybrids on the synthetic suites with the harness (after `gen_eval.sh` and `classical_baseline.sh`; `EVAL_BIN` and `DUMP_BIN` name the Rust binaries). The Rust backend check of the second cycle (ADR 0010 update): `parity.py prepare` exports the checkpoint and writes 100 letterboxed inputs and the PyTorch outputs, `cargo run --release -p auto-crop-infer --features ort,rten,learned --example net_parity -- MODEL.onnx INPUTS.f32 100 384 OUT 4` runs them through the pinned ONNX Runtime (`cargo xtask fetch-ort`, `AUTOCROP_ORT_DYLIB`) and rten and also decodes and times the Rust pre- and post-processing, and `parity.py compare` reports the differences.
+
 `train.py --overfit 64` is the M4.14 overfit check (no augmentation, same images; reports mean corner error at 256 px). `viz_samples.py` and `contact_sheet.py` draw augmented samples and quads for a quick look.
 
 ## Limits

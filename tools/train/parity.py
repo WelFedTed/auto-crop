@@ -72,6 +72,9 @@ def compare(a) -> int:
         got = np.fromfile(path, dtype="<f4").reshape(a.n, ch, s, s)
         raw = float(np.abs(got - ref).max())
         raw_heat = float(np.abs(got[:, :3] - ref[:, :3]).max())
+        sig = lambda x: 1.0 / (1.0 + np.exp(-x.astype(np.float64)))  # noqa: E731
+        prob = float(np.abs(sig(got[:, :3]) - sig(ref[:, :3])).max())  # M4.16 bar: heatmaps within 1e-4
+        off_px = float(np.abs(got[:, 3:] - ref[:, 3:]).max()) * 32.0
         worst, differ, mean_sum, mean_n = 0.0, 0, 0.0, 0
         for i in range(a.n):
             q = _corners(got[i], a.stride)
@@ -86,9 +89,9 @@ def compare(a) -> int:
             worst = max(worst, float(d.max()))
             mean_sum += float(d.sum())
             mean_n += 4
-        passed = differ == 0 and worst < 0.1
+        passed = differ == 0 and worst < 0.1 and prob < 1e-4
         ok &= passed
-        print(f"{Path(path).name}: n={a.n}  max |raw output diff| {raw:.2e} (heatmaps and mask logits {raw_heat:.2e})  decoded corners: max {worst:.2e} cells ({worst * a.stride:.2e} px at {a.size}), mean {mean_sum / max(mean_n, 1):.2e} cells, images decoding differently {differ}  -> {'PASS' if passed else 'FAIL'} (bar < 0.1 cell)")
+        print(f"{Path(path).name}: n={a.n}  max |raw output diff| {raw:.2e} (heatmap, mask and centre logits {raw_heat:.2e}; as probabilities {prob:.2e}; offsets {off_px:.2e} px)  decoded corners: max {worst:.2e} cells ({worst * a.stride:.2e} px at {a.size}), mean {mean_sum / max(mean_n, 1):.2e} cells, images decoding differently {differ}  -> {'PASS' if passed else 'FAIL'} (bars: corners < 0.1 cell, heatmap probabilities < 1e-4)")
     return 0 if ok else 1
 
 

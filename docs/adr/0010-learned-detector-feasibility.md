@@ -108,3 +108,107 @@ On the evidence we have, a from-scratch 0.94 M-parameter corner net is **feasibl
 - `tools/synth` gains `--train` (default behaviour byte-identical, see above); `tools/train` and its four Python pins are new developer tooling and are listed in `docs/provenance.md`.
 - The weights and datasets live under `target/` on the owner's machine only (one repo, no weights in git).
 - Revisit trigger: the golden-set dev tier (M4.46) or any set of at least 30 real labelled long receipts is available, or a second training cycle with a materially different recipe finishes.
+
+## Update 2026-10-12: second cycle, the owner's real labels, the Rust path
+
+Status of the recommendation: **still GO-IF, with narrower conditions (below). The shipping detector stays classical.** Code: `tools/train/`, the training mode of `tools/synth/`, `crates/infer` (feature `learned`, off by default). Classical numbers are from the `main` commit `1bb9c50` (`crates/imgproc/src/detect.rs` was not touched here; the harness records `0b06ed3`, which differs from `1bb9c50` only in tools and the infer crate). The earlier checkpoints and venv were lost in a crash; the environment was recreated from the hash-locked `tools/train/requirements.lock` (torch 2.14.1+cu130) and the net retrained.
+
+### What changed since the first cycle
+
+- **Generator, training mode only** (`python -m synth --train`; each feature draws from a random stream of its own; the default and evaluation suites are byte-identical: `smoke` and `smoke-c` regenerated with the changed generator have the same manifest hash and the same 200 image hashes as before): 30% partial frames that may cut away up to 60% of the page (was 20% and 45%), "tight" pages that fill the picture (25% of full-frame pictures), white-on-white desks (20%), photo prints with a white mat (15% of document scenes; the truth is the whole print, an assumption about how the owner labels prints) and 50% hands (was 40%). Unit tests cover the identity of the default path and the truth of the new modes.
+- **Net and training** (the same 0.94 M-parameter from-scratch net, no pretrained weights, no downloads): 384 px input (was 256; heatmap 96 x 96); 25% of samples zoomed so the page fills the canvas; 15% with a random finger-like blob over the picture; a page whose centre is outside the frame (a receipt cut by the picture) gets its centre target on the nearest border cell, so the decoder always finds a centre. 20,000 generated pictures (four 5,000-image sets, seeds disjoint from every evaluation suite) and a new 1,000-image validation set. Three consecutive runs, each continuing the EMA weights of the previous: A 6,150 steps (55.5 min), B 5,746 steps (55.6 min), C 6,397 steps (40.3 min); batch 64, AdamW, a cosine schedule per run. About 2.5 GPU-hours of training plus about 0.4 h of overfit checks on one RTX 3060 (CPU-bound data loading kept the GPU about half busy, and the machine was shared with other work, so the step counts are lower than the minutes would allow).
+- **Selection:** checkpoints by the synthetic validation score only (`best.pt`: B at step 4,917, C at its last step); confidence threshold fitted on the synthetic validation set (B 0.927, C 0.934). The owner's photographs were never used for training, tuning, thresholds or checkpoint choice. They were evaluated **twice for the learned net (candidate B once, candidate C once)** and three times for the classical detector (no tuning). Quads are answered as predicted, not clipped to the frame (the golden labels may lie outside it).
+
+### Held-out synthetic (default generator, never seen in training)
+
+| Suite (n) | Predictor | Mean IoU (95% CI) | Failure % | No quad | Auto-accepted, silent failures (one-sided 95% bound) | Flag rate |
+|---|---|---|---|---|---|---|
+| full (5,200) | classical | 0.6965 (0.685-0.708) | 40.5 | 616 | 1,468, 31 (2.84%) | 71.8% |
+| | learned B | 0.9281 (0.926-0.931) | 22.3 | 0 | 2,488, 13 (0.83%) | 52.2% |
+| | **learned C** | **0.9380 (0.936-0.940)** | **18.2** | 0 | 2,603, 9 (0.60%) | 49.9% |
+| | `snap` hybrid (C) | 0.9450 (0.943-0.947) | 18.1 | 0 | 2,386, 59 (3.06%) | 54.1% |
+| | `agree` hybrid (C) | 0.9406 (0.938-0.943) | 18.2 | 0 | 1,405, 1 (0.34%) | 73.0% |
+| | `agree_l` hybrid (C; the learned quad when both agree) | 0.9380 (0.936-0.940) | 18.2 | 0 | 1,405, 2 (0.45%) | 73.0% |
+| | `fallback` hybrid (C) | 0.9375 (0.935-0.940) | 18.2 | 0 | 2,899, 40 (1.79%) | 44.2% |
+| | first cycle (table above, 256 px) | 0.9240 (0.922-0.926) | 23.0 | 0 | 1,873, 10 (0.90%) | 64.0% |
+| mid-d (1,000) | classical / B / C | 0.689 / 0.925 / 0.934 | 43.4 / 23.5 / 20.1 | 122 / 0 / 0 | 290, 7 / 453, 3 / 480, 3 | 71.0 / 54.7 / 52.0% |
+| smoke, smoke-b, smoke-c (200 each) | classical | 0.696, 0.725, 0.705 | 41.5, 40.5, 42.5 | | | |
+| | C | 0.929, 0.937, 0.932 | 24.0, 19.0, 20.0 | 0 | 87, 2 / 96, 0 / 99, 0 | |
+| test-train-mode (1,000; the **new** harder training-mode generator: hands, mats, tight and white-on-white pages) | classical / C | 0.500 / 0.874 | 65.3 / 41.5 | 219 / 0 | 106, 11 / 242, 7 | 89.4 / 75.8% |
+
+(The `test-train-mode` of the first cycle came from the older generator and is not comparable.) Confidence quality of C on `full`: ECE 0.039, AUROC 0.956 (classical 0.204 and 0.879), in distribution.
+
+Per slice of `full` (failure %, mean IoU); the two slices that moved most against the first cycle are in bold:
+
+| Slice (n) | classical | first cycle | B | C | `snap` (C) |
+|---|---|---|---|---|---|
+| aspect=document (2,082) | 28.5, 0.793 | 18.7, 0.938 | 20.1, 0.941 | 15.7, 0.951 | 13.3, 0.961 |
+| aspect=receipt (1,560) | 37.2, 0.724 | 19.9, 0.931 | 19.4, 0.938 | 15.8, 0.948 | 16.5, 0.952 |
+| aspect=long (1,090) | 55.5, 0.582 | 25.2, 0.912 | 24.8, 0.915 | 19.4, 0.924 | 22.2, 0.928 |
+| aspect=strip (468) | 69.2, 0.440 | 47.2, 0.864 | 36.3, 0.868 | **35.3, 0.882** | 35.0, 0.891 |
+| framing=full (4,576) | 32.5, 0.757 | 14.2, 0.942 | 13.3, 0.947 | 9.6, 0.955 | 9.1, 0.964 |
+| framing=partial (624) | 98.9, 0.249 | 87.2, 0.792 | 88.6, 0.786 | **81.4, 0.816** | 83.7, 0.808 |
+| background=tile (624) | 66.2, 0.539 | 23.9, 0.920 | 22.8, 0.924 | 17.8, 0.938 | 19.9, 0.940 |
+| background=white-desk (831) | 56.0, 0.569 | 31.8, 0.907 | 29.8, 0.916 | 23.6, 0.929 | 25.8, 0.927 |
+| background=wood (831) | 27.9, 0.793 | 19.0, 0.932 | 19.4, 0.936 | 16.6, 0.944 | 15.6, 0.955 |
+
+The ordering is the same as before on every slice (learned far above classical). The two weak spots of the first cycle improved but did not close: strips 47% to 35% failure (the larger input helps; the 0.90 bar on a 25 px wide strip is a sub-pixel bar) and partial frames 87% to 81% (the truth lies beyond the frame, so part of the answer is an extrapolation; training on pages cut by up to 60% helped little).
+
+### The owner's real photographs (evaluation only; aggregates; n = 17)
+
+The 17 single-item, not-assisted blank-quad labels in `_data/golden/labels` (12 `receipt-long`, 3 `flatbed-single`, 2 `general-photo`; 7 flagged `partial_frame`, 1 `curved`). The other 13 labels are multi-item (10) or assisted (3), which a single-quad predictor cannot be scored on, and are left out. Exact labels, scored by the harness (canonical-warp IoU, failure = IoU < 0.90, no quad = failure). Percentile bootstrap over images, 10,000 resamples (one image per scene, so images are the resampling unit); exact Clopper-Pearson interval on the failure rate.
+
+| Predictor | Mean IoU (95% bootstrap) | Failure (IoU < 0.90), exact 95% | Auto-accepted (silent failures) | Images with IoU >= .95 / .90-.95 / .80-.90 / .50-.80 / < .50 |
+|---|---|---|---|---|
+| classical (commit 1bb9c50; 1 of 17 gave no quad) | 0.624 (0.43-0.80) | 11 of 17 = 64.7% (38-86%) | 4 (3) | 6 / 0 / 2 / 3 / 6 |
+| learned B | 0.797 (0.69-0.88) | 10 of 17 = 58.8% (33-82%) | 0 (0) | 4 / 3 / 4 / 4 / 2 |
+| learned C | 0.783 (0.68-0.87) | 12 of 17 = 70.6% (44-90%) | 1 (0) | 4 / 1 / 5 / 5 / 2 |
+| `snap` hybrid B / C | 0.811 (0.70-0.90) / 0.804 (0.69-0.90) | 9 / 10 of 17 = 52.9% / 58.8% | 0 (0) / 1 (0) | C: 6 / 1 / 4 / 4 / 2 |
+| `agree` and `agree_l` hybrids, B / C | as the learned net | as the learned net | 0 / 0 | |
+| `fallback` hybrid B / C | 0.797 / 0.792 | 10 / 12 of 17 | 4 (3) | |
+
+Paired differences against classical (the same images resampled): mean IoU B +0.173 (-0.048 to +0.398), C +0.159 (-0.052 to +0.375), `snap` C +0.181 (-0.028 to +0.390); failure rate B -5.9 points (-41.2 to +29.4), C +5.9 (-23.5 to +35.3), `snap` C -5.9 (-29.4 to +17.6). Every interval includes zero except the mean IoU of the `fallback` hybrid (+0.17, interval +0.002 to +0.358), which only adds the classical detector's own good answers.
+
+Descriptive slices of the same 17 (too small to test; looked at after the fact and used for no decision): `receipt-long` (12): classical 0.497 mean IoU and 83% failure, B 0.887 and 42%, C 0.861 and 67%; `partial_frame` (7): classical 0.338 and 86%, B 0.847 and 57%, C 0.849 and 86%; `flatbed-single` (3): classical 0.900 and 33%, B 0.508 and 100%, C 0.511 and 100% (`snap` C 0.578).
+
+**What can be concluded.** On 17 exactly labelled real photographs the learned net's quads are, on average, much closer to the truth than the classical detector's where the classical detector fails worst: the learned net has 2 images below IoU 0.5, the classical detector 6, and long receipts and pages cut by the frame improve most. That is the same direction as every synthetic slice. **What cannot be concluded:** that the learned net has a lower failure rate at the 0.90 bar (10 or 12 of 17 against 11 of 17: no separation, and the two candidates differ by two images although C is better on every synthetic measure); that more synthetic training transfers (C beat B on all synthetic suites and did not on these photographs, within noise); anything about calibration (the synthetic-fitted threshold auto-accepted 0 and 1 of 17 images, so the confidence does not carry over and no silent-failure claim is possible); anything about flat documents (3 images, where the learned net loses to the classical detector). The learned errors on real photographs are mostly near misses (IoU .80 to .95 for 6 or 7 of 17) rather than gross misses, which points at precision, not detection, as the next lever. With n = 17 a failure-rate difference needs a true effect of about 30 points to separate; the gate of the first GO-IF (at least 30 labels, separated intervals) is **not met**.
+
+### Rust path (candidate C, the exported net, 100 held-out `mid-d` images)
+
+ONNX opset 17, fp32, static 1 x 3 x 384 x 384, 3.77 MB, operators Add, Conv, GlobalAveragePool, HardSigmoid, HardSwish, Mul, Relu, Resize (the same set as before). Run through `crates/infer` (`ort =2.0.0-rc.13` load-dynamic with the SHA-256-pinned ONNX Runtime 1.28.2, fetched with `cargo xtask fetch-ort` for this check, and `rten =0.26.0`; example `net_parity`), compared with PyTorch fp32 on CPU, then decoded with the Python decoder and with the Rust decoder (`crates/infer/src/corner.rs`):
+
+| Check (100 images) | ort 1.28.2 | rten 0.26.0 |
+|---|---|---|
+| max abs difference, raw logits | 2.3e-3 | 2.0e-4 |
+| max abs difference, heatmap, mask and centre as probabilities (M4.16 bar 1e-4) | **1.6e-4** (candidate B: 3.9e-5) | 1.2e-5 (B: 9.7e-6) |
+| max offset difference | 0.06 px | 0.006 px |
+| decoded corners, max difference | 1.7e-4 cells = 6.9e-4 px (bar: < 0.1 cell) | 2.0e-5 cells = 7.8e-5 px |
+| images that decode to a different peak | 0 | 0 |
+
+The corner bar passes on both by three orders of magnitude on 100 images (the first cycle checked 5 random inputs). The M4.16 heatmap-probability bar of 1e-4 passes for rten and for candidate B on ort and **is missed by 0.6e-4 for candidate C on ort** (a logit difference in a flat region); it moves no decoded corner. The Rust decoder agrees with the Python decoder to 7e-4 px on the same outputs. Timing (12 logical CPUs, 4 threads, network only, 100 images x 3 runs, quiet machine): ort 8.5 ms median (p95 11.1), load 188 ms; rten 19.7 ms median (p95 25.6), load 5 ms (ADR 0007 measured rten 2 to 4 times ort; here 2.3 times at 384 px). Pre- and post-processing in Rust, one thread: letterbox of a 12 MP (4032 x 3024) RGB picture to 384 px 29.5 ms, of a 2 MP picture 8.0 ms (exact area average; JPEG decode not included), decoder 0.13 ms. That is about 40 ms per 12 MP picture with ort, most of it in the letterbox, which can be parallelised or replaced by the codec's scaled decode. The Rust letterbox resamples slightly differently from OpenCV's (area average, bilinear for enlarging, no pre-shrink warp); the effect on accuracy was not measured. Not measured: int8, other operating systems, the Rust path on real pictures.
+
+### Overfit check (M4.14: 36 images, no augmentation, 384 px)
+
+3,000 steps (13 min wall on the shared machine): mean corner error 1.52 px (median 1.01) at the 384 px input, mean IoU 0.964, 1 of 36 below 0.90; a second run of 3,094 steps gave 1.49 px (median 1.04). In 256 px units that is 1.0 px (median 0.67), against 2.7 px (1.7) after 700 steps in the first cycle. **The bar of < 1 px mean is not met** at this budget (the loss was still falling slowly); the mean is within about 0.5 px of it and the median is at it.
+
+### Not shown (UNMEASURED, not passes)
+
+- Any claim on real photographs beyond 17 images, on flat documents (3 images), on several items per picture (13 labels left out; they need a multi-quad predictor) or on HEIC and other decoded inputs.
+- Confidence calibration on real data (the synthetic-fitted threshold accepted almost nothing), so any silent-failure risk on real photographs.
+- Run-to-run variance: one training seed per run; B and C are one continued chain, not independent runs.
+- ImageNet or other pretrained initialisation (needs an owner-granted A-7 exception, not tried), a wider net, a stride-2 head, int8, and a real-photo fine-tune set (none exists; the private labels are evaluation only).
+- Whether the white-mat prints and white-on-white pages the generator now draws match the owner's real prints (the truth convention for a mat is an assumption), and whether the finger blobs help on real hands (the 7 `partial_frame` images are the only related ones).
+- The Rust `LearnedDetector` has no real-picture test, no multi-threaded letterbox, no mask-agreement feature (the Python confidence uses it) and no engine hook; it is a prototype behind a feature that is off by default.
+- Classical numbers on the 17 images are from commit `1bb9c50`; another agent was changing `detect.rs` in parallel, so they may have moved by the time this is read.
+
+### Revised recommendation: GO-IF (conditions narrowed)
+
+Keep the learned detector alive as the candidate for M4, not as the shipping detector. For it: strong on synthetic data (failure 18% against 40%, no slice where it loses), directionally positive on real photographs (mean IoU +0.16 to +0.17, fewer gross misses, long receipts and cut frames much better), and the Rust path works (parity, 8.5 ms). Against promoting it: the failure rate at the 0.90 bar did not separate from the classical detector on 17 photographs, more synthetic training did not carry over (C against B), the confidence does not transfer, and flat documents are worse. The remaining conditions replace those of the first GO-IF:
+
+1. **Evidence.** At least 30 (better 50, golden v1) exactly labelled single-item receipts and documents on which the learned net, or a hybrid, has a lower failure rate than the classical detector with a paired-bootstrap interval that excludes zero, fewer than half as many gross misses (IoU < 0.5), and is no worse on flat documents. The owner has 17 (plus 10 multi-item labels that need a multi-quad scorer); 13 more single-item labels reach 30 (about a minute each in the labeller). Effort: one to two hours of owner time, 1 day to run.
+2. **Precision.** Most real misses are at IoU .80 to .95. A refinement stage (move each learned edge to the strongest edge within a small band by a local line fit, as `detect/strip.rs` does for the classical detector; the existing `snap` hybrid does this only when a classical candidate agrees, and helped on synthetic data and a little on real) is the cheapest lever. Effort: 3 to 5 days with tests. Exit: median corner error on the real set under 1.5% of the diagonal (classical 5.5%, learned 2.7% to 4.4% now).
+3. **Domain gap.** Either a real-photo fine-tune set (another 50 to 100 photographs, separate from the evaluation labels; owner decision, B21 applies) or an owner-granted A-7 exception to try a pretrained backbone (option D, untried). Without one of these, more synthetic training is not expected to move the real failure rate (B to C). Effort: 1 day of training per variant; the decision is the owner's.
+4. **Confidence on real data (M4.42).** The auto-accept threshold must be fitted on real labels; until then the learned detector is Check-only. The `agree` hybrid is the only combination with a synthetic silent-failure bound (1 in 1,405 accepted, 0.34% one-sided 95% bound) and on real photographs it accepted nothing. Effort: part of M4.42; needs about 100 labels.
+5. **Rust.** A parallel letterbox or scaled decode, the mask feature, a real-picture test and the engine hook; the ort heatmap-probability bar of 1e-4 either relaxed to 2e-4 by the owner (the decoded corners differ by under 0.001 px) or met some other way. Effort: 3 to 4 days.
+
+If condition 1 fails after conditions 2 and 3 were tried once each, record NO-GO for the learned detector as the primary and keep the classical detector with the candidate-ranking work. Nothing in this update changes PLAN.md, the decision log, ROADMAP.md or what ships; no weights, datasets or checkpoints are committed (they live under `target/` on the owner's machine; the pinned ONNX Runtime fetched for the parity check is under `target/native/`).
