@@ -7,6 +7,7 @@ pub mod cancel;
 pub mod curved;
 pub mod curves_fit;
 pub mod detect;
+pub mod enhance;
 pub mod geometry;
 pub mod homography;
 pub mod items;

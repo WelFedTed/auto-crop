@@ -40,6 +40,7 @@ path = [
     "tools/perf_gate/fixtures/**",
     "tools/ocr_oracle/requirements.txt",
     "tools/ocr_oracle/requirements.lock",
+    "tools/ocr_oracle/variants-*.json",
     "tools/synth/requirements.txt",
     "tools/synth/requirements.lock",
     "tools/synth/overrides.txt",

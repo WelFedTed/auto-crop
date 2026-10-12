@@ -19,6 +19,9 @@ on:
     paths:
       - "tools/ocr_oracle/**"
       - ".github/workflows/ocr-oracle.yml"
+      - "crates/imgproc/src/enhance/**"
+      - "crates/imgproc/src/threshold.rs"
+      - "crates/eval/examples/enhance_*.rs"
   workflow_dispatch:
     inputs:
       blur:
@@ -110,4 +113,68 @@ jobs:
             work/*.json
             work/ocr-clean
             work/blur-*/manifest.json
+          if-no-files-found: warn
+
+  # Does enhancement help? (ROADMAP M7.50, M7.55). Synthetic receipts and prose documents are
+  # degraded the way phone photos are (uneven light, a cast shadow, thermal fade, dim noisy
+  # exposure, a warm lamp), enhanced in every mode by the pure-Rust enhancer, and read by the same
+  # pinned Tesseract. The claim "enhancement helps" is the table in the step summary: CER per slice
+  # and mode, the paired change against the original, images made worse, amount tokens lost. A mode
+  # that makes a slice worse is visible there and is the reason `Auto` avoids it.
+  enhance:
+    name: enhancement matrix (tesseract 5)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Build the enhancer front end
+        run: cargo build --release -p auto-crop-eval --example enhance_dir
+      - name: Install Tesseract 5.x (alex-p PPA, as the devcontainer) and fonts
+        run: |
+          set -euo pipefail
+          sudo add-apt-repository -y ppa:alex-p/tesseract-ocr5
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng fonts-dejavu-core
+          tesseract --version
+      - name: Python environment from the hashed lock
+        run: |
+          set -euo pipefail
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --require-hashes -r tools/ocr_oracle/requirements.lock
+      - name: Unit tests of the tools
+        run: .venv/bin/python -m unittest discover -s tools/ocr_oracle -v
+      - name: Synthetic receipts and documents, then the degradation slices
+        run: |
+          set -euo pipefail
+          py=.venv/bin/python
+          $py tools/ocr_oracle/ocr_oracle.py synth --out work/syn --count 8 --blur 3.0 > /dev/null
+          $py tools/ocr_oracle/degrade.py docs --out work/docs --count 6
+          $py tools/ocr_oracle/degrade.py slices --src work/syn/clean --out work/slices --family receipt
+          $py tools/ocr_oracle/degrade.py slices --src work/docs --out work/slices --family doc
+          ls work/slices
+      - name: Matrix, main variants (Tesseract thresholding 0 = Otsu, the acceptance setting, and 2 = Sauvola)
+        run: |
+          set -euo pipefail
+          .venv/bin/python tools/ocr_oracle/enhance_matrix.py --bin target/release/examples/enhance_dir \
+            --slices-dir work/slices --variants tools/ocr_oracle/variants-main.json --out work/matrix-main \
+            --thresholding 0 2 --jobs 4 | tee work/matrix-main.log
+          { echo '### Enhancement matrix: main variants'; cat work/matrix-main/matrix.md; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Matrix, parameter sweep (thresholding 0)
+        run: |
+          set -euo pipefail
+          .venv/bin/python tools/ocr_oracle/enhance_matrix.py --bin target/release/examples/enhance_dir \
+            --slices-dir work/slices --variants tools/ocr_oracle/variants-sweep.json --out work/matrix-sweep \
+            --thresholding 0 --jobs 4 | tee work/matrix-sweep.log
+          { echo '### Enhancement matrix: parameter sweep'; cat work/matrix-sweep/matrix.md; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: enhance-matrix
+          path: |
+            work/matrix-*/matrix.json
+            work/matrix-*/matrix.md
+            work/matrix-*.log
           if-no-files-found: warn

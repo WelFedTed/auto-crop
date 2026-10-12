@@ -1,0 +1,6 @@
+[
+  {"label": "original", "mode": "original"},
+  {"label": "clean", "mode": "clean"},
+  {"label": "document", "mode": "document"},
+  {"label": "receipt", "mode": "receipt"}
+]

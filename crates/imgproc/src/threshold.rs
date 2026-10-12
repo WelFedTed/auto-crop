@@ -17,6 +17,7 @@
 //!   is bit-identical to a naive per-pixel window scan, to any strip height, and at any thread
 //!   count.
 
+use crate::cancel::{Cancel, Cancelled, NeverCancel};
 use rayon::prelude::*;
 
 /// Output rows per rayon task (the strip). Any height gives the same result.
@@ -56,10 +57,44 @@ fn local_binarize<F>(
 where
     F: Fn(u64, u64, u64) -> f64 + Sync,
 {
+    local_map(
+        gray,
+        width,
+        height,
+        radius,
+        strip_rows,
+        threshold,
+        &|v: u8, t: f64| if f64::from(v) > t { 255 } else { 0 },
+        &NeverCancel,
+    )
+    .unwrap_or_default()
+}
+
+/// The general form of the local thresholds: for every pixel the window statistics give a
+/// threshold `t = threshold(sum, sumsq, n)` and the output byte is `emit(pixel, t)`. The enhance
+/// pipeline uses it for a soft ramp and a clamped threshold; [`sauvola`] and [`nick`] use it for
+/// the 0 / 255 result. The column sums are exact `u64`, the work per pixel is O(1) however large
+/// the window, the result does not depend on the strip height or the thread count, and `cancel`
+/// is polled every 64 rows of a strip (`Err(Cancelled)`: no output escapes).
+#[allow(clippy::too_many_arguments)]
+pub fn local_map<F, E>(
+    gray: &[u8],
+    width: usize,
+    height: usize,
+    radius: usize,
+    strip_rows: usize,
+    threshold: &F,
+    emit: &E,
+    cancel: &dyn Cancel,
+) -> Result<Vec<u8>, Cancelled>
+where
+    F: Fn(u64, u64, u64) -> f64 + Sync,
+    E: Fn(u8, f64) -> u8 + Sync,
+{
     assert_eq!(gray.len(), width * height, "gray must be width * height");
     let mut out = vec![0u8; width * height];
     if width == 0 || height == 0 {
-        return out;
+        return Ok(out);
     }
     let strip_rows = strip_rows.max(1);
     out.par_chunks_mut(width * strip_rows)
@@ -67,13 +102,18 @@ where
         .for_each(|(i, chunk)| {
             let y0 = i * strip_rows;
             let rows = chunk.len() / width;
-            binarize_strip(gray, width, height, radius, y0, rows, chunk, threshold);
+            map_strip(
+                gray, width, height, radius, y0, rows, chunk, threshold, emit, cancel,
+            );
         });
-    out
+    if cancel.is_cancelled() {
+        return Err(Cancelled);
+    }
+    Ok(out)
 }
 
 #[allow(clippy::too_many_arguments)]
-fn binarize_strip<F>(
+fn map_strip<F, E>(
     gray: &[u8],
     w: usize,
     h: usize,
@@ -82,8 +122,11 @@ fn binarize_strip<F>(
     rows: usize,
     out: &mut [u8],
     threshold: &F,
+    emit: &E,
+    cancel: &dyn Cancel,
 ) where
     F: Fn(u64, u64, u64) -> f64,
+    E: Fn(u8, f64) -> u8,
 {
     let mut colsum = vec![0u64; w];
     let mut colsq = vec![0u64; w];
@@ -98,6 +141,9 @@ fn binarize_strip<F>(
         }
     }
     for y in y0..y0 + rows {
+        if (y - y0).is_multiple_of(64) && cancel.is_cancelled() {
+            return;
+        }
         for x in 0..w {
             psum[x + 1] = psum[x] + colsum[x];
             psq[x + 1] = psq[x] + colsq[x];
@@ -109,11 +155,7 @@ fn binarize_strip<F>(
             let (lo, hi) = (x.saturating_sub(r), (x + r).min(w - 1));
             let n = nr * (hi - lo + 1) as u64;
             let (s, q) = (psum[hi + 1] - psum[lo], psq[hi + 1] - psq[lo]);
-            orow[x] = if f64::from(line[x]) > threshold(s, q, n) {
-                255
-            } else {
-                0
-            };
+            orow[x] = emit(line[x], threshold(s, q, n));
         }
         // Slide the window down one row: the row at `y + r + 1` enters, the one at `y - r` leaves.
         if y + 1 < y0 + rows {
