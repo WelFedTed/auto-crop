@@ -13,11 +13,13 @@ test('hash routes parse', () => {
   assert.deepEqual(parseRoute('#/item/nope'), { name: 'grid' });
   assert.deepEqual(parseRoute('#/backups/'), { name: 'backups' });
   assert.deepEqual(parseRoute('#/settings'), { name: 'settings' });
+  assert.deepEqual(parseRoute('#/convert'), { name: 'convert' });
+  assert.deepEqual(parseRoute('#/convert/'), { name: 'convert' });
   assert.deepEqual(parseRoute('#/whatever'), { name: 'home' });
 });
 
 test('paths round trip', () => {
-  for (const r of [{ name: 'home' }, { name: 'grid' }, { name: 'item', id: 7 }, { name: 'backups' }, { name: 'settings' }] as const) {
+  for (const r of [{ name: 'home' }, { name: 'grid' }, { name: 'item', id: 7 }, { name: 'backups' }, { name: 'convert' }, { name: 'settings' }] as const) {
     assert.deepEqual(parseRoute('#' + routePath(r)), r);
   }
 });

@@ -5,6 +5,7 @@
   import { api } from '../lib/backend.ts';
   import Icon from '../lib/components/Icon.svelte';
   import RestoreDialog from '../lib/components/RestoreDialog.svelte';
+  import { isConversionBackup } from '../lib/convert.ts';
   import { formatBytes, formatDate, formatDateTime, isPast } from '../lib/format.ts';
   import { href, navigate, router } from '../lib/router.svelte.ts';
   import { routePath } from '../lib/routes.ts';
@@ -13,18 +14,21 @@
   import type { BackupFile, BackupRun, BackupsView, DerivedAction, DerivedFile, RestoreMode, RestoreOutcome } from '../lib/types.ts';
 
   /** The restore dialog: for one split scan, or for every split scan of a run. */
-  let dialog = $state.raw<{ title: string; files: DerivedFile[]; file: BackupFile | null; run: BackupRun | null } | null>(null);
+  let dialog = $state.raw<{ title: string; files: DerivedFile[]; file: BackupFile | null; run: BackupRun | null; convert: boolean } | null>(null);
   let dialogBusy = $state(false);
 
   const isSplit = (f: BackupFile): boolean => f.kind === 'OneToN';
+  /** A conversion is a backup of one original with one derived file: the converted picture, not a split scan. */
+  const isConv = (f: BackupFile): boolean => isConversionBackup(f);
 
   function askRestore(file: BackupFile): void {
-    dialog = { title: S.restoreDialog.title(file.name), files: file.derived, file, run: null };
+    dialog = { title: S.restoreDialog.title(file.name), files: file.derived, file, run: null, convert: isConv(file) };
   }
 
   function askRestoreRun(run: BackupRun): void {
-    const files = run.files.filter((f) => isSplit(f) && !f.restored).flatMap((f) => f.derived);
-    dialog = { title: S.restoreDialog.title(run.name), files, file: null, run };
+    const pending = run.files.filter((f) => isSplit(f) && !f.restored);
+    const files = pending.flatMap((f) => f.derived);
+    dialog = { title: S.restoreDialog.title(run.name), files, file: null, run, convert: pending.length > 0 && pending.every(isConv) };
   }
 
   async function confirmRestore(action: DerivedAction): Promise<void> {
@@ -312,13 +316,13 @@
                     <span class="fthumb"><Icon name="image" size={20} /></span>
                     <div class="finfo">
                       <div class="fname mono">
-                        {isSplit(f) ? S.backups.splitRunLine(f.name, f.derived.length) : f.name}
-                        {#if isSplit(f)}<span class="badge accent splitbadge">{S.backups.splitBadge}</span>{/if}
+                        {isConv(f) ? S.backups.convertedLine(f.name, f.derived[0].name) : isSplit(f) ? S.backups.splitRunLine(f.name, f.derived.length) : f.name}
+                        {#if isSplit(f)}<span class="badge accent splitbadge">{isConv(f) ? S.backups.convertedBadge : S.backups.splitBadge}</span>{/if}
                         <span class="fnote" class:warn={f.changedSinceSaved && !f.restored} class:okay={f.restored}>{fileNote(f)}</span>
                       </div>
                       <div class="fpath mono" title={f.displayPath}>{f.displayPath}</div>
                       {#if isSplit(f)}
-                        <ul class="derived" aria-label={S.backups.derivedHeading(f.derived.length)}>
+                        <ul class="derived" aria-label={isConv(f) ? S.backups.convertedHeading : S.backups.derivedHeading(f.derived.length)}>
                           {#each f.derived as d (d.name)}
                             <li class={d.state}>
                               <span class="mono">{d.name}</span>
@@ -364,6 +368,7 @@
   title={dialog?.title ?? ''}
   files={dialog?.files ?? []}
   busy={dialogBusy}
+  variant={dialog?.convert ? 'convert' : 'split'}
   onrestore={(a) => void confirmRestore(a)}
   oncancel={() => (dialog = null)}
 />

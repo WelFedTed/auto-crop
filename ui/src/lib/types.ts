@@ -385,6 +385,111 @@ export type CropImageKind = 'thumb' | 'result';
 
 export type QuadPts = [Pt, Pt, Pt, Pt];
 
+// ---- Convert (crates/engine/src/convert.rs and convert_batch.rs; the front end of ROADMAP M6.49) ----
+
+export type ConvertTarget = 'jpg' | 'png';
+export type ConvertColour = 'srgb' | 'preserve';
+export type ConvertPlacement = 'replace' | 'keep' | 'folder';
+export type QualityPreset = 'balanced' | 'small' | 'best';
+export type ConvertQuality = { kind: 'preset'; preset: QualityPreset } | { kind: 'fixed'; value: number };
+
+/** What a run does. Every key is optional on the wire; the UI always sends all of them. */
+export interface ConvertOptions {
+  target: ConvertTarget;
+  colour: ConvertColour;
+  quality: ConvertQuality;
+  stripLocation: boolean;
+  placement: ConvertPlacement;
+  /** Convert files that are already in the target format again. */
+  reencode: boolean;
+}
+
+/** The format names the engine reports. */
+export type ConvertFormat = 'jpeg' | 'png' | 'tiff' | 'webp' | 'heic' | 'avif' | 'gif' | 'bmp' | 'jxl' | 'unknown';
+
+export interface ConvertAdded {
+  added: number;
+  duplicates: number;
+  linksSkipped: number;
+  truncated: boolean;
+  ids: number[];
+}
+
+export interface ConvertFileView {
+  id: number;
+  /** Display name only, never a path. */
+  name: string;
+  format: string;
+  bytes: number;
+}
+
+export interface ConvertFormatCount {
+  format: string;
+  count: number;
+}
+
+export interface ConvertCannot {
+  id: number;
+  name: string;
+  format: string;
+  /** `HEIF_UNAVAILABLE` or `UNSUPPORTED_FORMAT`. */
+  code: string;
+}
+
+export interface ConvertPreview {
+  total: number;
+  willConvert: number;
+  sameFormat: number;
+  cannot: number;
+  byFormat: ConvertFormatCount[];
+  cannotFiles: ConvertCannot[];
+  heifAvailable: boolean;
+  heifUnavailable: number;
+  bytesToConvert: number;
+  placement: ConvertPlacement;
+  /** The chosen output folder's name (never its path); null until one is chosen. */
+  folder: string | null;
+}
+
+export type ConvertStatus = 'converted' | 'skipped' | 'failed';
+
+export interface ConvertFileResult {
+  id: number;
+  name: string;
+  status: ConvertStatus;
+  /** For a skip or a failure: `SAME_FORMAT`, `NOT_REPLACEABLE`, `HEIF_UNAVAILABLE`, `UNSUPPORTED_FORMAT`, `CANCELLED` or an `ErrorCode`. */
+  code: string | null;
+  notices: string[];
+  /** The file name the converted picture was written as. */
+  output: string | null;
+  from: string;
+  to: string | null;
+  bytesIn: number;
+  bytesOut: number;
+  width: number | null;
+  height: number | null;
+  /** The backup that holds the original (replace mode only). */
+  backupId: string | null;
+}
+
+export interface ConvertProgress {
+  done: number;
+  total: number;
+  result: ConvertFileResult;
+}
+
+export interface ConvertSummary {
+  /** Also the id of the backup run in the Backups view. */
+  runId: string;
+  converted: number;
+  skipped: number;
+  failed: number;
+  cancelled: boolean;
+  bytesIn: number;
+  bytesOut: number;
+  results: ConvertFileResult[];
+}
+
 /** The commands the shell exposes (Tauri `invoke` names, snake_case). */
 export interface Api {
   launchInfo(): Promise<LaunchInfo>;
@@ -451,6 +556,24 @@ export interface Api {
    * image is not ready. Applying is `setCurves` with the suggestion's `curves`.
    */
   suggestCurves(id: number, crop: number): Promise<CurveSuggestion | null>;
+
+  // ---- Convert: its own list of files (opaque ids and names), separate from the images opened for cropping. ----
+  /** Tells the shell the Convert screen is showing, so a window drop goes to the Convert list (`convert-added`). */
+  convertMode(on: boolean): Promise<void>;
+  convertPickFiles(): Promise<ConvertAdded>;
+  convertPickFolder(includeSubfolders: boolean): Promise<ConvertAdded>;
+  /** Opens a folder dialog; resolves with the chosen folder's NAME (the earlier choice when cancelled, else null). */
+  convertPickOutputFolder(): Promise<string | null>;
+  convertList(): Promise<ConvertFileView[]>;
+  convertRemove(ids: number[]): Promise<void>;
+  convertClear(): Promise<void>;
+  convertPreview(options: ConvertOptions): Promise<ConvertPreview>;
+  /** Resolves with the summary at the end; `convert-progress` events arrive meanwhile. */
+  convertRun(options: ConvertOptions, runName: string): Promise<ConvertSummary>;
+  /** Stops after the files in progress. */
+  convertCancel(): Promise<void>;
+  /** Opens the folder a converted file went to; `null` opens the first one of the run. */
+  convertOpenFolder(id: number | null): Promise<void>;
 }
 
 /** Events the shell emits (`@tauri-apps/api/event`). */
@@ -459,4 +582,8 @@ export interface Events {
   'items-added': OpenSummary;
   /** One item changed (analysis finished, save finished...). */
   'item-updated': ItemView;
+  /** Files were added to the Convert list by a window drop. */
+  'convert-added': ConvertAdded;
+  /** One file of a Convert run finished. */
+  'convert-progress': ConvertProgress;
 }

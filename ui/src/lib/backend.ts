@@ -12,6 +12,12 @@ import { curveQuery } from './curve.ts';
 import type {
   Api,
   BackupsView,
+  ConvertAdded,
+  ConvertFileView,
+  ConvertOptions,
+  ConvertPreview,
+  ConvertProgress,
+  ConvertSummary,
   CropImageKind,
   CurvePreviewKind,
   CurveSet,
@@ -94,6 +100,18 @@ const tauriApi: Api = {
     invoke<ItemView>('set_curves', { id, crop, curves, phase, label, gesture }),
   clearCurves: (id: number, crop: number) => invoke<ItemView>('clear_curves', { id, crop }),
   suggestCurves: (id: number, crop: number) => invoke<CurveSuggestion | null>('suggest_curves', { id, crop }),
+
+  convertMode: (on: boolean) => invoke<void>('convert_mode', { on }),
+  convertPickFiles: () => invoke<ConvertAdded>('convert_pick_files'),
+  convertPickFolder: (includeSubfolders: boolean) => invoke<ConvertAdded>('convert_pick_folder', { includeSubfolders }),
+  convertPickOutputFolder: () => invoke<string | null>('convert_pick_output_folder'),
+  convertList: () => invoke<ConvertFileView[]>('convert_list'),
+  convertRemove: (ids: number[]) => invoke<void>('convert_remove', { ids }),
+  convertClear: () => invoke<void>('convert_clear'),
+  convertPreview: (options: ConvertOptions) => invoke<ConvertPreview>('convert_preview', { options }),
+  convertRun: (options: ConvertOptions, runName: string) => invoke<ConvertSummary>('convert_run', { options, runName }),
+  convertCancel: () => invoke<void>('convert_cancel'),
+  convertOpenFolder: (id: number | null) => invoke<void>('convert_open_folder', { id }),
 };
 
 export type Unlisten = () => void;
@@ -107,6 +125,8 @@ interface Impl {
   on<K extends keyof Events>(event: K, cb: (payload: Events[K]) => void): Promise<Unlisten>;
   /** Mock only: a file dropped on the window in a plain browser. */
   dropFiles?: (files: File[]) => Promise<OpenSummary>;
+  /** Mock only: a file dropped on the window while the Convert screen is showing. */
+  convertDropFiles?: (files: File[]) => Promise<ConvertAdded>;
 }
 
 let token = '';
@@ -200,6 +220,18 @@ export const api: Api = {
   setCurves: (id, crop, curves, phase, label, gesture) => impl.api.setCurves(id, crop, curves, phase, label, gesture),
   clearCurves: (id, crop) => impl.api.clearCurves(id, crop),
   suggestCurves: (id, crop) => impl.api.suggestCurves(id, crop),
+
+  convertMode: (on) => impl.api.convertMode(on),
+  convertPickFiles: () => impl.api.convertPickFiles(),
+  convertPickFolder: (sub) => impl.api.convertPickFolder(sub),
+  convertPickOutputFolder: () => impl.api.convertPickOutputFolder(),
+  convertList: () => impl.api.convertList(),
+  convertRemove: (ids) => impl.api.convertRemove(ids),
+  convertClear: () => impl.api.convertClear(),
+  convertPreview: (options) => impl.api.convertPreview(options),
+  convertRun: (options, runName) => impl.api.convertRun(options, runName),
+  convertCancel: () => impl.api.convertCancel(),
+  convertOpenFolder: (id) => impl.api.convertOpenFolder(id),
 };
 
 /** URL of an image of an item. `gen` is part of the URL so a committed change always reloads. */
@@ -229,6 +261,19 @@ export function onItemsAdded(cb: (s: OpenSummary) => void): Promise<Unlisten> {
 
 export function onItemUpdated(cb: (v: ItemView) => void): Promise<Unlisten> {
   return impl.on('item-updated', cb);
+}
+
+export function onConvertAdded(cb: (s: ConvertAdded) => void): Promise<Unlisten> {
+  return impl.on('convert-added', cb);
+}
+
+export function onConvertProgress(cb: (p: ConvertProgress) => void): Promise<Unlisten> {
+  return impl.on('convert-progress', cb);
+}
+
+/** In a plain browser, files dropped on the Convert screen go to the mock's Convert list. */
+export function dropFilesIntoMockConvert(files: File[]): Promise<ConvertAdded> | null {
+  return isMock && impl.convertDropFiles ? impl.convertDropFiles(files) : null;
 }
 
 /** In a plain browser, files dropped on the window go to the mock. Inside the shell the Rust side handles drops. */

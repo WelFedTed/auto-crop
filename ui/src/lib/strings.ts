@@ -246,12 +246,93 @@ export const NOTICES: Record<string, string> = {
   'sync.root':
     'This folder is kept in sync by a cloud service, which can upload a half-written file or undo the swap. Save as copy is safer here.',
   'convert.same_format': 'This file is already in the target format, so there was nothing to convert.',
+  // Convert (crates/engine/src/convert.rs, crates/codecs): what happened to the picture itself. The five codes that
+  // stop a replacement (tiff.multi_page ... cmyk.naive_conversion) read differently when the file was NOT converted:
+  // CONVERT_SKIPPED_NOTICES below. `tiff.multi_page` above is the Save text; Convert uses `convertNoticeText`.
+  'alpha.flattened': 'Transparency was filled with white.',
+  'alpha.dropped': 'Transparency was removed.',
+  'depth.reduced_to_8': 'Extra colour depth was reduced to the usual 8 bits per colour.',
+  'colour.converted_to_srgb': 'Colours were converted to sRGB.',
+  'colour.profile_unusable': 'The colour profile in this file could not be used, so its colours were kept as they are.',
+  'colour.nclx_not_srgb': 'This picture uses colours outside sRGB, so it may look a little different in some programs.',
+  'hdr.not_tonemapped': 'This is an HDR picture. It was converted as it is, so it may look flatter than on your phone.',
+  'heic.multi_image': 'Only the main image of this file was converted.',
+  'heic.sequence': 'This file holds a sequence of images. Only the first one was converted.',
+  'anim.first_frame_only': 'This picture is animated. Only its first frame was converted.',
+  'cmyk.naive_conversion': 'This is a CMYK picture. Its colours were converted without its colour profile, so they may look different.',
+  'livephoto.video_untouched': 'The Live Photo video next to it was not touched.',
+  'heif.unavailable': 'This build of Auto Crop has no HEIC decoder. The HEIC package of Auto Crop has one.',
+  'icc.invalid': 'The colour profile in this file was damaged, so it was ignored.',
+};
+
+/** The Convert wording for the sources a replacement would damage, when the file was left as it is. */
+export const CONVERT_SKIPPED_NOTICES: Record<string, string> = {
+  'tiff.multi_page': 'This TIFF has several pages. Replacing it would lose all but the first.',
+  'anim.first_frame_only': 'This picture is animated. Replacing it would keep only the first frame.',
+  'heic.multi_image': 'This file holds several images. Replacing it would keep only the main one.',
+  'heic.sequence': 'This file holds a sequence of images. Replacing it would keep only the first.',
+  'cmyk.naive_conversion': 'This is a CMYK picture. Its colours cannot be converted accurately, so it was not replaced.',
+};
+
+/** Convert wording that differs from the Save wording of the same code. */
+const CONVERT_NOTICES: Record<string, string> = {
+  'tiff.multi_page': 'This TIFF has several pages. Only the first page was converted.',
+  'sync.root': 'This folder syncs to the cloud. A sync program can upload a half-written file or undo the swap, so look at the result.',
 };
 
 const GENERIC_NOTICE = 'Auto Crop added a note to this result.';
 
 export function noticeText(code: string): string {
   return NOTICES[code] ?? GENERIC_NOTICE;
+}
+
+/** A notice on a Convert result. `skipped` picks the wording for a file that was left as it is. Error codes (a note such as SOURCE_CHANGED) read as their error message. */
+export function convertNoticeText(code: string, status: 'converted' | 'skipped' | 'failed' = 'converted'): string {
+  if (status === 'skipped' && code in CONVERT_SKIPPED_NOTICES) return CONVERT_SKIPPED_NOTICES[code];
+  if (code in CONVERT_NOTICES) return CONVERT_NOTICES[code];
+  if (code in ERRORS) return ERRORS[code as ErrorCode];
+  return noticeText(code);
+}
+
+/** Convert-specific sentences for the skip codes (and the error codes whose general text talks about Save as copy). */
+const CONVERT_CODES: Record<string, string> = {
+  SAME_FORMAT: 'Already in the chosen format, so it was left alone.',
+  NOT_REPLACEABLE: 'Left as it is. Choose “Keep originals, save beside them” to convert it anyway.',
+  HEIF_UNAVAILABLE: 'This build of Auto Crop has no HEIC decoder, so this file was not converted. The HEIC package of Auto Crop has one.',
+  UNSUPPORTED_FORMAT: "Auto Crop can't convert this kind of file.",
+  CANCELLED: 'Stopped before this file was converted. It is unchanged.',
+  READ_ONLY: 'This file or its folder is read-only. Choose “Save to a folder” to convert it anyway.',
+  UNSUPPORTED_OUTPUT: "This picture can't be written in the chosen format. It is unchanged.",
+  HELD_FOR_REVIEW: 'This file was held back, so nothing was written. It is unchanged.',
+};
+
+/** Why a file was skipped or failed in a Convert run or preview, from the code the engine sent. */
+export function convertCodeText(code: string | null | undefined): string {
+  if (!code) return ERRORS.INTERNAL;
+  return CONVERT_CODES[code] ?? (code in ERRORS ? ERRORS[code as ErrorCode] : ERRORS.INTERNAL);
+}
+
+/** The same, for the preview's list of files that cannot be converted: shorter, because the HEIC note above it says the rest. */
+export function convertCannotText(code: string): string {
+  return code === 'HEIF_UNAVAILABLE' ? 'Needs the HEIC decoder, which this build does not have.' : convertCodeText(code);
+}
+
+const FORMAT_NAMES: Record<string, string> = {
+  jpeg: 'JPG',
+  png: 'PNG',
+  tiff: 'TIFF',
+  webp: 'WebP',
+  heic: 'HEIC',
+  avif: 'AVIF',
+  gif: 'GIF',
+  bmp: 'BMP',
+  jxl: 'JPEG XL',
+  unknown: 'Unknown',
+};
+
+/** "heic" -> "HEIC", "jpeg" -> "JPG": a format name as the person knows it. */
+export function formatName(format: string): string {
+  return FORMAT_NAMES[format] ?? format.toUpperCase();
 }
 
 /** The short form shown on a badge: why a source is open-only. */
@@ -896,6 +977,13 @@ export const S = {
     result: (restored: string, kept: number, removed: number) =>
       `Restored ${restored}. ${kept} ${kept === 1 ? 'file' : 'files'} kept${removed > 0 ? `, ${removed} moved to Backups` : ''}.`,
     occupied: (name: string) => `Another file is at the original place, so the scan came back as ${name}.`,
+    // The same sheet for a converted file (Convert results and Backups)
+    legendConvert: 'What happens to the converted file',
+    bodyConvert: 'This was converted. What should happen to the converted file?',
+    keepConvert: 'Keep the converted file',
+    keepConvertNote: 'The converted file stays where it is. Only the original comes back.',
+    removeConvert: 'Remove the converted file',
+    removeConvertNote: 'Moved to Backups, not deleted. You can bring it back from there.',
   },
   backups: {
     title: 'Backups',
@@ -952,6 +1040,142 @@ export const S = {
     } as Record<string, string>,
     restoreSplit: 'Restore…',
     splitBadge: 'Split',
+    // Conversions (Convert screen): one original, one converted file
+    convertedBadge: 'Converted',
+    convertedLine: (name: string, to: string) => `${name} to ${to}`,
+    convertedHeading: 'The converted file',
+  },
+  // The Convert screen: turn pictures from one format into another (HEIC to JPG above all).
+  convert: {
+    title: 'Convert formats',
+    intro: 'Change a whole batch of pictures from one format to another, for example HEIC photos from a phone into JPG.',
+    homeTitle: 'Convert formats',
+    homeBody: 'Turn HEIC photos from a phone into JPG, or PNG into JPG, a whole folder at once.',
+    homeButton: 'Convert files',
+    // files
+    filesHeading: 'Files',
+    listLabel: 'Files to convert',
+    dropTitle: 'Drop pictures or a folder here',
+    dropSub: 'or choose them below',
+    dropFormats: 'HEIC · JPG · PNG · WebP · TIFF · AVIF · GIF · BMP',
+    listKeys: 'The list is one stop: Up and Down arrows move between files, Enter removes the file.',
+    dropMore: 'You can also drop more files or folders anywhere in this window.',
+    chooseFiles: 'Choose files',
+    chooseFolder: 'Choose a folder',
+    subfolders: 'Include subfolders',
+    fileCount: (n: number) => `${n} ${n === 1 ? 'file' : 'files'}`,
+    clearAll: 'Clear all',
+    remove: (name: string) => `Remove ${name} from the list`,
+    added: (added: number, duplicates: number, truncated: boolean) => {
+      const parts = [added === 0 ? 'No new files were added.' : `Added ${added} ${added === 1 ? 'file' : 'files'}.`];
+      if (duplicates > 0) parts.push(`${duplicates} ${duplicates === 1 ? 'was' : 'were'} already in the list.`);
+      if (truncated) parts.push('The list is full, so some files were not added.');
+      return parts.join(' ');
+    },
+    removed: (n: number) => `Removed ${n} ${n === 1 ? 'file' : 'files'} from the list. Nothing on disk was changed.`,
+    cleared: 'The list is empty. Nothing on disk was changed.',
+    // options
+    optionsHeading: 'Options',
+    targetLabel: 'Convert to',
+    targetJpg: 'JPG',
+    targetPng: 'PNG',
+    qualityLabel: 'JPG quality',
+    qualitySmall: 'Small',
+    qualityBalanced: 'Balanced',
+    qualityBest: 'Best',
+    qualityCustom: 'Custom',
+    qualitySmallNote: 'Smaller files, a little less detail.',
+    qualityBalancedNote: 'A good choice for most pictures.',
+    qualityBestNote: 'Larger files, the most detail.',
+    qualityCustomNote: 'Pick a number from 1 to 100. Higher keeps more detail.',
+    qualityValue: 'Quality, 1 to 100',
+    qualityNumber: 'Quality number',
+    pngNoQuality: 'PNG is lossless, so there is no quality to choose.',
+    colourLabel: 'Colours',
+    colourSrgb: 'sRGB (recommended)',
+    colourSrgbNote: 'Looks right in every program and on every screen.',
+    colourPreserve: 'Keep original colours (wide gamut)',
+    colourPreserveNote: 'Keeps each picture’s colour profile. Some programs show these colours dulled.',
+    whereLabel: 'What happens to the originals',
+    whereReplace: (days: number | null) =>
+      days === null ? 'Replace originals (backed up until you delete them, restorable)' : `Replace originals (backed up for ${days} days, restorable)`,
+    whereKeep: 'Keep originals, save beside them',
+    whereFolder: 'Save to a folder',
+    chooseOutput: 'Choose folder',
+    changeOutput: 'Change folder',
+    outputFolder: (name: string) => `Folder: ${name}`,
+    outputFolderNone: 'No folder chosen yet.',
+    stripLocation: 'Strip location (GPS)',
+    stripLocationNote: 'Removes where each picture was taken from the converted file.',
+    reencode: 'Convert files already in this format again',
+    reencodeNote: (target: string) => `Off: a file that is already a ${target} is left alone.`,
+    // preview
+    previewHeading: 'What will happen',
+    previewChecking: 'Checking the files…',
+    previewFailed: "Couldn't check the files. Try changing an option, or remove and add the files again.",
+    willConvert: (n: number) => `${n} will be converted`,
+    sameFormat: (n: number, target: string) => `${n} already ${target}, left alone`,
+    cannot: (n: number) => `${n} cannot be converted`,
+    sizeToConvert: (size: string) => `${size} to convert`,
+    byFormat: 'In the list',
+    byFormatItem: (format: string, n: number) => `${n} ${format}`,
+    cannotHeading: 'Cannot be converted',
+    cannotMore: (n: number) => `and ${n} more`,
+    heifMissing: (n: number) =>
+      `This build of Auto Crop has no HEIC decoder, so ${n} HEIC or AVIF ${n === 1 ? 'file' : 'files'} cannot be converted. The HEIC package of Auto Crop has the decoder.`,
+    originalsReplace: (days: number | null) =>
+      days === null
+        ? 'Each original is moved to Backups first and kept until you delete it. You can restore it any time.'
+        : `Each original is moved to Backups first and kept ${days} days. You can restore it any time.`,
+    originalsKeep: 'Originals are not touched. Each converted file is saved beside its original.',
+    originalsFolder: (name: string | null) =>
+      name ? `Originals are not touched. Converted files are saved in “${name}”.` : 'Originals are not touched. Choose a folder for the converted files.',
+    // the button and why it is off
+    convertN: (n: number) => `Convert ${n} ${n === 1 ? 'file' : 'files'}`,
+    convertNone: 'Convert files',
+    whyNoFiles: 'Add files to convert them.',
+    whyNothing: 'Nothing to convert: every file is already in the chosen format or cannot be converted.',
+    whyNeedFolder: 'Choose a folder for the converted files first.',
+    whyChecking: 'Checking the files…',
+    // run
+    running: 'Converting',
+    runningOf: (done: number, total: number) => `${done} of ${total} files`,
+    progressLabel: 'Conversion progress',
+    progressAnnounce: (done: number, total: number) => `${done} of ${total} files done.`,
+    cancel: 'Cancel',
+    cancelling: 'Stopping after the files in progress…',
+    // results
+    resultsLabel: 'Results',
+    doneTitle: 'Done',
+    stoppedTitle: 'Stopped',
+    counts: (converted: number, skipped: number, failed: number) => `${converted} converted, ${skipped} skipped, ${failed} failed`,
+    sizeSummary: (from: string, to: string) => `${from} to ${to}`,
+    stoppedNote: 'The files not yet converted were not touched.',
+    statusConverted: 'Converted',
+    statusSkipped: 'Skipped',
+    statusFailed: 'Failed',
+    sizeChange: (from: string, to: string) => `${from} to ${to}`,
+    dimensions: (w: number, h: number) => `${w} × ${h}`,
+    outputName: (name: string) => `Saved as ${name}`,
+    openFolder: 'Open folder',
+    openFolderFor: (name: string) => `Open the folder of ${name}`,
+    openFailed: "Couldn't open the folder.",
+    convertMore: 'Convert more',
+    openBackups: 'Open Backups',
+    originalsInBackups: 'Replaced originals are in Backups. Restore one there, or here.',
+    restoreOriginal: 'Restore original',
+    restoreOriginalOf: (name: string) => `Restore the original of ${name}`,
+    restoredBadge: 'Original restored',
+    restoredOne: (name: string) => `Restored ${name}.`,
+    restoredAsCopy: (name: string) => `Restored as a copy: ${name}. The edited file is untouched.`,
+    changedSince: 'The file on disk was edited after it was converted.',
+    restoreAsCopy: 'Restore as copy',
+    replaceAnyway: 'Replace anyway',
+    restoreFailed: (name: string, reason: string) => `${name}: ${reason}`,
+    runFailed: 'The conversion stopped unexpectedly. Files that were already converted are listed; the others are unchanged.',
+    done: (converted: number, skipped: number, failed: number) => `Finished. ${converted} converted, ${skipped} skipped, ${failed} failed.`,
+    chooseFolderFailed: "Couldn't choose that folder.",
+    busyNote: 'A conversion is running. Options come back when it ends.',
   },
   settings: {
     title: 'Settings',

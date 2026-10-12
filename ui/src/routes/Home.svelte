@@ -56,6 +56,16 @@
           <input type="checkbox" checked={store.includeSubfolders} onchange={(e) => store.setIncludeSubfolders(e.currentTarget.checked)} />
           {S.home.subfolders}
         </label>
+
+        <!-- A second way in: no cropping, just change the format of many files (HEIC to JPG above all). -->
+        <section class="convert-card" aria-labelledby="convert-h">
+          <span class="convert-ico"><Icon name="convert" size={24} /></span>
+          <div class="convert-text">
+            <h2 id="convert-h">{S.convert.homeTitle}</h2>
+            <p>{S.convert.homeBody}</p>
+          </div>
+          <a class="btn btn-lg btn-primary" href={href('/convert')}>{S.convert.homeButton}</a>
+        </section>
       </div>
 
       <div class="right">
@@ -222,6 +232,41 @@
     font-size: 14px;
   }
 
+  .convert-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px 18px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--accent);
+    border-radius: 12px;
+  }
+
+  .convert-ico {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    background: var(--accent-tint);
+    color: var(--accent-text);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .convert-text {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .convert-text p {
+    margin: 2px 0 0;
+    font-size: 13px;
+    color: var(--text-2);
+    line-height: 1.4;
+  }
+
   .pad {
     padding: 18px 20px;
     display: flex;
@@ -334,6 +379,16 @@
     padding: 14px 40px 18px;
     color: var(--text-3);
     font-size: 13px;
+  }
+
+  @media (max-width: 560px) {
+    .convert-card {
+      flex-wrap: wrap;
+    }
+
+    .convert-card .btn {
+      width: 100%;
+    }
   }
 
   @media (max-width: 900px) {

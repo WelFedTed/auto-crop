@@ -8,6 +8,7 @@ export type Route =
   | { name: 'grid' }
   | { name: 'item'; id: number }
   | { name: 'backups' }
+  | { name: 'convert' }
   | { name: 'settings' };
 
 export function parseRoute(hash: string): Route {
@@ -18,6 +19,8 @@ export function parseRoute(hash: string): Route {
       return { name: 'grid' };
     case 'backups':
       return { name: 'backups' };
+    case 'convert':
+      return { name: 'convert' };
     case 'settings':
       return { name: 'settings' };
     case 'item': {

@@ -2,12 +2,14 @@
 <!-- SPDX-FileCopyrightText: 2026 Auto Crop contributors -->
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { dropFilesIntoMock, isMock } from './lib/backend.ts';
+  import { dropFilesIntoMock, dropFilesIntoMockConvert, isMock } from './lib/backend.ts';
+  import { convert } from './lib/convert.svelte.ts';
   import Toasts from './lib/components/Toasts.svelte';
   import { router } from './lib/router.svelte.ts';
   import { store } from './lib/store.svelte.ts';
   import { S } from './lib/strings.ts';
   import Backups from './routes/Backups.svelte';
+  import Convert from './routes/Convert.svelte';
   import Editor from './routes/Editor.svelte';
   import Grid from './routes/Grid.svelte';
   import Home from './routes/Home.svelte';
@@ -33,6 +35,12 @@
       e.preventDefault();
       const files = Array.from(e.dataTransfer?.files ?? []);
       if (files.length === 0 || !isMock) return;
+      // On the Convert screen a drop goes to the Convert list (in the shell, Rust knows through `convert_mode`).
+      if (router.route.name === 'convert') {
+        const c = dropFilesIntoMockConvert(files);
+        if (c) void c.then((a) => convert.handleAdded(a));
+        return;
+      }
       const p = dropFilesIntoMock(files);
       if (p) void p.then((s) => store.handleAdded(s));
     };
@@ -91,6 +99,8 @@
       {/key}
     {:else if route.name === 'backups'}
       <Backups />
+    {:else if route.name === 'convert'}
+      <Convert />
     {:else if route.name === 'settings'}
       <Settings />
     {/if}

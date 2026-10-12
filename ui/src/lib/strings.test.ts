@@ -4,15 +4,21 @@
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { test } from 'node:test';
+import { DEFAULT_OPTIONS } from './convert.ts';
 import { defaultSettings, patchedSettings } from './settings-defaults.ts';
 import {
+  CONVERT_SKIPPED_NOTICES,
   ERRORS,
   FALLBACK_HOLD,
   HOLD,
   NOTICES,
   S,
+  convertCannotText,
+  convertCodeText,
+  convertNoticeText,
   errorMessage,
   formatList,
+  formatName,
   holdAction,
   holdCause,
   holdTitle,
@@ -239,4 +245,160 @@ test('the curved copy has no empty line', () => {
     } else if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) walk(v, `${path}.${k}`);
   };
   walk(S.curved, 'S.curved');
+});
+
+// ------------------------------------------------------------------------------------------ Convert
+
+const rustSource = (file: string) => readFileSync(new URL(`../../../${file}`, import.meta.url), 'utf8');
+
+test('every notice code a conversion can carry has its own line (read from crates/codecs and crates/engine)', () => {
+  const families = 'alpha|depth|colour|hdr|heic|heif|tiff|anim|cmyk|livephoto|sync|convert|icc';
+  const found = new Set<string>();
+  for (const f of [
+    'crates/codecs/src/decode.rs',
+    'crates/codecs/src/heif/mod.rs',
+    'crates/engine/src/convert.rs',
+    'crates/engine/src/colour.rs',
+    'crates/engine/src/fsstate.rs',
+  ]) {
+    for (const m of rustSource(f).matchAll(new RegExp(`"((?:${families})\\.[a-z_0-9]+)"`, 'g'))) found.add(m[1]);
+  }
+  // the ones the task names, so a failed scan cannot pass silently
+  for (const known of ['alpha.flattened', 'depth.reduced_to_8', 'colour.converted_to_srgb', 'colour.profile_unusable', 'colour.nclx_not_srgb', 'hdr.not_tonemapped', 'heic.multi_image', 'heic.sequence', 'tiff.multi_page', 'anim.first_frame_only', 'cmyk.naive_conversion', 'livephoto.video_untouched', 'sync.root', 'convert.same_format', 'heif.unavailable']) {
+    assert.ok(found.has(known), `the scan of the Rust sources missed ${known}: ${[...found].join(', ')}`);
+  }
+  for (const code of found) {
+    assert.ok(code in NOTICES, `no copy for the notice ${code}`);
+    assert.notEqual(convertNoticeText(code), noticeText('some.future.code'), `${code} falls back to the generic line`);
+    assert.ok(convertNoticeText(code, 'skipped').length > 20, code);
+    assert.ok(!/\b[a-z]+\.[a-z_]+\b/.test(convertNoticeText(code)), `${code} shows a raw code`);
+  }
+});
+
+test('the five sources a replacement would damage read differently when the file was left as it is', () => {
+  const src = rustSource('crates/engine/src/convert.rs');
+  const start = src.indexOf('const REPLACE_BLOCKERS');
+  const blockers = [...src.slice(start, src.indexOf('];', start)).matchAll(/"([a-z_]+\.[a-z_]+)"/g)].map((m) => m[1]);
+  assert.equal(blockers.length, 5);
+  for (const code of blockers) {
+    assert.ok(CONVERT_SKIPPED_NOTICES[code], `no "left as it is" line for ${code}`);
+    assert.notEqual(CONVERT_SKIPPED_NOTICES[code], NOTICES[code], code);
+    assert.equal(convertNoticeText(code, 'skipped'), CONVERT_SKIPPED_NOTICES[code]);
+    assert.ok(convertNoticeText(code, 'converted').length > 20, code);
+    // Convert never tells the person to "Save as copy", a button of the other flow
+    assert.ok(!/Save as copy/.test(convertNoticeText(code, 'converted')), code);
+  }
+  assert.ok(!/Save as copy/.test(convertNoticeText('sync.root')));
+});
+
+test('a notice that is really an error code (a note on a converted file) reads as its error message', () => {
+  assert.equal(convertNoticeText('SOURCE_CHANGED'), ERRORS.SOURCE_CHANGED);
+  assert.equal(convertNoticeText('SAVED_SOURCE_IN_USE'), ERRORS.SAVED_SOURCE_IN_USE);
+});
+
+test('every skip code of Skip::code() has Convert copy, and so does every failure code (read from crates/engine)', () => {
+  const src = rustSource('crates/engine/src/convert.rs');
+  const skips = [...src.matchAll(/Skip::\w+(?:\(_\))? => "([A-Z_]+)"/g)].map((m) => m[1]);
+  assert.deepEqual([...skips].sort(), ['HEIF_UNAVAILABLE', 'NOT_REPLACEABLE', 'SAME_FORMAT', 'UNSUPPORTED_FORMAT']);
+  for (const code of [...skips, 'CANCELLED']) {
+    assert.notEqual(convertCodeText(code), ERRORS.INTERNAL, code);
+    assert.ok(convertCodeText(code).length > 20, code);
+  }
+  assert.match(convertCodeText('HEIF_UNAVAILABLE'), /HEIC decoder/);
+  assert.match(convertCodeText('HEIF_UNAVAILABLE'), /HEIC package/);
+  assert.match(convertCodeText('NOT_REPLACEABLE'), /Keep originals/);
+  assert.match(convertCannotText('HEIF_UNAVAILABLE'), /HEIC decoder/);
+  assert.equal(convertCannotText('UNSUPPORTED_FORMAT'), convertCodeText('UNSUPPORTED_FORMAT'));
+  // every engine error code has a line, and none sends the person to a button Convert does not have
+  for (const code of rustVariants('crates/core/src/error.rs', 'ErrKind').map(screaming)) {
+    assert.ok(convertCodeText(code).length > 10, code);
+    assert.ok(!/Save as copy/.test(convertCodeText(code)), `${code} sends the person to a button Convert does not have`);
+  }
+  assert.equal(convertCodeText(null), ERRORS.INTERNAL);
+  assert.equal(convertCodeText('SOMETHING_NEW'), ERRORS.INTERNAL);
+});
+
+test('format names are the ones the person knows, and every engine format has one', () => {
+  assert.equal(formatName('jpeg'), 'JPG');
+  assert.equal(formatName('heic'), 'HEIC');
+  assert.equal(formatName('webp'), 'WebP');
+  const src = rustSource('crates/engine/src/convert_batch.rs');
+  const start = src.indexOf('pub fn format_name');
+  const names = [...src.slice(start, src.indexOf('\n}', start)).matchAll(/=> "([a-z]+)"/g)].map((m) => m[1]);
+  assert.ok(names.length >= 10);
+  for (const n of names) assert.ok(n in { jpeg: 1, png: 1, tiff: 1, webp: 1, heic: 1, avif: 1, gif: 1, bmp: 1, jxl: 1, unknown: 1 }, `${n} is not in the ConvertFormat type`);
+});
+
+test('the Convert copy has no empty line and says what the task asks', () => {
+  const sample: Record<string, unknown[]> = {
+    added: [3, 1, true],
+    originalsFolder: ['Converted photos'],
+    originalsReplace: [30],
+    whereReplace: [30],
+    outputFolder: ['Converted photos'],
+    remove: ['IMG.heic'],
+    restoreOriginalOf: ['IMG.heic'],
+    openFolderFor: ['IMG.heic'],
+    restoreFailed: ['IMG.heic', 'It failed.'],
+    sameFormat: [2, 'JPG'],
+    byFormatItem: ['HEIC', 4],
+    sizeChange: ['2 MB', '1 MB'],
+    sizeSummary: ['2 MB', '1 MB'],
+    dimensions: [4032, 3024],
+    outputName: ['IMG.jpg'],
+    restoredOne: ['IMG.heic'],
+    restoredAsCopy: ['IMG.heic'],
+    sizeToConvert: ['2 MB'],
+    reencodeNote: ['JPG'],
+    counts: [12, 1, 0],
+    done: [12, 1, 0],
+    runningOf: [3, 12],
+    progressAnnounce: [3, 12],
+  };
+  const walk = (o: unknown, path: string): void => {
+    if (typeof o === 'string') assert.ok(o.trim().length > 0, path);
+    else if (typeof o === 'function') {
+      const key = path.slice(path.lastIndexOf('.') + 1);
+      const out = (o as (...a: unknown[]) => unknown)(...(sample[key] ?? [3]));
+      assert.ok(typeof out === 'string' && out.trim().length > 0, `${path}()`);
+    } else if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) walk(v, `${path}.${k}`);
+  };
+  walk(S.convert, 'S.convert');
+  assert.equal(S.convert.counts(12, 1, 0), '12 converted, 1 skipped, 0 failed');
+  assert.equal(S.convert.willConvert(12), '12 will be converted');
+  assert.equal(S.convert.sameFormat(3, 'JPG'), '3 already JPG, left alone');
+  assert.equal(S.convert.cannot(2), '2 cannot be converted');
+  assert.equal(S.convert.convertN(1), 'Convert 1 file');
+  assert.equal(S.convert.convertN(12), 'Convert 12 files');
+  assert.match(S.convert.whereReplace(30), /backed up for 30 days, restorable/);
+  assert.match(S.convert.whereReplace(null), /until you delete them/);
+  assert.equal(S.convert.colourSrgb, 'sRGB (recommended)');
+  assert.equal(S.convert.colourPreserve, 'Keep original colours (wide gamut)');
+  assert.equal(S.convert.whereKeep, 'Keep originals, save beside them');
+  assert.match(S.convert.originalsReplace(30), /moved to Backups first/);
+  assert.match(S.convert.originalsReplace(30), /30 days/);
+  assert.match(S.convert.heifMissing(2), /no HEIC decoder/);
+  assert.match(S.convert.heifMissing(2), /HEIC package/);
+  assert.match(convertNoticeText('alpha.flattened'), /filled with white/);
+  assert.match(convertNoticeText('colour.converted_to_srgb'), /sRGB/);
+  assert.equal(convertNoticeText('heic.multi_image'), 'Only the main image of this file was converted.');
+  assert.match(convertNoticeText('livephoto.video_untouched'), /Live Photo video/);
+  assert.match(convertNoticeText('sync.root'), /syncs to the cloud/);
+});
+
+test('the Convert commands, events and option keys match the Rust side (read from crates/shell and crates/engine)', () => {
+  const app = rustSource('crates/shell/src/app.rs');
+  const backend = readFileSync(new URL('./backend.ts', import.meta.url), 'utf8');
+  const commands = [...backend.matchAll(/invoke<[^>]+>\('(convert_[a-z_]+)'/g)].map((m) => m[1]);
+  assert.equal(commands.length, 11);
+  for (const c of commands) assert.ok(new RegExp(`\\b${c}\\b`).test(app), `the shell has no ${c}`);
+  for (const ev of ['convert-added', 'convert-progress']) {
+    assert.ok(app.includes(`"${ev}"`), `the shell never emits ${ev}`);
+    assert.ok(backend.includes(`impl.on('${ev}'`), `backend.ts never listens to ${ev}`);
+  }
+  // ConvertOptions: the TypeScript keys are the fields of the engine struct
+  const src = rustSource('crates/engine/src/convert.rs');
+  const start = src.indexOf('pub struct ConvertOptions {');
+  const fields = [...src.slice(start, src.indexOf('\n}', start)).matchAll(/^ {4}pub ([a-z_]+):/gm)].map((m) => camel(m[1]));
+  assert.deepEqual(Object.keys(DEFAULT_OPTIONS).sort(), fields.sort());
 });

@@ -41,6 +41,7 @@ import {
 import { cornersOf, curveQuery, validateCurves } from './curve.ts';
 import { curvedDetectedQuad } from './curved-model.ts';
 import { gestureKey, pushEntry } from './history.ts';
+import { createConvertMock } from './mock-convert.ts';
 import { mockSuggestion } from './mock-suggest.ts';
 import type { BedSpec, SceneSpec } from './mock-scene.ts';
 import { cloneEdit, type Quad } from './quad.ts';
@@ -156,6 +157,8 @@ const existingNames = new Set<string>(['scan_two_01.jpg']);
 const listeners: { [K in keyof Events]: Set<(p: Events[K]) => void> } = {
   'items-added': new Set(),
   'item-updated': new Set(),
+  'convert-added': new Set(),
+  'convert-progress': new Set(),
 };
 
 function emit<K extends keyof Events>(event: K, payload: Events[K]): void {
@@ -677,9 +680,18 @@ async function redetectOne(m: MockItem, patch: SplitPatch): Promise<ItemView> {
   );
 }
 
+// Convert: its own file list and run (mock-convert.ts); a converted-and-replaced original shows up in Backups.
+const convertMock = createConvertMock({
+  emitAdded: (a) => emit('convert-added', a),
+  emitProgress: (p) => emit('convert-progress', p),
+  addBackupRun: (run) => backups.unshift(run),
+  expiresAt: (createdMs) => expiry(createdMs),
+});
+
 const firstCrop = (s: ScanState): ModelCrop | undefined => included(s)[0] ?? s.crops[0];
 
 const api: Api = {
+  ...convertMock.api,
   async launchInfo(): Promise<LaunchInfo> {
     return {
       token: 'mock',
@@ -1211,7 +1223,10 @@ if (typeof window !== 'undefined') {
     failNextSave: (code: ErrorCode) => {
       forcedFailure = code;
     },
+    /** Adds the sample list to the Convert screen, as a window drop would. */
+    convertSamples: () => convertMock.samples(true),
   };
+  if (new URLSearchParams(location.search).has('convertsamples')) convertMock.samples(false);
 }
 
 // ---------------------------------------------------------------------------------------------- export
@@ -1227,6 +1242,7 @@ export const mockImpl: BackendImpl = {
     };
   },
   dropFiles: addFiles,
+  convertDropFiles: convertMock.dropFiles,
 };
 
 export const mockStats = () => ({ saveCount, items: items.size });

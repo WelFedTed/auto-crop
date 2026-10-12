@@ -14,6 +14,7 @@
     title,
     files,
     busy = false,
+    variant = 'split',
     onrestore,
     oncancel,
   }: {
@@ -22,6 +23,8 @@
     /** Every file made from the scan(s) being restored. */
     files: DerivedFile[];
     busy?: boolean;
+    /** `convert`: the files were made by converting the original (Convert results and Backups). */
+    variant?: 'split' | 'convert';
     onrestore: (action: DerivedAction) => void;
     oncancel: () => void;
   } = $props();
@@ -40,6 +43,8 @@
     } else if (!open && dialog.open) dialog.close();
   });
 
+  const conv = $derived(variant === 'convert');
+
   const stateNote = (f: DerivedFile) => S.backups.derivedState[f.state] ?? '';
 </script>
 
@@ -49,7 +54,7 @@
       <span class="ico"><Icon name="backups" size={22} /></span>
       <h2 id="rd-title">{title}</h2>
     </div>
-    <p>{S.restoreDialog.body(files.length)}</p>
+    <p>{conv ? S.restoreDialog.bodyConvert : S.restoreDialog.body(files.length)}</p>
     <ul class="files" aria-label={S.backups.derivedHeading(files.length)}>
       {#each files as f (f.name)}
         <li class={f.state}>
@@ -59,14 +64,14 @@
       {/each}
     </ul>
     <fieldset>
-      <legend class="sr-only">{S.restoreDialog.legend}</legend>
+      <legend class="sr-only">{conv ? S.restoreDialog.legendConvert : S.restoreDialog.legend}</legend>
       <label class="opt" class:on={action === 'keep'}>
         <input type="radio" name="derived" value="keep" checked={action === 'keep'} onchange={() => (action = 'keep')} />
-        <span><b>{S.restoreDialog.keep}</b><span class="d">{S.restoreDialog.keepNote}</span></span>
+        <span><b>{conv ? S.restoreDialog.keepConvert : S.restoreDialog.keep}</b><span class="d">{conv ? S.restoreDialog.keepConvertNote : S.restoreDialog.keepNote}</span></span>
       </label>
       <label class="opt" class:on={action === 'remove'}>
         <input type="radio" name="derived" value="remove" checked={action === 'remove'} onchange={() => (action = 'remove')} />
-        <span><b>{S.restoreDialog.remove}</b><span class="d">{S.restoreDialog.removeNote}</span></span>
+        <span><b>{conv ? S.restoreDialog.removeConvert : S.restoreDialog.remove}</b><span class="d">{conv ? S.restoreDialog.removeConvertNote : S.restoreDialog.removeNote}</span></span>
       </label>
     </fieldset>
     {#if changed.length > 0}
