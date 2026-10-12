@@ -89,6 +89,8 @@ struct Report {
     decoders: Vec<&'static str>,
     encoders: Vec<&'static str>,
     heif: Heif,
+    /// `auto-crop convert` can convert HEIC and HEIF files in this build (libheif and the HEVC decoder are there).
+    heic_conversion: bool,
     sandbox: &'static str,
     network: &'static str,
 }
@@ -135,6 +137,7 @@ fn gather(env: &Env) -> Report {
         (0, 0, 0)
     };
     let settings = env.paths.settings_file();
+    let heif = heif_info();
     Report {
         schema: "auto-crop/doctor",
         v: 1,
@@ -163,7 +166,8 @@ fn gather(env: &Env) -> Report {
         settings_file: settings.to_string_lossy().into_owned(),
         decoders: auto_crop_codecs::supported_input_formats().to_vec(),
         encoders: vec!["jpeg", "png"],
-        heif: heif_info(),
+        heic_conversion: heif.feature && heif.hevc == Some(true),
+        heif,
         sandbox: "none",
         network: "none",
     }
@@ -270,6 +274,15 @@ pub fn run(env: &Env) -> u8 {
             "heif:      not in this build (HEIC, HEIF and AVIF do not open; the separate package has them)"
         );
     }
+    let _ = writeln!(
+        out,
+        "convert:   to jpg and png; HEIC and HEIF to JPG {}",
+        if r.heic_conversion {
+            "available"
+        } else {
+            "NOT available in this build (the HEIC package has it)"
+        }
+    );
     let _ = writeln!(out, "webview:   not needed (the CLI has none)");
     let _ = writeln!(
         out,

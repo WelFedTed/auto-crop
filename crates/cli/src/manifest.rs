@@ -58,11 +58,17 @@ pub mod code {
     pub const NO_BACKUP: &str = "NO_BACKUP";
     /// restore: that backup was already restored.
     pub const ALREADY_RESTORED: &str = "ALREADY_RESTORED";
+    /// convert: the file already is in the target format (`--reencode` converts it anyway).
+    pub const SAME_FORMAT: &str = "SAME_FORMAT";
+    /// convert: a HEIC, HEIF or AVIF file in a build without the HEIC decoder.
+    pub const HEIF_UNAVAILABLE: &str = "HEIF_UNAVAILABLE";
 }
 
 /// Every code this CLI itself emits (the docs test checks `docs/cli.md` against it).
 #[cfg(test)]
-pub const CODES: [&str; 14] = [
+pub const CODES: [&str; 16] = [
+    code::SAME_FORMAT,
+    code::HEIF_UNAVAILABLE,
     code::LOW_CONFIDENCE,
     code::DETECTION_FAILED,
     code::SPLIT_HELD,
@@ -129,6 +135,22 @@ pub struct ItemRecord {
     /// The backup that holds the original, for an in-place save.
     pub backup_id: Option<String>,
     pub ms: Option<Timing>,
+    /// What a `convert` did to this file (absent in a `process` manifest).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub convert: Option<ConvertRec>,
+}
+
+/// The conversion of one file (`convert` runs only; added to schema version 1 with `convert`).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct ConvertRec {
+    /// The source's format as sniffed from its content (`heic`, `png`, `tiff`...).
+    pub from: &'static str,
+    pub to: &'static str,
+    pub bytes_in: u64,
+    /// 0 in a dry run.
+    pub bytes_out: u64,
+    /// What the output embeds: `none` (taken to be sRGB), `srgb` or `other` (`--colour preserve`).
+    pub icc: &'static str,
 }
 
 impl ItemRecord {
@@ -147,6 +169,7 @@ impl ItemRecord {
             outputs: Vec::new(),
             backup_id: None,
             ms: None,
+            convert: None,
         }
     }
 
@@ -208,8 +231,36 @@ pub struct Options {
     pub jobs: usize,
 }
 
+/// The options of a `convert` run.
+#[derive(Debug, Clone, Serialize)]
+pub struct ConvertOpts {
+    /// `in_place`, `copy` (beside the original) or `output`.
+    pub mode: &'static str,
+    /// `jpg` or `png`.
+    pub to: &'static str,
+    /// `srgb` or `preserve`.
+    pub colour: &'static str,
+    pub quality: Option<String>,
+    pub strip_location: bool,
+    pub reencode: bool,
+    pub max_pixels: Option<u64>,
+    pub recursive: bool,
+    pub jobs: usize,
+}
+
+/// The options of the run, by command (`run.command` says which).
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum RunOpts {
+    Process(Options),
+    Convert(ConvertOpts),
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Run {
+    /// `process` or `convert` (added to schema version 1 with `convert`; a manifest without it is a
+    /// `process` run).
+    pub command: &'static str,
     /// Also the id of the backup run (`restore --run`).
     pub id: String,
     pub started: String,
@@ -218,7 +269,7 @@ pub struct Run {
     pub cancelled: bool,
     pub exit_code: u8,
     pub exit_name: &'static str,
-    pub options: Options,
+    pub options: RunOpts,
 }
 
 #[derive(Debug, Clone, Serialize)]

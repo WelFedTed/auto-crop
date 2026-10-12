@@ -14,7 +14,7 @@ code: the tool never connects to anything.
 
 - [Quickstart](#quickstart)
 - [What happens to my originals](#what-happens-to-my-originals)
-- [Reference](#reference): [inputs](#inputs), [output modes](#output-modes), [held results](#held-results-and-presets), [multi-item scans](#scans-with-several-items), [process](#process), [analyze](#analyze), [render](#render), [restore](#restore), [backups](#backups), [doctor](#doctor-and---version)
+- [Reference](#reference): [inputs](#inputs), [output modes](#output-modes), [held results](#held-results-and-presets), [multi-item scans](#scans-with-several-items), [process](#process), [convert](#convert), [analyze](#analyze), [render](#render), [restore](#restore), [backups](#backups), [doctor](#doctor-and---version)
 - [Exit codes](#exit-codes)
 - [The run manifest](#the-run-manifest)
 - [Interrupting, progress, platforms](#interrupting-progress-and-platforms)
@@ -44,6 +44,16 @@ With no output option, `process` replaces each original **after saving a verifie
 auto-crop process receipts/*.jpg                        # (PowerShell and cmd do not expand *: the tool does)
 auto-crop restore receipts/a.jpg                        # one file
 auto-crop restore --run 01a1103657c06520100387c0b987    # everything one run changed (the id is in the manifest)
+```
+
+Change the format (HEIC to JPG, TIFF or WebP to PNG...) with `convert`. It replaces each original
+after a verified backup, like `process`, unless told otherwise:
+
+```text
+auto-crop convert --to jpg --dry-run photos/            # what would happen; nothing is decoded or written
+auto-crop convert --to jpg -r photos/                   # IMG_0001.HEIC becomes IMG_0001.jpg, the HEIC goes to the backups
+auto-crop convert --to png --copy scans/                # keep the TIFFs, write scans/a.png beside scans/a.tif
+auto-crop convert --to jpg --output out/ --quality 85 photos/*.heic
 ```
 
 A result the detector is not sure about is **held**: nothing is written for it and the run exits 4.
@@ -105,7 +115,8 @@ backup entry. A restore is itself reversible for the same reason.
 back without losing content: today JPEG and PNG, single frame. A WebP, TIFF (even single page), HEIC,
 HEIF or AVIF source is **skipped** (`NOT_REPLACEABLE`) and stays byte-identical; use `--output`,
 `--suffix` or `--copy` to get a copy (PNG, or JPEG for HEIC). Replacing an original with a file in
-another format (a conversion) is not available yet, so `--format` needs a copy mode.
+another format is a different command, [`convert`](#convert), because there you chose the new format;
+`process --format` still needs a copy mode.
 
 **What is never written.** Results below the cut-off, failed detections and multi-item scans that were
 not accepted are held: no file, no backup (see [held results](#held-results-and-presets)).
@@ -236,6 +247,59 @@ Options: the [input](#inputs) and [output](#output-modes) options above, the det
 Reports on stderr: failed items always; held and skipped items and a summary unless `--quiet`; every item with
 `--verbose`.
 
+### `convert`
+
+```text
+auto-crop convert --to jpg|png [options] <file|folder|pattern>...
+```
+
+Converts images to JPEG or PNG: HEIC, HEIF and AVIF (a build with the `heif` feature, the HEIC package),
+TIFF, WebP, BMP, PNG and JPEG. No crop, no detection, no enhancement. Options: the [input](#inputs) options
+above, and
+
+| Option | Meaning |
+|---|---|
+| `--to jpg\|png` | The format to convert to. Required. |
+| `--quality small\|balanced\|best\|1-100` | JPEG quality: a preset taken from the source's own quality when it is a JPEG (default balanced), or a fixed number. PNG is lossless. |
+| `--colour srgb\|preserve` | `srgb` (default) turns the colours of a source with a wide-gamut profile (Display P3 from an iPhone HEIC, Adobe RGB) into sRGB, relative colorimetric, and the file carries an sRGB profile; a profile that already is sRGB is kept byte for byte, and a source with no profile is taken to be sRGB. `preserve` leaves the pixels and the source's profile exactly as they are. A profile that cannot be read is kept with the notice `colour.profile_unusable`. |
+| `--in-place` | Replace each original with the converted file after a verified backup. The default. |
+| `--copy` | Keep the originals and write each converted file beside its original (`IMG_0001.heic` stays, `IMG_0001.jpg` appears). |
+| `-o`, `--output DIR` | Write the converted files into DIR (the folder tree is mirrored) and keep the originals. |
+| `--reencode` | Also convert files that already are in the target format (a JPEG to a new JPEG to change its quality). Without it they are skipped (`SAME_FORMAT`). A re-encoded file keeps its name and is replaced after a backup, or gets `(2)` in a copy mode. |
+| `--strip-location` | Drop GPS, XMP and IPTC from the converted files. Other EXIF is kept. |
+| `--max-pixels N` | Refuse images larger than N pixels (default 100 million, at most 500 million). |
+| `-n`, `--dry-run` | Read the headers and print the plan (the new name of each file, the status and codes); decode and write nothing at all, no backup, no journal, no temp file. |
+| `-j`, `--jobs N`, `--mem-limit MB`, `--manifest FILE`, `--progress ...`, `--json`, `--ndjson` | As for `process`. |
+
+**What a conversion does to the picture.** The pixels are decoded once. EXIF orientation is applied once and
+the output says orientation 1 (for HEIC the turn comes from the file's `irot` and `imir`; its EXIF tag is
+ignored, so a rotation is never applied twice). EXIF is carried to JPEG and PNG (PNG as an `eXIf` chunk) with
+the orientation reset and the sizes rewritten, `ColorSpace` set to 1 when the colours were converted to sRGB;
+`--strip-location` removes GPS (and, for JPEG, XMP and IPTC). Transparency is composited over white
+(`alpha.flattened`): neither output has an alpha channel. More than 8 bits per channel are reduced to 8
+(`depth.reduced_to_8`). A HEIC with several images converts the first (`heic.multi_image`); a Live Photo's
+still is converted and its paired `.MOV` is never read, moved or changed (`livephoto.video_untouched`).
+The file's modification time is kept.
+
+**What is never replaced.** A source with several frames (animated WebP, multi-page TIFF, a HEIC or AVIF with
+several images or a sequence) and a CMYK source are **skipped** (`NOT_REPLACEABLE`, with the notice that says
+why) in the default mode and stay byte-identical; with `--copy` or `--output` their first frame is converted
+and the notice is on the result. A HEIC, HEIF or AVIF file in a build without the decoder is skipped as
+`HEIF_UNAVAILABLE`, and `convert` says so on stderr; `auto-crop doctor` shows whether this build has it. A
+file that is not an image, or an image format this build does not read (GIF, JPEG XL), is `UNSUPPORTED_FORMAT`.
+
+**Safety.** The default replaces the original by the protocol of [What happens to my
+originals](#what-happens-to-my-originals): encode and verify a temp file, back up the original (verified),
+commit the new file under a name that is not taken (`IMG_0001 (2).jpg` if `IMG_0001.jpg` exists; nothing is
+overwritten), then remove the original. Each step is journalled and a crash is recovered at the next start.
+`auto-crop restore IMG_0001.jpg` (the converted file or the original's path) brings the original back; with
+`--derived remove` the converted file moves into the backup entry too, with `--derived keep` (the default) it
+stays. A file whose content is another format than its name says (a HEIC called `.jpg`) is converted under its
+own name. `--copy` and `--output` change nothing that exists.
+
+Exit codes are `process`'s; `convert` never holds anything, so it never exits 4. Skipping is by choice and
+exits 0.
+
 ### `analyze`
 
 ```text
@@ -358,6 +422,15 @@ breaking change would be version 2 with a different `schema` value or `v`.
 - `run.id` is also the id of the backup run: `auto-crop restore --run <id>`. `backup_id` is the backup of this
   original (`auto-crop backups show <id>`); it is `null` for held, skipped and copied items.
 - `confidence.score` is **uncalibrated**; `band` is `good`, `check` or `failed` *at this run's cut-off*.
+- `run.command` is `process` or `convert` (a manifest without it is a `process` run). A `convert` manifest
+  has the same shape: `run.options` is then `{ "mode": "in_place|copy|output", "to": "jpg|png", "colour":
+  "srgb|preserve", "quality", "strip_location", "reencode", "max_pixels", "recursive", "jobs" }`, every item has
+  `crops: 1` for a converted file, `confidence: null` and `split: false`, `reasons` hold the notices
+  (`alpha.flattened`, `colour.converted_to_srgb`, `depth.reduced_to_8`, `heic.multi_image`,
+  `livephoto.video_untouched`...), `outputs[0]` is the converted file (`format` `jpeg` or `png`, its pixel
+  size) and a `convert` object says `{ "from", "to", "bytes_in", "bytes_out", "icc": "none|srgb|other" }`
+  (`icc` is what the output embeds). `backup_id` is set for a replaced original. Added to version 1 with `convert`,
+  additively: a `process` manifest only gains `run.command`.
 
 **Codes.** From the engine (`ErrKind`): `CORRUPT`, `UNSUPPORTED_FORMAT`, `TOO_LARGE`, `UNREADABLE`, `READ_ONLY`,
 `DISK_FULL`, `FILE_IN_USE`, `VERIFY_FAILED`, `BACKUP_FAILED`, `SOURCE_CHANGED`, `NO_CROP`, `INTERNAL_PANIC`, and the
@@ -374,6 +447,8 @@ rest of its registry. From this tool:
 | `CANCELLED` | skipped | The run was interrupted before this file. |
 | `EXISTS` | skipped | `--if-exists skip` and the name was taken. |
 | `LINK` | skipped | A link or junction named directly. |
+| `SAME_FORMAT` | skipped | `convert`: the file already is in the target format (`--reencode` converts it anyway). |
+| `HEIF_UNAVAILABLE` | skipped | `convert`: a HEIC, HEIF or AVIF file in a build without the HEIC decoder. |
 | `NOT_FOUND` | failed | The named path does not exist. |
 | `NO_MATCH` | failed | A pattern matched nothing. |
 | `MODIFIED_SINCE_SAVE`, `NO_BACKUP`, `ALREADY_RESTORED` | restore | See [restore](#restore). |

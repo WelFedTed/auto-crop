@@ -110,6 +110,8 @@ struct Walker<'a> {
     args: &'a InputArgs,
     store: Option<PathBuf>,
     seen: HashSet<String>,
+    /// Which files are images for this command (the extension test).
+    keep: fn(&Path) -> bool,
     out: Expansion,
 }
 
@@ -208,7 +210,7 @@ impl Walker<'_> {
                     }
                 }
             } else if meta.is_file() {
-                if is_candidate(&path) {
+                if (self.keep)(&path) {
                     self.add(path, shown, root);
                 } else {
                     self.out.ignored_non_image += 1;
@@ -236,7 +238,7 @@ impl Walker<'_> {
                 self.walk(&abs, typed, &abs.clone(), 0);
             }
         } else if meta.is_file() {
-            if is_candidate(path) {
+            if (self.keep)(path) {
                 let root = abs.parent().map(Path::to_path_buf).unwrap_or_default();
                 self.add(abs, typed.to_owned(), &root);
             } else {
@@ -254,10 +256,17 @@ impl Walker<'_> {
 
 /// Expands every input. `store` is the backup store folder (never walked).
 pub fn expand(args: &InputArgs, store: Option<&Path>) -> Expansion {
+    expand_with(args, store, is_candidate)
+}
+
+/// [`expand`] with another test for what counts as an image file (`convert` also lists HEIC, HEIF
+/// and AVIF in a build that cannot decode them, so it can say so).
+pub fn expand_with(args: &InputArgs, store: Option<&Path>, keep: fn(&Path) -> bool) -> Expansion {
     let mut w = Walker {
         args,
         store: store.map(absolute),
         seen: HashSet::new(),
+        keep,
         out: Expansion::default(),
     };
     for typed in &args.paths {

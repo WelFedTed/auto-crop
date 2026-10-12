@@ -55,6 +55,19 @@ jobs:
             if ldd "$bin" | grep -Ei 'heif|dav1d|de265'; then echo "linked against a HEIF library"; exit 1; fi
             if strings "$bin" | grep -q 'heif_context_alloc'; then echo "contains libheif symbols"; exit 1; fi
           done
+      - name: The CLI without the feature says HEIF_UNAVAILABLE for an AVIF file and leaves it alone
+        env:
+          AUTOCROP_NATIVE_PREFIX: /nonexistent/native/prefix
+        run: |
+          cargo build -p auto-crop-cli
+          work=target/convert-default; rm -rf "$work"; mkdir -p "$work/photos"
+          cp crates/codecs/tests/fixtures/heif/gradient-444-48x32.avif "$work/photos/tile.avif"
+          sum=$(sha256sum "$work/photos/tile.avif")
+          target/debug/auto-crop --home "$work/home" convert --to jpg --json "$work/photos" > "$work/m.json"
+          cat "$work/m.json"
+          grep -q '"code": "HEIF_UNAVAILABLE"' "$work/m.json"
+          [ "$sum" = "$(sha256sum "$work/photos/tile.avif")" ]
+          target/debug/auto-crop doctor | grep -q "NOT available"
       - name: The feature without a built library fails with a clear message (negative test)
         env:
           AUTOCROP_NATIVE_PREFIX: /nonexistent/native/prefix
@@ -117,6 +130,65 @@ jobs:
         run: cargo test -p auto-crop-codecs --features heif -- --nocapture
       - name: Engine tests with the feature (open AVIF, never replace it, copy it as PNG)
         run: cargo test -p auto-crop-engine --features heif --lib --test formats
+      - name: Convert flow with the feature (HEIC and AVIF to JPG and PNG, sizes, sRGB, orientation once, replace and restore)
+        run: cargo test -p auto-crop-engine --features heif --test convert_heif -- --nocapture
+      - name: CLI convert on real HEIC and AVIF files (manifest, sizes, sRGB, decodes, restore byte-identical)
+        shell: bash
+        run: |
+          cargo build -p auto-crop-cli --features heif
+          # macOS has shasum, not sha256sum.
+          sha() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
+          bin=target/debug/auto-crop
+          [ -f "$bin" ] || bin=target/debug/auto-crop.exe
+          src=$(find target/native -maxdepth 4 -type d -name 'libheif-*' -path '*/src/*' | head -1)
+          work=target/convert-check; rm -rf "$work"; mkdir -p "$work/photos"
+          cp "$src/tests/data/rainbow-451x461.heic" "$work/photos/IMG_0001.HEIC"
+          cp "$src/tests/data/with-alpha-512x512.heic" "$work/photos/IMG_0002.heic"
+          cp crates/codecs/tests/fixtures/heif/gradient-444-48x32.avif "$work/photos/tile.avif"
+          cp crates/codecs/tests/fixtures/heif/icc-srgb-32x24.avif "$work/photos/srgb.avif"
+          cp crates/codecs/tests/fixtures/heif/orient6-444-48x32.avif "$work/photos/turned.avif"
+          (cd "$work/photos" && sha * > ../before.txt)
+          cat "$work/before.txt"
+          "$bin" --home "$work/home" doctor
+          # Dry run first: nothing is decoded or written.
+          "$bin" --home "$work/home" convert --to jpg --dry-run --json "$work/photos" > "$work/dry.json"
+          (cd "$work/photos" && sha -c ../before.txt)
+          test ! -e "$work/home"
+          # The real run: replace with a backup.
+          "$bin" --home "$work/home" convert --to jpg --json "$work/photos" > "$work/manifest.json"
+          py=python3; command -v python3 >/dev/null 2>&1 || py=python
+          "$py" - "$work/manifest.json" <<'PY'
+          import json, sys
+          doc = json.load(open(sys.argv[1]))
+          assert doc["run"]["command"] == "convert", doc["run"]
+          assert doc["run"]["exit_code"] == 0, doc["run"]
+          assert doc["summary"]["saved"] == 5, doc["summary"]
+          want = {"IMG_0001.HEIC": (451, 461), "IMG_0002.heic": (512, 512), "tile.avif": (48, 32), "srgb.avif": (32, 24)}
+          for it in doc["items"]:
+              assert it["status"] == "saved" and it["written"] and it["backup_id"], it
+              out = it["outputs"][0]
+              assert out["format"] == "jpeg" and out["path"].lower().endswith(".jpg"), out
+              assert it["convert"]["icc"] in ("none", "srgb"), it["convert"]
+              name = it["input"].replace("\\", "/").rsplit("/", 1)[-1]
+              if name in want:
+                  assert (out["width"], out["height"]) == want[name], (name, out)
+              if name == "IMG_0002.heic":
+                  assert "alpha.flattened" in it["reasons"], it["reasons"]
+              print("ok", name, out["width"], out["height"], it["convert"])
+          open(sys.argv[1] + ".run", "w").write(doc["run"]["id"])
+          PY
+          for f in IMG_0001 IMG_0002 tile srgb turned; do
+            test -f "$work/photos/$f.jpg"
+            "$bin" --home "$work/home" analyze --json "$work/photos/$f.jpg" > /dev/null
+          done
+          ls "$work/photos"
+          # Restore the run: every original comes back byte for byte.
+          run=$(cat "$work/manifest.json.run")
+          "$bin" --home "$work/home" restore --run "$run" --derived remove
+          (cd "$work/photos" && sha -c ../before.txt)
+          "$bin" --home "$work/home" convert --to png --copy --json "$work/photos" > "$work/copy.json"
+          "$py" -c "import json,sys;d=json.load(open(sys.argv[1]));assert d['summary']['saved']==5,d['summary'];print('copy ok')" "$work/copy.json"
+          (cd "$work/photos" && sha -c ../before.txt)
       - name: Hostile-file corpus and fuzz seeds through libheif and dav1d
         run: |
           cargo run --quiet -p xtask --features heif -- make-hostile

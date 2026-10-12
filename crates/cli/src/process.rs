@@ -14,7 +14,7 @@ use crate::env::{Env, base_settings, cpu_floor, test_hook};
 use crate::exit;
 use crate::inputs::{self, Candidate, Problem};
 use crate::manifest::{
-    self, ItemRecord, Manifest, Options, OutputRec, Run, Status, Summary, Timing, code,
+    self, ItemRecord, Manifest, Options, OutputRec, Run, RunOpts, Status, Summary, Timing, code,
 };
 use crate::pipeline::{
     self, Decision, Prepared, Ready, Shared, analysed_record, decide, err_code, split_reasons,
@@ -70,7 +70,7 @@ pub fn processed_outputs(store_dir: &Path) -> HashMap<String, String> {
 
 /// The backup store can take a write: the folder exists (or is made) and a probe file can be
 /// created and removed. A run that would replace originals needs this before it touches one.
-fn store_writable(dir: &Path) -> Result<(), String> {
+pub(crate) fn store_writable(dir: &Path) -> Result<(), String> {
     let probe = dir.join(format!(".write-test-{}", new_id()));
     fs::create_dir_all(dir)
         .and_then(|()| fs::write(&probe, b"x"))
@@ -79,7 +79,7 @@ fn store_writable(dir: &Path) -> Result<(), String> {
 }
 
 /// The one-time notice. Returns whether it was shown.
-fn first_write_notice(env: &Env, retention: Option<u32>) -> bool {
+pub(crate) fn first_write_notice(env: &Env, retention: Option<u32>, instead: &str) -> bool {
     if env.global.quiet || env.global.no_config {
         return false;
     }
@@ -95,7 +95,7 @@ fn first_write_notice(env: &Env, retention: Option<u32>) -> bool {
         "note: auto-crop replaces your originals, after saving a verified backup of each one.\n\
          \x20 backups:  {} ({keep})\n\
          \x20 undo:     auto-crop restore <file>   or   auto-crop restore --run <run id>\n\
-         \x20 instead:  --output DIR, --suffix TEXT or --copy write new files and leave originals alone;\n\
+         \x20 instead:  {instead} write new files and leave originals alone;\n\
          \x20           --dry-run shows what would happen. This note is shown once.",
         env.paths.backups_dir().display()
     );
@@ -127,14 +127,14 @@ fn out_record(path: &Path, dims: Option<(u32, u32)>, format: Option<&'static str
 }
 
 /// An output the engine wrote, described from the file itself.
-fn written_output(path: &Path) -> OutputRec {
+pub(crate) fn written_output(path: &Path) -> OutputRec {
     match fs::read(path).ok().and_then(|b| probe(&b).ok()) {
         Some(p) => out_record(path, Some((p.width, p.height)), Some(format_name(p.format))),
         None => out_record(path, None, None),
     }
 }
 
-fn planned_output(path: &Path, format: Format) -> OutputRec {
+pub(crate) fn planned_output(path: &Path, format: Format) -> OutputRec {
     let abs = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
     OutputRec {
         path: abs.to_string_lossy().into_owned(),
@@ -356,7 +356,7 @@ struct Event<'a, T: Serialize> {
     body: &'a T,
 }
 
-fn emit<T: Serialize>(t: &'static str, body: &T) {
+pub(crate) fn emit<T: Serialize>(t: &'static str, body: &T) {
     let line = serde_json::to_string(&Event {
         v: manifest::SCHEMA_VERSION,
         t,
@@ -370,19 +370,19 @@ fn emit<T: Serialize>(t: &'static str, body: &T) {
 }
 
 #[derive(Serialize)]
-struct StartBody<'a> {
-    tool: &'a manifest::Tool,
-    run_id: &'a str,
-    items: usize,
-    dry_run: bool,
+pub(crate) struct StartBody<'a> {
+    pub(crate) tool: &'a manifest::Tool,
+    pub(crate) run_id: &'a str,
+    pub(crate) items: usize,
+    pub(crate) dry_run: bool,
 }
 
 #[derive(Serialize)]
-struct EndBody<'a> {
-    summary: &'a Summary,
-    exit_code: u8,
-    exit_name: &'static str,
-    cancelled: bool,
+pub(crate) struct EndBody<'a> {
+    pub(crate) summary: &'a Summary,
+    pub(crate) exit_code: u8,
+    pub(crate) exit_name: &'static str,
+    pub(crate) cancelled: bool,
 }
 
 /// Writes `text` to `path` through a temp file in the same folder.
@@ -406,7 +406,7 @@ pub fn write_atomic(path: &Path, text: &str) -> std::io::Result<()> {
     r
 }
 
-fn problem_record(idx: usize, typed: &str, p: Problem) -> ItemRecord {
+pub(crate) fn problem_record(idx: usize, typed: &str, p: Problem) -> ItemRecord {
     let status = match p {
         Problem::NotFound | Problem::NoMatch => Status::Failed,
         Problem::Unsupported | Problem::Link => Status::Skipped,
@@ -500,7 +500,7 @@ pub fn run(args: ProcessArgs, env: &Env) -> u8 {
     };
 
     if replacing && !args.dry_run && !candidates.is_empty() {
-        first_write_notice(env, retention);
+        first_write_notice(env, retention, "--output DIR, --suffix TEXT or --copy");
     }
     let mut rep = Reporter::new(g, args.progress, total, args.dry_run);
     let mut warnings: Vec<String> = Vec::new();
@@ -611,6 +611,7 @@ pub fn run(args: ProcessArgs, env: &Env) -> u8 {
         v: manifest::SCHEMA_VERSION,
         tool: manifest::tool(),
         run: Run {
+            command: "process",
             id: run_id,
             started: rfc3339(started),
             finished: rfc3339(now_secs()),
@@ -618,7 +619,7 @@ pub fn run(args: ProcessArgs, env: &Env) -> u8 {
             cancelled,
             exit_code,
             exit_name: exit::name(exit_code),
-            options: Options {
+            options: RunOpts::Process(Options {
                 mode: args.mode.name(),
                 triage: args.detect.triage.name(),
                 cutoff: args.detect.cutoff,
@@ -640,7 +641,7 @@ pub fn run(args: ProcessArgs, env: &Env) -> u8 {
                 reprocess: args.reprocess,
                 recursive: args.input.recursive,
                 jobs,
-            },
+            }),
         },
         summary: summary.clone(),
         items: records,

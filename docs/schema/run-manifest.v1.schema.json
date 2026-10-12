@@ -27,25 +27,13 @@
         "cancelled": { "type": "boolean" },
         "exit_code": { "enum": [0, 1, 2, 3, 4, 5, 6, 130] },
         "exit_name": { "enum": ["ok", "internal", "usage", "failed", "held", "no_input", "precondition", "cancelled"] },
+        "command": { "enum": ["process", "convert"], "description": "Which command made this manifest; absent in a manifest written before `convert` existed, which is a `process` run. Added to version 1 additively." },
         "options": {
-          "type": "object",
-          "required": ["mode", "triage", "cutoff", "split", "profile", "margin_percent", "format", "quality", "accept_splits", "reprocess", "recursive", "jobs"],
-          "properties": {
-            "mode": { "enum": ["in_place", "output", "suffix", "copy"] },
-            "triage": { "enum": ["strict", "balanced", "aggressive"] },
-            "cutoff": { "type": "number", "description": "The effective cut-off on the uncalibrated score." },
-            "split": { "enum": ["auto", "always", "never"] },
-            "profile": { "enum": ["photos", "receipts"] },
-            "margin_percent": { "type": "number" },
-            "format": { "enum": ["keep", "jpg", "png"] },
-            "quality": { "type": ["string", "null"], "description": "`small`, `balanced`, `best` or a number 1 to 100 as text; null is the default (balanced)." },
-            "strip_location": { "type": "boolean" },
-            "max_pixels": { "type": ["integer", "null"] },
-            "accept_splits": { "type": "boolean" },
-            "reprocess": { "type": "boolean" },
-            "recursive": { "type": "boolean" },
-            "jobs": { "type": "integer" }
-          }
+          "oneOf": [
+            { "$ref": "#/$defs/processOptions" },
+            { "$ref": "#/$defs/convertOptions" }
+          ],
+          "description": "The options of the run: `processOptions` for `process`, `convertOptions` for `convert` (`run.command` says which)."
         }
       }
     },
@@ -70,6 +58,52 @@
     "warnings": { "type": "array", "items": { "type": "string" } }
   },
   "$defs": {
+    "processOptions": {
+      "type": "object",
+      "required": ["mode", "triage", "cutoff", "split", "profile", "margin_percent", "format", "quality", "accept_splits", "reprocess", "recursive", "jobs"],
+      "properties": {
+        "mode": { "enum": ["in_place", "output", "suffix", "copy"] },
+        "triage": { "enum": ["strict", "balanced", "aggressive"] },
+        "cutoff": { "type": "number", "description": "The effective cut-off on the uncalibrated score." },
+        "split": { "enum": ["auto", "always", "never"] },
+        "profile": { "enum": ["photos", "receipts"] },
+        "margin_percent": { "type": "number" },
+        "format": { "enum": ["keep", "jpg", "png"] },
+        "quality": { "type": ["string", "null"], "description": "`small`, `balanced`, `best` or a number 1 to 100 as text; null is the default (balanced)." },
+        "strip_location": { "type": "boolean" },
+        "max_pixels": { "type": ["integer", "null"] },
+        "accept_splits": { "type": "boolean" },
+        "reprocess": { "type": "boolean" },
+        "recursive": { "type": "boolean" },
+        "jobs": { "type": "integer" }
+      }
+    },
+    "convertOptions": {
+      "type": "object",
+      "required": ["mode", "to", "colour", "quality", "strip_location", "reencode", "recursive", "jobs"],
+      "properties": {
+        "mode": { "enum": ["in_place", "copy", "output"], "description": "`in_place` replaces each original after a verified backup; `copy` writes beside the original; `output` writes under `--output DIR`." },
+        "to": { "enum": ["jpg", "png"] },
+        "colour": { "enum": ["srgb", "preserve"] },
+        "quality": { "type": ["string", "null"], "description": "As for `process`." },
+        "strip_location": { "type": "boolean" },
+        "reencode": { "type": "boolean" },
+        "max_pixels": { "type": ["integer", "null"] },
+        "recursive": { "type": "boolean" },
+        "jobs": { "type": "integer" }
+      }
+    },
+    "convertRecord": {
+      "type": "object",
+      "required": ["from", "to", "bytes_in", "bytes_out", "icc"],
+      "properties": {
+        "from": { "type": "string", "description": "The source's format as sniffed from its content: jpeg, png, tiff, webp, heic, avif, bmp..." },
+        "to": { "enum": ["jpeg", "png"] },
+        "bytes_in": { "type": "integer" },
+        "bytes_out": { "type": "integer", "description": "0 in a dry run." },
+        "icc": { "enum": ["none", "srgb", "other"], "description": "What the output embeds: nothing (taken to be sRGB), an sRGB profile, or another profile (`--colour preserve`)." }
+      }
+    },
     "item": {
       "type": "object",
       "required": ["index", "input", "status", "code", "reasons", "detail", "confidence", "crops", "split", "written", "outputs", "backup_id", "ms"],
@@ -77,7 +111,7 @@
         "index": { "type": "integer", "description": "Position of the input in the run, stable whatever --jobs is." },
         "input": { "type": "string" },
         "status": { "enum": ["saved", "held", "failed", "skipped"] },
-        "code": { "type": ["string", "null"], "description": "One registry code for held, failed and skipped items: an engine error name (CORRUPT, DISK_FULL...) or one of the CLI's (LOW_CONFIDENCE, DETECTION_FAILED, SPLIT_HELD, ALREADY_PROCESSED, NOT_REPLACEABLE, UNSUPPORTED_FORMAT, CANCELLED, EXISTS, NOT_FOUND, NO_MATCH, LINK)." },
+        "code": { "type": ["string", "null"], "description": "One registry code for held, failed and skipped items: an engine error name (CORRUPT, DISK_FULL...) or one of the CLI's (LOW_CONFIDENCE, DETECTION_FAILED, SPLIT_HELD, ALREADY_PROCESSED, NOT_REPLACEABLE, UNSUPPORTED_FORMAT, CANCELLED, EXISTS, NOT_FOUND, NO_MATCH, LINK, and for `convert` SAME_FORMAT, HEIF_UNAVAILABLE)." },
         "reasons": { "type": "array", "items": { "type": "string" }, "description": "The detector's hold reasons (PARTIAL_FRAME...) and notices (tiff.multi_page...). Never hold anything by themselves." },
         "detail": { "type": ["string", "null"], "description": "Text for people; not stable." },
         "confidence": {
@@ -99,6 +133,7 @@
         "written": { "type": "boolean", "description": "Files were written (false in a dry run, and for held, failed and skipped items)." },
         "outputs": { "type": "array", "items": { "$ref": "#/$defs/output" } },
         "backup_id": { "type": ["string", "null"] },
+        "convert": { "$ref": "#/$defs/convertRecord", "description": "Present in a `convert` manifest for a converted file; absent otherwise." },
         "ms": {
           "oneOf": [
             { "type": "null" },

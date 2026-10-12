@@ -286,6 +286,84 @@ pub fn process_flags() -> Vec<Flag> {
     f
 }
 
+pub fn convert_flags() -> Vec<Flag> {
+    let mut f = input_flags();
+    f.extend([
+        val(
+            "to",
+            None,
+            "jpg|png",
+            "The format to convert to (required)",
+        ),
+        val(
+            "quality",
+            None,
+            "small|balanced|best|1-100",
+            "JPEG quality: a preset taken from the source's own quality when it is a JPEG (default balanced) or a fixed number",
+        ),
+        val(
+            "colour",
+            None,
+            "srgb|preserve",
+            "srgb (default) turns the colours of a wide-gamut source (Display P3, Adobe RGB) into sRGB; preserve keeps the pixels and the source's profile as they are",
+        ),
+        sw(
+            "in-place",
+            None,
+            "Replace each original with the converted file after a verified backup (the default)",
+        ),
+        val(
+            "output",
+            Some('o'),
+            "DIR",
+            "Write the converted files to DIR (mirrors the folder tree) and leave the originals alone",
+        ),
+        sw(
+            "copy",
+            None,
+            "Keep the originals: write each converted file beside its original",
+        ),
+        sw(
+            "reencode",
+            None,
+            "Convert files that already are in the target format too (a JPEG to a new JPEG, to change its quality)",
+        ),
+        sw(
+            "strip-location",
+            None,
+            "Drop GPS, XMP and IPTC metadata from the converted files (other EXIF is kept)",
+        ),
+        val(
+            "max-pixels",
+            None,
+            "N",
+            "Refuse images larger than N pixels (default 100 million, at most 500 million)",
+        ),
+        sw(
+            "dry-run",
+            Some('n'),
+            "Read the headers and print the plan; decode and write nothing at all",
+        ),
+    ]);
+    f.extend(pool_flags());
+    f.extend([
+        val(
+            "manifest",
+            None,
+            "FILE",
+            "Also write the run manifest (JSON, see docs/cli.md) to FILE",
+        ),
+        val(
+            "progress",
+            None,
+            "auto|always|never",
+            "Progress line on stderr (default auto: only on a terminal)",
+        ),
+    ]);
+    f.extend(global_flags());
+    f
+}
+
 pub fn analyze_flags() -> Vec<Flag> {
     let mut f = input_flags();
     f.extend(detect_flags());
@@ -932,6 +1010,91 @@ fn process(p: &Parsed) -> Res<ProcessArgs> {
     })
 }
 
+/// Where `convert` puts the converted files.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConvertDest {
+    /// Replace the original after a verified backup. `explicit` is `--in-place`.
+    InPlace { explicit: bool },
+    /// `--copy`: beside the original, which is kept.
+    Copy,
+    /// `--output DIR`.
+    Dir(PathBuf),
+}
+
+impl ConvertDest {
+    pub fn name(&self) -> &'static str {
+        match self {
+            ConvertDest::InPlace { .. } => "in_place",
+            ConvertDest::Copy => "copy",
+            ConvertDest::Dir(_) => "output",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ConvertArgs {
+    pub input: InputArgs,
+    pub to: auto_crop_engine::convert::ConvertTarget,
+    pub colour: auto_crop_engine::colour::ColourMode,
+    pub dest: ConvertDest,
+    pub reencode: bool,
+    pub knobs: Knobs,
+    pub dry_run: bool,
+    pub jobs: Option<usize>,
+    pub mem_limit_mb: Option<u64>,
+    pub manifest: Option<PathBuf>,
+    pub progress: Progress,
+}
+
+fn convert(p: &Parsed) -> Res<ConvertArgs> {
+    use auto_crop_engine::colour::ColourMode;
+    use auto_crop_engine::convert::ConvertTarget;
+    let modes = ["in-place", "output", "copy"]
+        .iter()
+        .filter(|m| p.has(m))
+        .count();
+    if modes > 1 {
+        return usage("give at most one of --in-place, --output and --copy");
+    }
+    let dest = if let Some(d) = p.value("output") {
+        if d.is_empty() {
+            return usage("`--output` needs a folder");
+        }
+        ConvertDest::Dir(PathBuf::from(d))
+    } else if p.has("copy") {
+        ConvertDest::Copy
+    } else {
+        ConvertDest::InPlace {
+            explicit: p.has("in-place"),
+        }
+    };
+    let to = match p.value("to") {
+        Some("jpg" | "jpeg") => ConvertTarget::Jpg,
+        Some("png") => ConvertTarget::Png,
+        Some(o) => return usage(format!("unknown --to `{o}` (jpg or png)")),
+        None => return usage("convert: `--to jpg|png` is required"),
+    };
+    let colour = match p.value("colour").or_else(|| p.value("color")) {
+        None | Some("srgb") => ColourMode::Srgb,
+        Some("preserve") => ColourMode::Preserve,
+        Some(o) => return usage(format!("unknown --colour `{o}` (srgb or preserve)")),
+    };
+    let (jobs, mem_limit_mb) = pool(p)?;
+    Ok(ConvertArgs {
+        input: inputs(p, "convert")?,
+        to,
+        colour,
+        dest,
+        reencode: p.has("reencode"),
+        knobs: knobs(p)?,
+        dry_run: p.has("dry-run"),
+        jobs,
+        mem_limit_mb,
+        manifest: p.value("manifest").map(PathBuf::from),
+        progress: progress(p)?,
+    })
+}
+
 #[derive(Debug, Clone)]
 pub struct AnalyzeArgs {
     pub input: InputArgs,
@@ -996,6 +1159,7 @@ pub enum Command {
     Help(Option<&'static str>),
     Version,
     Process(Box<ProcessArgs>),
+    Convert(Box<ConvertArgs>),
     Analyze(Box<AnalyzeArgs>),
     Render(Box<RenderArgs>),
     Restore(RestoreArgs),
@@ -1012,10 +1176,14 @@ pub struct Cli {
     pub command: Command,
 }
 
-pub const COMMANDS: [(&str, &str); 6] = [
+pub const COMMANDS: [(&str, &str); 7] = [
     (
         "process",
         "Detect, crop and straighten images (overwrites originals after a verified backup unless told otherwise)",
+    ),
+    (
+        "convert",
+        "Convert images to JPG or PNG (HEIC to JPG, TIFF, WebP, BMP...): replaces originals after a verified backup unless told otherwise",
     ),
     (
         "analyze",
@@ -1040,6 +1208,7 @@ pub const COMMANDS: [(&str, &str); 6] = [
 pub fn flags_for(command: &str) -> Option<Vec<Flag>> {
     Some(match command {
         "process" => process_flags(),
+        "convert" => convert_flags(),
         "analyze" => analyze_flags(),
         "render" => render_flags(),
         "restore" => restore_flags(),
@@ -1138,6 +1307,7 @@ pub fn parse_cli(args: &[String]) -> Res<Cli> {
     }
     let command = match word {
         "process" => Command::Process(Box::new(process(&p)?)),
+        "convert" => Command::Convert(Box::new(convert(&p)?)),
         "analyze" => {
             let (jobs, mem_limit_mb) = pool(&p)?;
             Command::Analyze(Box::new(AnalyzeArgs {
@@ -1343,6 +1513,7 @@ pub fn help(topic: Option<&str>) -> String {
                 .map_or("", |(_, a)| *a);
             let line = match cmd {
                 "process" => "auto-crop process [options] <file|folder|pattern>...",
+                "convert" => "auto-crop convert --to jpg|png [options] <file|folder|pattern>...",
                 "analyze" => "auto-crop analyze [options] <file|folder|pattern>...",
                 "render" => "auto-crop render [options] --output <file> <image>",
                 "restore" => "auto-crop restore [options] <file|backup-id>...   |   --run <id>",
@@ -1393,6 +1564,67 @@ mod tests {
         assert!(!p.dry_run && !p.accept_splits && !p.reprocess);
         assert_eq!(p.input.max_depth, 64);
         assert_eq!(p.input.max_files, 50_000);
+    }
+
+    fn convert_of(a: &[&str]) -> Res<ConvertArgs> {
+        match parse_cli(&v(a))?.command {
+            Command::Convert(c) => Ok(*c),
+            other => panic!("not convert: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn convert_defaults_replace_with_a_backup_and_srgb_and_every_option_parses() {
+        use auto_crop_engine::colour::ColourMode;
+        use auto_crop_engine::convert::ConvertTarget;
+        let c = convert_of(&["convert", "--to", "jpg", "a.heic"]).unwrap();
+        assert_eq!(c.to, ConvertTarget::Jpg);
+        assert_eq!(c.colour, ColourMode::Srgb);
+        assert_eq!(c.dest, ConvertDest::InPlace { explicit: false });
+        assert!(!c.reencode && !c.dry_run && c.knobs.quality.is_none());
+        let c = convert_of(&[
+            "convert",
+            "--to=png",
+            "--colour",
+            "preserve",
+            "-o",
+            "out",
+            "--reencode",
+            "--strip-location",
+            "--quality",
+            "best",
+            "-n",
+            "-rj3",
+            "--manifest",
+            "m.json",
+            "--progress",
+            "never",
+            "--max-pixels",
+            "5000000",
+            "dir",
+        ])
+        .unwrap();
+        assert_eq!(c.to, ConvertTarget::Png);
+        assert_eq!(c.colour, ColourMode::Preserve);
+        assert_eq!(c.dest, ConvertDest::Dir(PathBuf::from("out")));
+        assert!(c.reencode && c.dry_run && c.knobs.strip_location && c.input.recursive);
+        assert_eq!((c.jobs, c.knobs.max_pixels), (Some(3), Some(5_000_000)));
+        assert_eq!(
+            convert_of(&["convert", "--to", "jpeg", "--copy", "x"])
+                .unwrap()
+                .dest,
+            ConvertDest::Copy
+        );
+        for bad in [
+            &["convert", "a.png"][..],
+            &["convert", "--to", "tiff", "a.png"],
+            &["convert", "--to", "jpg"],
+            &["convert", "--to", "jpg", "--copy", "--in-place", "a.png"],
+            &["convert", "--to", "jpg", "--colour", "x", "a.png"],
+            &["convert", "--to", "jpg", "--format", "png", "a.png"],
+        ] {
+            assert!(convert_of(bad).is_err(), "{bad:?}");
+        }
     }
 
     #[test]

@@ -10,6 +10,7 @@
 mod analyze;
 mod args;
 mod backups;
+mod convert;
 mod devpipeline;
 mod doctor;
 mod env;
@@ -71,6 +72,7 @@ fn execute(cli: args::Cli) -> u8 {
     };
     match command {
         Command::Process(a) => process::run(*a, &env),
+        Command::Convert(a) => convert::run(*a, &env),
         Command::Analyze(a) => analyze::run(*a, &env),
         Command::Render(a) => render::run(*a, &env),
         Command::Restore(a) => restore::run(a, &env),
