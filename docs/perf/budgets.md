@@ -163,6 +163,18 @@ A second protocol is less sensitive to drift: 40 images per pass, 5 rounds inter
 - **Floors, for the record (not verdicts):** CLI, 5 workers on 6 cores: **3.5 images/s** (median 3.46, best 3.60) against **>= 4**, which is 0.86-0.90x of the floor, i.e. below it even though this run took CPU from a competitor; GUI, 4 workers: **2.57-2.94** against **>= 3**. Neither is more than 1.5x off, so neither trips the redesign rule on this evidence, but both are at risk, and the 1.7-1.9x CPU-per-image finding above says why: the plan's 4 images/s needs at most 875 CPU-ms per image and the measurement is 1300-1400.
 - **Peak RSS** is reliable (it does not depend on CPU share): about 80 MB for one worker and 55 MB per extra worker, 460-486 MB at eight, i.e. well inside the 166 MiB per-job weight the budget reserves (1.4 GB admitted at eight workers).
 
+## Enhancement (M7 engine slice), 12 MP, NOISY: the real pipeline, not the prototype above
+
+The `enhance` rows of Table A above are the M1 prototype (luma plus Otsu or Sauvola). The pipeline of PLAN 5 is now built (`imgproc::enhance`: illumination flatten, Clean, Document, Receipt); its full numbers, the OCR evidence and the caveats are in [enhance.md](enhance.md). Summary, same host and the same loaded conditions as this page (other builds running; `Processor(_Total)` 56% to 100%), release build, scalar Rust, synthetic 2928 x 4099 page, best of 5:
+
+| Line | Budget | Clean | Document | Receipt | Verdict |
+|---|---:|---:|---:|---:|---|
+| `enhance`, all threads (Auto / Grayscale: Clean; B&W / Faded: Document, Receipt) | 120 / 250 ms | **72 ms** | **139 ms** | **120 ms** | within 120 ms (Clean) and within 250 ms (B&W), NOISY |
+| `enhance`, 1 thread (batch mode) | about 200 CPU-ms | 264 ms | 610 ms | 485 ms | 1.3x and 2.4-3x over the CPU line (the scalar `f64` threshold pass is 226-335 ms of it) |
+| analysis (proxy, text scale, 2 estimate rounds, tone) | percentile grid 15 ms on the 1.5 MP proxy | 60 ms | 75 ms | 52 ms | **not met as a single stage**: proxy 13-33 ms, text scale 10-12, each estimate round 14-18 |
+| extra peak heap | per-image 3x RGB8 + 64 MB | 16.7 MB | 16.7 MB | 24.8 MB at strength 0.5 | **within**, no full-image float copy; 48 MP 17.8 / 48.3 MB, 100 MP 19.2 / 100.1 MB (Clean / Document) |
+| slider tick on a 2 MP proxy | 16 ms | not met: a preview re-runs the analysis, 30-60 ms at 2 MP | | | no stage cache yet (M7.02) |
+
 ## Verdict summary
 
 | Finding | Evidence | Status |
@@ -178,4 +190,4 @@ A second protocol is less sensitive to drift: 40 images per pass, 5 rounds inter
 
 ## Not measured (stay PROVISIONAL)
 
-`refine` (10 ms), `commit` (100 ms), scheduling slack (75 ms), the real analysis lines (corner net 10-25 ms, orientation, fusion), the enhancement flatten (M7), first paint and first overlay (<= 150 ms p95: needs a scaled JPEG decode, which zune-jpeg lacks, and Tauri IPC), HEIC, the GUI batch with its preview pool, T2 escalation, Tier-L (budgets x2), cold-cache reads, real photographs (0.15 versus 0.4-0.5 bytes per pixel), the Apple-silicon and Tier-M baselines (M1.61, M1.62), and anything at 24 MP. None of the PLAN 7.1 numbers has been replaced by these measurements: they are bounds from a loaded desktop.
+`refine` (10 ms), `commit` (100 ms), scheduling slack (75 ms), the real analysis lines (corner net 10-25 ms, orientation, fusion), the enhancement stage at 48 and 100 MP wall time on an idle machine and on Tier-M (the real pipeline is in the section above and in enhance.md, NOISY), first paint and first overlay (<= 150 ms p95: needs a scaled JPEG decode, which zune-jpeg lacks, and Tauri IPC), HEIC, the GUI batch with its preview pool, T2 escalation, Tier-L (budgets x2), cold-cache reads, real photographs (0.15 versus 0.4-0.5 bytes per pixel), the Apple-silicon and Tier-M baselines (M1.61, M1.62), and anything at 24 MP. None of the PLAN 7.1 numbers has been replaced by these measurements: they are bounds from a loaded desktop.
