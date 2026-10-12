@@ -29,6 +29,10 @@ On 1.4 MP pages (the size of the preview) one `enhance` call takes 25 to 45 ms i
 
 12 MP, 8 threads: extra peak heap **16.7 MB for Clean and 16.7 MB for Document** (the proxy, its working copies and the grids; the flattened luma plane and the result plane are allocated after the input RGB buffer is freed, so they do not raise the peak above the analysis's), **24.8 MB for Receipt at strength 0.5** (the input stays alive to blend). A full-frame `f32` copy of the RGB image would be 144 MB. One thread and eight threads peak within 13 KB of each other (`the_peak_does_not_grow_with_the_thread_count_beyond_the_band_scratch`). `Engine::save_weight` adds `2 B/px` of output for the grey modes plus the proxy to the admission weight.
 
+Large images (`the_peak_at_48_and_100_mp_is_two_bytes_per_pixel_not_a_float_copy`, `#[ignore]`, 8 threads, a striped synthetic page, wall time includes cloning the 144 MB or 300 MB input): **48 MP** Clean 17.8 MB extra peak (0.37 B/px) in 0.20 s, Document 48.3 MB (1.01 B/px) in 0.49 s; **100 MP** Clean 19.2 MB (0.19 B/px) in 0.33 s, Document 100.1 MB (1.00 B/px) in 0.82 s. No overflow (the threshold kernel's sums are exact `u64`, tested to 19 MP of 255 in `threshold.rs` and run here to 100 MP); the nightly job of M7.61 does not exist yet.
+
+Single thread (batch mode, one image per worker), 12 MP, NOISY: Clean 264 ms, Document 610 ms, Receipt 485 ms (the threshold pass is 335 ms and 226 ms of those: the per-pixel `f64` square root of the local threshold is scalar; SIMD, M7.13, is the headroom). Against the plan's batch breakdown (`enhance` about 200 CPU-ms per 12 MP image) Clean is 1.3x and the B&W modes 2.4x to 3x.
+
 ## Determinism and oracles (all in `cargo test`)
 
 * Bytes identical at 1 and 8 threads for Clean, Document and Receipt, at strength 1 and 0.6 (`the_bytes_do_not_depend_on_the_thread_count`), and the strip kernel's own tests (`threshold.rs`).

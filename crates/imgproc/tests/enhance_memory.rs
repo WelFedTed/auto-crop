@@ -122,6 +122,46 @@ fn the_peak_does_not_grow_with_the_thread_count_beyond_the_band_scratch() {
     assert!(eight <= one + 8 * 4 * 8 * 4000 * 4, "{one} vs {eight}");
 }
 
+/// A large striped "page": shaded paper with dark text-like bars (cheap to build at any size).
+fn big_page(w: u32, h: u32) -> Raster {
+    let mut r = Raster::new(w, h);
+    for y in 0..h {
+        let light = 1.0 - 0.45 * (y as f32 / h as f32);
+        for x in 0..w {
+            let bar = (y / 40) % 3 == 0 && (x / 14) % 5 != 0 && y % 40 > 8 && y % 40 < 30;
+            let v = if bar { 40.0 } else { 235.0 } * light;
+            let i = ((y as usize * w as usize) + x as usize) * 3;
+            r.data[i..i + 3].copy_from_slice(&[v as u8, v as u8, (v * 0.92) as u8]);
+        }
+    }
+    r
+}
+
+#[test]
+#[ignore = "48 and 100 MP: slow and memory hungry, run by hand or nightly (ROADMAP M7.61)"]
+fn the_peak_at_48_and_100_mp_is_two_bytes_per_pixel_not_a_float_copy() {
+    for (w, h) in [(6928u32, 6928u32), (10000, 10000)] {
+        let img = big_page(w, h);
+        let px = u64::from(w) * u64::from(h);
+        for mode in [Mode::Clean, Mode::Document] {
+            let t = Instant::now();
+            let extra = extra_peak(img.clone(), mode, 1.0, 8);
+            println!(
+                "{:.0} MP {mode:?}: extra peak {:.1} MB ({:.2} B/px), {:.0} ms",
+                px as f64 / 1e6,
+                extra as f64 / 1e6,
+                extra as f64 / px as f64,
+                t.elapsed().as_secs_f64() * 1e3
+            );
+            // The result plane and the flattened luma: 2 bytes per pixel at most, plus the proxy.
+            assert!(
+                (extra as u64) <= 2 * px + extra_bytes(w, h, mode) + 16 * 1024 * 1024,
+                "{w} x {h} {mode:?}: {extra}"
+            );
+        }
+    }
+}
+
 #[test]
 #[ignore = "measures, does not assert a budget"]
 fn time_the_modes_at_12_mp() {
