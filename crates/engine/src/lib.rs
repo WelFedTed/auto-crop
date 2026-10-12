@@ -4,8 +4,10 @@
 //! Job queue, edit pipeline and safe writes.
 
 pub mod api;
+pub mod colour;
 pub mod commit;
 pub mod convert;
+pub mod convert_batch;
 pub mod curved;
 mod engine;
 pub mod enumerate;

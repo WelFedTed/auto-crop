@@ -287,6 +287,8 @@ pub(crate) struct Inner {
     /// Per-run knobs of a headless front end (crop margin); the defaults are what every other
     /// front end has always had.
     pub(crate) run: Mutex<RunOptions>,
+    /// The files of the Convert flow and the state of its run (`crate::convert_batch`).
+    pub(crate) convert: Mutex<crate::convert_batch::Session>,
 }
 
 /// What an engine does on start-up besides being created (see [`Engine::with_settings`]).
@@ -376,6 +378,7 @@ impl Engine {
                 reserved: Mutex::new(ReservedKeys::default()),
                 session: Mutex::new(auto_crop_core::SessionHistory::new()),
                 run: Mutex::new(RunOptions::default()),
+                convert: Mutex::new(crate::convert_batch::Session::default()),
             }),
         };
         if housekeeping != Housekeeping::None {

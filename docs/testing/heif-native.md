@@ -37,6 +37,7 @@ The libraries must be found at run time: on Windows put `target/native/prefix/bi
 ```
 cargo test -p auto-crop-codecs --features heif          # real AVIF and HEIC files, limits, orientation, hostile input
 cargo test -p auto-crop-engine --features heif          # open AVIF, never replace it, copy it as PNG
+cargo test -p auto-crop-engine --features heif --test convert_heif   # the Convert flow on the committed AVIF files and the libheif archive HEIC files (ADR-0012)
 cargo run -p xtask --features heif -- make-hostile      # the hostile corpus through libheif and dav1d, each file in its own process
 cargo run --release -p auto-crop-codecs --features heif --example heif_probe -- --repeat 10 file.avif
 ```

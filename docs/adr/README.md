@@ -15,3 +15,4 @@ Numbered `NNNN-slug.md` records using [0000-template.md](0000-template.md). Ever
 | [0009](0009-heif-decode-backend.md) | HEIC, HEIF and AVIF decoding: libheif backend in codecs, dav1d, header walk | accepted |
 | [0010](0010-learned-detector-feasibility.md) | Learned page-corner detector: feasibility study (GO-IF) | accepted |
 | [0011](0011-cli-argument-parser.md) | CLI argument parser: hand-written, table-driven (no clap) | accepted |
+| [0012](0012-convert-flow.md) | The Convert flow: one engine path for the CLI and the app, what a conversion replaces, colour and metadata | accepted |

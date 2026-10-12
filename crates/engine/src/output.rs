@@ -141,6 +141,40 @@ impl SourceMeta {
         Self { icc, jpeg }
     }
 
+    /// [`SourceMeta::read`], plus the EXIF of a PNG, WebP, HEIC or AVIF source (a JPEG's comes from
+    /// `read`): a conversion carries it into the new file with the Orientation reset (the decode
+    /// turned the pixels) and the dimensions rewritten, like the metadata of a JPEG source.
+    pub fn read_for_convert(
+        format: Format,
+        bytes: &[u8],
+        icc: Option<Arc<Vec<u8>>>,
+        limits: &auto_crop_codecs::DecodeLimits,
+    ) -> Self {
+        let mut m = Self::read(format, bytes, icc);
+        if m.jpeg.is_none()
+            && let Some(exif) = auto_crop_codecs::extract_exif(bytes, format, limits)
+        {
+            m.jpeg = Some(JpegMeta {
+                exif: Some(exif),
+                ..JpegMeta::default()
+            });
+        }
+        m
+    }
+
+    /// After a colour conversion: the profile the output embeds is `icc`, and when `to_srgb` the
+    /// EXIF `ColorSpace` tag, if there is one, says sRGB.
+    pub fn with_colour(mut self, icc: Option<Vec<u8>>, to_srgb: bool) -> Self {
+        self.icc = icc.map(Arc::new);
+        if to_srgb
+            && let Some(jm) = self.jpeg.as_mut()
+            && let Some(e) = jm.exif.take()
+        {
+            jm.exif = Some(jpeg_meta::exif_set_srgb(&e));
+        }
+        self
+    }
+
     /// `q_est` when the source's tables are IJG's.
     pub fn q_est(&self) -> Option<u8> {
         self.jpeg
@@ -214,9 +248,31 @@ pub fn encode_raster(
                 None => raw,
             }
         }
-        Format::Png => PngEncoder
-            .encode(&src, &OutputSpec::default(), &encode_meta, &cancel)
-            .map_err(|_| ErrKind::EncodeFailed)?,
+        Format::Png => {
+            let raw = PngEncoder
+                .encode(&src, &OutputSpec::default(), &encode_meta, &cancel)
+                .map_err(|_| ErrKind::EncodeFailed)?;
+            // The EXIF of the source (orientation reset, size rewritten) goes in as an `eXIf`
+            // chunk; XMP and IPTC have no place in a PNG this writer makes.
+            let exif = meta
+                .jpeg
+                .as_ref()
+                .filter(|_| !o.strip_metadata)
+                .and_then(|jm| jm.exif.as_deref())
+                .and_then(|e| {
+                    jpeg_meta::exif_patch(
+                        e,
+                        &jpeg_meta::ExifPatch {
+                            dims,
+                            strip_location: o.strip_location,
+                        },
+                    )
+                });
+            match exif {
+                Some(e) => png_insert_exif(&raw, &e),
+                None => raw,
+            }
+        }
         // The writers that do not exist yet (M2.26, M11): never reached for a replace (the
         // replaceability gate stops these formats) and refused for a copy.
         _ => return Err(ErrKind::UnsupportedOutput),
@@ -227,9 +283,66 @@ pub fn encode_raster(
     })
 }
 
+/// CRC-32 (IEEE) as PNG chunks use it. Bitwise: only ever run over an EXIF blob.
+fn crc32(parts: &[&[u8]]) -> u32 {
+    let mut crc = 0xFFFF_FFFFu32;
+    for part in parts {
+        for &b in *part {
+            crc ^= u32::from(b);
+            for _ in 0..8 {
+                crc = if crc & 1 == 1 {
+                    (crc >> 1) ^ 0xEDB8_8320
+                } else {
+                    crc >> 1
+                };
+            }
+        }
+    }
+    !crc
+}
+
+/// Inserts an `eXIf` chunk holding `exif` right after the `IHDR` chunk of `png`. A blob that does
+/// not fit a chunk, or a stream that does not start with a PNG header, is returned unchanged.
+pub(crate) fn png_insert_exif(png: &[u8], exif: &[u8]) -> Vec<u8> {
+    const AFTER_IHDR: usize = 8 + 4 + 4 + 13 + 4;
+    if png.len() < AFTER_IHDR
+        || !png.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A])
+        || &png[12..16] != b"IHDR"
+        || exif.is_empty()
+        || exif.len() > 0x00FF_FFFF
+    {
+        return png.to_vec();
+    }
+    let mut out = Vec::with_capacity(png.len() + exif.len() + 12);
+    out.extend_from_slice(&png[..AFTER_IHDR]);
+    out.extend_from_slice(&(exif.len() as u32).to_be_bytes());
+    out.extend_from_slice(b"eXIf");
+    out.extend_from_slice(exif);
+    out.extend_from_slice(&crc32(&[b"eXIf", exif]).to_be_bytes());
+    out.extend_from_slice(&png[AFTER_IHDR..]);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_exif_chunk_is_inserted_with_a_valid_crc_and_the_png_still_decodes() {
+        let r = gradient(20, 12);
+        let blob = auto_crop_codecs::fixtures::exif_blob(6, true);
+        let raw = auto_crop_codecs::encode(&r, Format::Png, 0, None).unwrap();
+        let with = png_insert_exif(&raw, &blob);
+        assert_eq!(with.len(), raw.len() + blob.len() + 12);
+        let d = auto_crop_codecs::decode(&with).unwrap();
+        // The orientation in the chunk is applied by the decoder: 6 turns the 20 x 12 picture.
+        assert_eq!((d.raster.width, d.raster.height), (12, 20));
+        assert_eq!(d.exif_orientation, 6);
+        // The `png` crate checks chunk CRCs while decoding, so a bad CRC would have failed above;
+        // check the arithmetic against a known value too ("123456789" has CRC-32 0xCBF43926).
+        assert_eq!(crc32(&[b"123456789"]), 0xCBF4_3926);
+        assert_eq!(png_insert_exif(b"not a png", &blob), b"not a png");
+    }
 
     #[test]
     fn the_presets_clamp_around_the_estimate() {

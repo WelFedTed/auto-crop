@@ -17,6 +17,18 @@ pub fn input_extensions() -> &'static [&'static str] {
     auto_crop_codecs::supported_input_extensions()
 }
 
+/// The extensions the Convert picker offers: [`input_extensions`] plus HEIC, HEIF and AVIF in every
+/// build (a build without the decoder lists them and says why it cannot convert them).
+pub fn convert_extensions() -> Vec<&'static str> {
+    let mut v: Vec<&'static str> = input_extensions().to_vec();
+    for e in ["heic", "heif", "avif"] {
+        if !v.contains(&e) {
+            v.push(e);
+        }
+    }
+    v
+}
+
 /// File extensions this build opens (matched case-insensitively; the content is sniffed later).
 /// The list is the codecs' own: only formats this build can decode (JPEG, PNG, TIFF and WebP, and
 /// with the `heif` feature HEIC, HEIF and AVIF). Opening a format is not the same as being able to
@@ -57,7 +69,13 @@ fn is_link(meta: &fs::Metadata) -> bool {
     false
 }
 
-fn walk(dir: &Path, depth: usize, include_subfolders: bool, out: &mut Found) {
+fn walk(
+    dir: &Path,
+    depth: usize,
+    include_subfolders: bool,
+    out: &mut Found,
+    keep: fn(&Path) -> bool,
+) {
     let Ok(rd) = fs::read_dir(dir) else { return };
     let mut entries: Vec<_> = rd.flatten().collect();
     entries.sort_by_key(|e| e.file_name());
@@ -75,9 +93,9 @@ fn walk(dir: &Path, depth: usize, include_subfolders: bool, out: &mut Found) {
         } else if meta.is_dir() {
             let name = e.file_name().to_string_lossy().into_owned();
             if include_subfolders && depth < MAX_DEPTH && name != "AutoCrop" {
-                walk(&path, depth + 1, include_subfolders, out);
+                walk(&path, depth + 1, include_subfolders, out, keep);
             }
-        } else if meta.is_file() && is_candidate(&path) {
+        } else if meta.is_file() && keep(&path) {
             out.files.push(path);
         }
     }
@@ -85,6 +103,24 @@ fn walk(dir: &Path, depth: usize, include_subfolders: bool, out: &mut Found) {
 
 /// Expands files and folders into candidate files, in a stable order, without duplicates.
 pub fn collect(roots: &[PathBuf], include_subfolders: bool) -> Found {
+    collect_with(roots, include_subfolders, is_candidate)
+}
+
+/// Like [`is_candidate`], plus the HEIC, HEIF and AVIF extensions in every build: a conversion
+/// lists them so a build without the HEIC decoder can say so instead of silently ignoring them.
+pub fn is_convert_candidate(path: &Path) -> bool {
+    let ext = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    (is_candidate(path) || matches!(ext.as_str(), "heic" | "heif" | "avif"))
+        && !path
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().starts_with(".autocrop-"))
+}
+
+/// [`collect`] with the files kept by `keep` (see [`is_candidate`], [`is_convert_candidate`]).
+pub fn collect_with(roots: &[PathBuf], include_subfolders: bool, keep: fn(&Path) -> bool) -> Found {
     let mut out = Found::default();
     for root in roots {
         let Ok(meta) = fs::symlink_metadata(root) else {
@@ -93,8 +129,8 @@ pub fn collect(roots: &[PathBuf], include_subfolders: bool) -> Found {
         if is_link(&meta) {
             out.links_skipped += 1;
         } else if meta.is_dir() {
-            walk(root, 0, include_subfolders, &mut out);
-        } else if meta.is_file() && is_candidate(root) {
+            walk(root, 0, include_subfolders, &mut out, keep);
+        } else if meta.is_file() && keep(root) {
             out.files.push(root.clone());
         }
     }
