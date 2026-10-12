@@ -807,12 +807,23 @@ pub fn run() {
         .setup(|app| {
             // "Open with" and `AutoCrop.exe file-or-folder ...`: paths on the command line are opened like a
             // drop. They are opened here, in Rust, before the webview asks for its list of items.
-            let paths: Vec<PathBuf> = std::env::args_os()
-                .skip(1)
+            let mut args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+            // `AutoCrop.exe --convert file-or-folder ...` (a "Convert with Auto Crop" shortcut)
+            // puts the paths on the Convert list instead of opening them for cropping.
+            let convert = args.first().is_some_and(|a| a == "--convert");
+            if convert {
+                args.remove(0);
+            }
+            let paths: Vec<PathBuf> = args
+                .into_iter()
                 .map(PathBuf::from)
                 .filter(|p| p.exists())
                 .collect();
-            if !paths.is_empty()
+            if convert && !paths.is_empty() {
+                if let Some(shared) = app.try_state::<Shared>() {
+                    shared.engine.convert_add(&paths, true);
+                }
+            } else if !paths.is_empty()
                 && let Some(shared) = app.try_state::<Shared>()
             {
                 let summary = shared.engine.open_paths(&paths, true);
