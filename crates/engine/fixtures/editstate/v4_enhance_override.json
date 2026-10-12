@@ -1,0 +1,97 @@
+{
+  "version": 4,
+  "orientation": {
+    "quarterTurns": 0,
+    "mirror": false
+  },
+  "items": [
+    {
+      "id": 1,
+      "include": true,
+      "geometry": {
+        "type": "quad",
+        "corners": [
+          {
+            "x": 0.04,
+            "y": 0.05
+          },
+          {
+            "x": 0.47,
+            "y": 0.04
+          },
+          {
+            "x": 0.48,
+            "y": 0.46
+          },
+          {
+            "x": 0.05,
+            "y": 0.47
+          }
+        ],
+        "quarterTurns": 0,
+        "mirror": false,
+        "fineDeg": 0.0
+      },
+      "enhanceOverride": null,
+      "origin": {
+        "kind": "auto",
+        "pipelineVer": 2
+      },
+      "confidence": {
+        "score": 0.96875,
+        "forced": null,
+        "reasons": []
+      }
+    },
+    {
+      "id": 2,
+      "include": true,
+      "geometry": {
+        "type": "quad",
+        "corners": [
+          {
+            "x": 0.53,
+            "y": 0.05
+          },
+          {
+            "x": 0.96,
+            "y": 0.06
+          },
+          {
+            "x": 0.95,
+            "y": 0.47
+          },
+          {
+            "x": 0.52,
+            "y": 0.46
+          }
+        ],
+        "quarterTurns": 0,
+        "mirror": false,
+        "fineDeg": 0.0
+      },
+      "enhanceOverride": {
+        "mode": "document",
+        "strength": 80
+      },
+      "origin": {
+        "kind": "manual"
+      },
+      "confidence": null
+    }
+  ],
+  "margin": {
+    "kind": "paperEdge",
+    "margin": 0.0
+  },
+  "enhance": {
+    "mode": "clean",
+    "strength": 70
+  },
+  "split": {
+    "policy": "auto",
+    "profile": "photos",
+    "orderMode": "reading",
+    "nextId": 3
+  }
+}

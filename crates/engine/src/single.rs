@@ -29,12 +29,13 @@ use crate::group::{
     SourceFingerprint, commit_single,
 };
 use crate::lossless::{Backend, try_lossless};
-use crate::output::{SourceMeta, encode_raster};
+use crate::output::{SourceMeta, encode_enhanced};
 use crate::source::hash_file;
 use crate::space::{Need, preflight};
 use crate::store::NewBackup;
 use crate::util::blake3_hex;
 use auto_crop_codecs::{Format, decode_with};
+use auto_crop_imgproc::cancel::NeverCancel;
 use auto_crop_imgproc::render::Limits;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -95,10 +96,13 @@ impl Engine {
             )
         };
         // The first included crop that renders: a quad, or a curved page.
-        let shape = state
+        let (crop_id, shape) = state
             .included()
-            .find_map(|i| PageShape::of(&i.geometry))
+            .find_map(|i| PageShape::of(&i.geometry).map(|s| (i.id, s)))
             .ok_or(ErrKind::NoCrop)?;
+        // What this crop is saved with (its own override, else the image's default). Original, the
+        // default, leaves every byte below exactly as it was before enhancement existed.
+        let enhance = state.effective_enhance(crop_id).unwrap_or_default();
         let opts = self.options();
         let copy = target == SaveTarget::Copy;
         // A curved page is held for review: replacing the original needs the user's acceptance of
@@ -177,7 +181,9 @@ impl Engine {
         let meta = SourceMeta::read(src_format, &bytes, icc.clone());
         let mut notices: Vec<String> = Vec::new();
         // Never for a curved page: the lossless path moves whole MCU blocks and cannot flatten.
-        let lossless = (src_format == Format::Jpeg && fmt == Format::Jpeg)
+        // Never for an enhanced crop either: its pixels are recomputed, so it costs one
+        // re-encode generation (and the save sheet says so).
+        let lossless = (src_format == Format::Jpeg && fmt == Format::Jpeg && enhance.is_identity())
             .then(|| {
                 shape
                     .as_quad()
@@ -201,12 +207,21 @@ impl Engine {
             None => {
                 let decoded = decode_with(&bytes, &opts.limits()).map_err(codec_err)?;
                 drop(bytes);
-                let out = shape
-                    .render(&decoded.raster, Limits::pixels(opts.max_pixels))
+                // Geometry (one resample, from the full-resolution source) -> flatten ->
+                // threshold -> encode.
+                let page = shape
+                    .render_enhanced(
+                        &decoded.raster,
+                        Limits::pixels(opts.max_pixels),
+                        enhance,
+                        &NeverCancel,
+                    )
                     .map_err(|_| ErrKind::NoCrop)?;
                 drop(decoded);
-                let enc = encode_raster(&out, fmt, &meta, &opts)?;
-                (enc.bytes, (out.width, out.height), enc.expect)
+                let dims = page.pixels.dims();
+                let enc = encode_enhanced(&page.pixels, fmt, &meta, &opts)?;
+                notices.extend(enc.notices.iter().map(|n| (*n).to_owned()));
+                (enc.encoded.bytes, dims, enc.encoded.expect)
             }
         };
         let mtime = UNIX_EPOCH + Duration::from_millis(orig_mtime_ms.max(0) as u64);
@@ -411,6 +426,14 @@ impl Engine {
         else {
             return false;
         };
+        // An enhanced crop is a change worth a rewrite even when its geometry is not.
+        if it
+            .history
+            .as_ref()
+            .is_some_and(|h| h.current().is_enhanced())
+        {
+            return false;
+        }
         it.exif_orientation == 1
             && q.quarter_turns % 4 == 0
             && !q.mirror

@@ -8,12 +8,14 @@
 //! ICC policy of [`EngineOptions`]). A front end that writes copies itself (`auto-crop render`,
 //! `process --output`) calls this so its files equal what an in-place save would write.
 
+use crate::curved::PageShape;
 use crate::error::{ErrKind, Result, codec_err};
 use crate::lossless::{Backend, try_lossless};
-use crate::output::{EngineOptions, SourceMeta, encode_raster};
+use crate::output::{EngineOptions, SourceMeta, encode_enhanced};
 use auto_crop_codecs::{Format, decode_with, sniff};
-use auto_crop_core::QuadWarp;
-use auto_crop_imgproc::render::{Limits, render_quad};
+use auto_crop_core::{Enhance, QuadWarp};
+use auto_crop_imgproc::cancel::NeverCancel;
+use auto_crop_imgproc::render::Limits;
 use std::sync::Arc;
 
 /// One finished output.
@@ -25,6 +27,8 @@ pub struct RenderedOutput {
     pub format: Format,
     /// Produced by moving JPEG coefficients, with no re-encode.
     pub lossless: bool,
+    /// Notice codes of an enhanced output (`enhance.icc_dropped`, `enhance.png_recommended`).
+    pub notices: Vec<String>,
 }
 
 /// The format of the outputs of a source in `source`: the source's own when this build can write
@@ -48,8 +52,24 @@ pub fn render_outputs(
     want: Option<Format>,
     opts: &EngineOptions,
 ) -> Result<Vec<RenderedOutput>> {
+    render_outputs_enhanced(source, quads, &[], want, opts)
+}
+
+/// [`render_outputs`] with an enhancement per quad (`enhances[i]` is the enhancement of
+/// `quads[i]`; a missing entry is `Original`). The same pixel production as an in-place save: an
+/// enhanced quad skips the lossless JPEG path, is rendered once, enhanced, and written through
+/// `output::encode_enhanced` (grey for Document and Receipt, the colour profile dropped with a
+/// notice in the saved path, PNG recommended), so `process --output` and an in-place `process`
+/// agree byte for byte.
+pub fn render_outputs_enhanced(
+    source: &[u8],
+    quads: &[QuadWarp],
+    enhances: &[Enhance],
+    want: Option<Format>,
+    opts: &EngineOptions,
+) -> Result<Vec<RenderedOutput>> {
     crate::run_isolated(std::panic::AssertUnwindSafe(|| {
-        render_inner(source, quads, want, opts)
+        render_inner(source, quads, enhances, want, opts)
     }))
     .unwrap_or(Err(ErrKind::InternalPanic))
 }
@@ -57,16 +77,19 @@ pub fn render_outputs(
 fn render_inner(
     source: &[u8],
     quads: &[QuadWarp],
+    enhances: &[Enhance],
     want: Option<Format>,
     opts: &EngineOptions,
 ) -> Result<Vec<RenderedOutput>> {
     if quads.is_empty() {
         return Err(ErrKind::NoCrop);
     }
+    let enhance_of = |i: usize| enhances.get(i).copied().unwrap_or_default();
     let src_format = sniff(source);
-    // The exact lossless path: one JPEG to one JPEG.
+    // The exact lossless path: one JPEG to one JPEG, for the identity only.
     if let (1, Some(Format::Jpeg)) = (quads.len(), src_format)
         && want.is_none_or(|f| f == Format::Jpeg)
+        && enhance_of(0).is_identity()
     {
         let meta = SourceMeta::read(Format::Jpeg, source, None);
         if let Some(l) = try_lossless(&mut Backend::new(), source, &quads[0], &meta, opts) {
@@ -76,6 +99,7 @@ fn render_inner(
                 height: l.dims.1,
                 format: Format::Jpeg,
                 lossless: true,
+                notices: Vec::new(),
             }]);
         }
     }
@@ -87,16 +111,25 @@ fn render_inner(
     let meta = SourceMeta::read(decoded.format, source, decoded.icc.map(Arc::new));
     quads
         .iter()
-        .map(|q| {
-            let out = render_quad(&decoded.raster, q, Limits::pixels(opts.max_pixels))
+        .enumerate()
+        .map(|(i, q)| {
+            let page = PageShape::Quad(q.clone())
+                .render_enhanced(
+                    &decoded.raster,
+                    Limits::pixels(opts.max_pixels),
+                    enhance_of(i),
+                    &NeverCancel,
+                )
                 .map_err(|_| ErrKind::NoCrop)?;
-            let enc = encode_raster(&out, fmt, &meta, opts)?;
+            let (width, height) = page.pixels.dims();
+            let enc = encode_enhanced(&page.pixels, fmt, &meta, opts)?;
             Ok(RenderedOutput {
-                bytes: enc.bytes,
-                width: out.width,
-                height: out.height,
+                bytes: enc.encoded.bytes,
+                width,
+                height,
                 format: fmt,
                 lossless: false,
+                notices: enc.notices.iter().map(|n| (*n).to_owned()).collect(),
             })
         })
         .collect()

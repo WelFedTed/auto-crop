@@ -642,6 +642,149 @@ fn analysis_can_be_reused_for_another_strength() {
     assert_eq!(a, b);
 }
 
+/// One labelled sample of the suggestion suites.
+struct Sample {
+    name: String,
+    img: Raster,
+    /// The suggestion should fire.
+    page: bool,
+}
+
+/// Pages that enhancement would visibly improve (receipts and documents under uneven or dim
+/// light, a colour cast, thermal fade), a flat bright page that it would not, and photographs.
+/// `seeds` picks the page and photo seeds, so the dev set and the held-out set share no image.
+fn suggestion_suite(seeds: &[u64]) -> Vec<Sample> {
+    let mut out = Vec::new();
+    for &seed in seeds {
+        let lights = [
+            ("tilt", Light::Tilt { dx: 0.4, dy: 0.15 }),
+            (
+                "shadow",
+                Light::Shadow {
+                    depth: 0.45,
+                    width: 180.0,
+                },
+            ),
+            ("vignette", Light::Vignette { k: 0.4 }),
+        ];
+        for (i, (ln, light)) in lights.iter().enumerate() {
+            let s = seed * 10 + i as u64;
+            let doc = page(&PageSpec::document(s).with_objects());
+            out.push(Sample {
+                name: format!("document {ln} #{s}"),
+                img: lit(&doc.truth, *light, [1.0; 3], 2.5, s),
+                page: true,
+            });
+            let spec = PageSpec::receipt(s);
+            let rcpt = page(&spec);
+            let faded = if i == 2 {
+                fade(&rcpt.truth, spec.paper, 0.35)
+            } else {
+                rcpt.truth.clone()
+            };
+            out.push(Sample {
+                name: format!("receipt {ln}{} #{s}", if i == 2 { " faded" } else { "" }),
+                img: lit(&faded, *light, [1.0, 0.93, 0.85], 2.5, s),
+                page: true,
+            });
+        }
+        // Coloured paper under a lamp.
+        let warm = page(&PageSpec::document(seed * 10 + 7));
+        out.push(Sample {
+            name: format!("document warm lamp #{seed}"),
+            img: lit(&warm.truth, Light::Flat, [1.0, 0.82, 0.6], 2.5, seed),
+            page: true,
+        });
+        // Nothing to improve: black on white, even light, paper at 250.
+        let mut crisp = PageSpec::document(seed * 10 + 8);
+        crisp.paper = [252; 3];
+        crisp.ink = [10; 3];
+        let flat = page(&crisp);
+        out.push(Sample {
+            name: format!("flat crisp scan #{seed}"),
+            img: lit(&flat.truth, Light::Flat, [1.0; 3], 1.0, seed),
+            page: false,
+        });
+        for (k, kind) in PhotoKind::ALL.iter().enumerate() {
+            let (w, h) = if k % 2 == 0 { (1000, 750) } else { (600, 900) };
+            out.push(Sample {
+                name: format!("photo {kind:?} #{seed}"),
+                img: photo(*kind, seed * 100 + k as u64, w, h),
+                page: false,
+            });
+        }
+    }
+    out
+}
+
+fn judge(set: &[Sample], print: bool) -> (usize, usize, usize, usize) {
+    let (mut tp, mut fp, mut fnn, mut tn) = (0, 0, 0, 0);
+    for s in set {
+        let m = measures::measure(&s.img, &NeverCancel).unwrap();
+        let sug = measures::suggest(&m);
+        if print {
+            println!(
+                "{:34} {:5} paper {:.2} ink {:.3} shade {:.2} luma {:3.0} cast {:.3} colour {:.3} comps {:5} conc {:.2} glyph {:.2} faded {:5} rej {:.2} -> {:?}",
+                s.name,
+                if s.page { "PAGE" } else { "other" },
+                m.paper_fraction,
+                m.ink_fraction,
+                m.shading,
+                m.paper_luma,
+                m.cast,
+                m.colour_fraction,
+                m.text_components,
+                m.concentration,
+                m.glyph_ink_share,
+                m.faded,
+                m.rejected,
+                sug.as_ref().map(|x| (
+                    x.mode,
+                    x.reasons.iter().map(|r| r.code()).collect::<Vec<_>>()
+                )),
+            );
+        }
+        match (s.page, sug.is_some()) {
+            (true, true) => tp += 1,
+            (true, false) => fnn += 1,
+            (false, true) => fp += 1,
+            (false, false) => tn += 1,
+        }
+    }
+    (tp, fp, fnn, tn)
+}
+
+#[test]
+#[ignore = "prints the measures of every sample (threshold calibration)"]
+fn suggestion_calibration_table() {
+    let dev = suggestion_suite(&[1, 2, 3, 4]);
+    let (tp, fp, fnn, tn) = judge(&dev, true);
+    println!("dev: tp {tp} fp {fp} fn {fnn} tn {tn}");
+}
+
+#[test]
+fn the_suggestion_is_precise_on_pages_and_silent_on_photographs() {
+    // Dev set: the seeds the thresholds were chosen on. Held-out set: other seeds, never looked at
+    // while choosing them.
+    for (label, seeds) in [("dev", vec![1u64, 2, 3, 4]), ("held-out", vec![11, 12, 13])] {
+        let set = suggestion_suite(&seeds);
+        let (tp, fp, fnn, tn) = judge(&set, false);
+        println!("{label}: tp {tp} fp {fp} fn {fnn} tn {tn}");
+        assert_eq!(
+            fp, 0,
+            "{label}: a false positive on a photograph or a clean scan"
+        );
+        let precision = tp as f32 / (tp + fp).max(1) as f32;
+        let recall = tp as f32 / (tp + fnn).max(1) as f32;
+        assert!(precision >= 0.9, "{label}: precision {precision}");
+        assert!(
+            recall >= 0.85,
+            "{label}: recall {recall} ({fnn} pages missed)"
+        );
+        assert!(tn >= 9, "{label}");
+    }
+}
+
 #[test]
 #[ignore = "debug print"]
 fn debug_text_scale_faded() {

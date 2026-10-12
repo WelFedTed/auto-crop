@@ -296,11 +296,14 @@ impl Engine {
         let src_px = u64::from(dims.0) * u64::from(dims.1);
         let cap = self.options().max_pixels;
         let out_px = curved_output_pixels(&state, dims, cap);
-        Some(if out_px > 0 {
+        let base = if out_px > 0 {
             curved_job_weight(src_px, out_px)
         } else {
             job_weight(src_px)
-        })
+        };
+        // Enhancement: by OUTPUT pixels (a flattened luma plane and the result plane, plus the
+        // proxy), whatever the source size.
+        Some(base.saturating_add(crate::enhance::enhance_extra_bytes(&state, dims, cap)))
     }
 }
 

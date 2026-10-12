@@ -28,8 +28,8 @@ pub use cancel::{BAND_ROWS, CancelToken, GenerationCounter, Interrupt, Level};
 pub use confidence::{Confidence, Forced, Reason, ReasonCode};
 pub use curve::{ArcCurve, CoonsSampler, Curve, CurveError, CurveGrid, CurveWarp};
 pub use edit::{
-    EDIT_STATE_VERSION, EditState, Enhance, Item, ItemId, MarginPolicy, OrderMode, Orient, Origin,
-    SplitPolicy, SplitProfile, SplitState,
+    EDIT_STATE_VERSION, ENHANCE_FULL, EditState, Enhance, EnhanceMode, Item, ItemId, MarginPolicy,
+    OrderMode, Orient, Origin, SplitPolicy, SplitProfile, SplitState,
 };
 pub use error::{CoreError, ErrKind};
 pub use geometry::{ExifOrientation, Geometry, GridWarp, Pt, QuadWarp, Side};

@@ -441,7 +441,7 @@ fn undo_and_redo_restore_the_curves_exactly_and_edits_are_one_step_per_gesture()
     assert_eq!(v.crops[0].curves.as_ref(), Some(&nine));
     // The state itself round-trips through the persisted schema.
     let st = e.engine.edit_state(v.id).unwrap();
-    assert_eq!(st.version, 3);
+    assert_eq!(st.version, auto_crop_core::EDIT_STATE_VERSION);
     let back =
         auto_crop_engine::migrate::migrate_str(&serde_json::to_string(&st).unwrap()).unwrap();
     assert_eq!(back, st);

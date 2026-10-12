@@ -20,7 +20,12 @@ use serde::{Deserialize, Serialize};
 /// Version 3 (curved pages, `docs/dev/curved-pages.md`) adds the geometry variant `curved`. Nothing
 /// in an older document changes meaning, so v2 -> v3 only raises the version; the bump exists so an
 /// older build refuses a document that holds curves (`SchemaTooNew`) instead of half-reading it.
-pub const EDIT_STATE_VERSION: u32 = 3;
+///
+/// Version 4 (enhancement, PLAN 5) gives [`Enhance`] its modes and a strength: `{"mode": "clean",
+/// "strength": 100}`, `document`, `receipt`. `{"mode": "original"}`, the only value a v3 document
+/// can hold, keeps its shape and meaning, so v3 -> v4 only raises the version (lossless); the bump
+/// makes an older build refuse an enhanced document (`SchemaTooNew`) instead of failing to parse it.
+pub const EDIT_STATE_VERSION: u32 = 4;
 
 /// Stable id of an item across edits and undo (not render-relevant).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -64,13 +69,137 @@ impl Default for MarginPolicy {
     }
 }
 
-/// Enhancement (B13): suggested, never forced. v1 has only `Original`; the modes and their
-/// parameters (PLAN 5.2) are additive.
+/// The enhancement modes by name (PLAN 5.4), for callers that pass a mode and a strength
+/// separately. `Original` is the default and never touches the pixels (B13).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EnhanceMode {
+    #[default]
+    Original,
+    /// Flatten the lighting, set the levels, keep the colour.
+    Clean,
+    /// Flatten and binarise (Sauvola): 8-bit grey, black on white.
+    Document,
+    /// Flatten, stretch the contrast and binarise (NICK, faded thermal print): 8-bit grey.
+    Receipt,
+}
+
+impl EnhanceMode {
+    /// A stable lowercase name (`original`, `clean`, `document`, `receipt`).
+    pub fn name(self) -> &'static str {
+        match self {
+            EnhanceMode::Original => "original",
+            EnhanceMode::Clean => "clean",
+            EnhanceMode::Document => "document",
+            EnhanceMode::Receipt => "receipt",
+        }
+    }
+
+    /// The mode writes one grey channel instead of colour.
+    pub fn is_gray_output(self) -> bool {
+        matches!(self, EnhanceMode::Document | EnhanceMode::Receipt)
+    }
+}
+
+/// Full strength, in percent.
+pub const ENHANCE_FULL: u8 = 100;
+
+fn full_strength() -> u8 {
+    ENHANCE_FULL
+}
+
+/// Enhancement (B13): suggested, never forced; `Original` is the default and the only value that
+/// is ever in a state unless a person (or an opt-in CLI run) chose another. A mode carries its
+/// strength in whole percent (0 to 100; more is read as 100): the output is the input blended
+/// with the enhanced result, so 0 is `Original` and 100 is the mode itself. Percent, not a float,
+/// so the value compares, hashes and serialises exactly.
+///
+/// JSON: `{"mode": "original"}` or `{"mode": "document", "strength": 100}` (an absent strength is
+/// 100).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "camelCase")]
 pub enum Enhance {
     #[default]
     Original,
+    Clean {
+        #[serde(default = "full_strength")]
+        strength: u8,
+    },
+    Document {
+        #[serde(default = "full_strength")]
+        strength: u8,
+    },
+    Receipt {
+        #[serde(default = "full_strength")]
+        strength: u8,
+    },
+}
+
+impl Enhance {
+    /// `mode` at `strength` percent (`Original` ignores it).
+    pub fn new(mode: EnhanceMode, strength: u8) -> Self {
+        match mode {
+            EnhanceMode::Original => Enhance::Original,
+            EnhanceMode::Clean => Enhance::Clean { strength },
+            EnhanceMode::Document => Enhance::Document { strength },
+            EnhanceMode::Receipt => Enhance::Receipt { strength },
+        }
+    }
+
+    /// `mode` at a strength between 0 and 1 (clamped, NaN is 0), rounded to whole percent.
+    pub fn from_fraction(mode: EnhanceMode, strength: f32) -> Self {
+        let s = if strength.is_nan() {
+            0.0
+        } else {
+            strength.clamp(0.0, 1.0)
+        };
+        Self::new(mode, (s * 100.0).round() as u8)
+    }
+
+    pub fn mode(self) -> EnhanceMode {
+        match self {
+            Enhance::Original => EnhanceMode::Original,
+            Enhance::Clean { .. } => EnhanceMode::Clean,
+            Enhance::Document { .. } => EnhanceMode::Document,
+            Enhance::Receipt { .. } => EnhanceMode::Receipt,
+        }
+    }
+
+    /// Strength in percent, at most 100; `Original` has none (0).
+    pub fn strength(self) -> u8 {
+        match self {
+            Enhance::Original => 0,
+            Enhance::Clean { strength }
+            | Enhance::Document { strength }
+            | Enhance::Receipt { strength } => strength.min(ENHANCE_FULL),
+        }
+    }
+
+    /// Strength as a fraction between 0 and 1.
+    pub fn strength01(self) -> f32 {
+        f32::from(self.strength()) / 100.0
+    }
+
+    /// The pixels come out as they went in: `Original`, or a mode at strength 0. Such a state
+    /// keeps the lossless JPEG path and never touches the pixels.
+    pub fn is_identity(self) -> bool {
+        self.strength() == 0
+    }
+
+    /// The same mode at another strength.
+    pub fn with_strength(self, strength: u8) -> Self {
+        Self::new(self.mode(), strength)
+    }
+
+    /// The identity forms collapse to `Original` and the strength is clamped: equal pixels, equal
+    /// value (what the render hash is made of).
+    fn normalised(self) -> Self {
+        if self.is_identity() {
+            Enhance::Original
+        } else {
+            self.with_strength(self.strength())
+        }
+    }
 }
 
 /// Where an item came from. Provenance: render ignores it.
@@ -336,6 +465,35 @@ impl EditState {
         h.geometry(&it.geometry);
         Some(h.finish())
     }
+
+    /// What decides the page of ONE item BEFORE any enhancement: the whole-image orientation and
+    /// margin and the item's geometry. The suggestion for an item is a function of this (it
+    /// measures the page as it would be saved with enhancement off), so it can be cached by it.
+    pub fn item_page_hash(&self, id: ItemId) -> Option<u64> {
+        let it = self.item(id)?;
+        let mut h = Fnv::new();
+        h.u8(0x5A); // its own domain
+        h.u8(self.orientation.quarter_turns % 4);
+        h.bool(self.orientation.mirror);
+        h.margin(&self.margin);
+        h.geometry(&it.geometry);
+        Some(h.finish())
+    }
+
+    /// The enhancement that applies to an item: its own override, else the default of the state.
+    /// `None` if there is no such item.
+    pub fn effective_enhance(&self, id: ItemId) -> Option<Enhance> {
+        self.item(id)
+            .map(|i| i.enhance_override.unwrap_or(self.enhance))
+    }
+
+    /// Some included item is enhanced (an effective enhancement that is not the identity): its
+    /// pixels are not the crop's, so the idempotency no-op rule and the lossless JPEG path do not
+    /// apply to it.
+    pub fn is_enhanced(&self) -> bool {
+        self.included()
+            .any(|i| !i.enhance_override.unwrap_or(self.enhance).is_identity())
+    }
 }
 
 /// FNV-1a, 64 bit. Stable by construction (no `std::hash` randomness, no layout dependence).
@@ -444,9 +602,20 @@ impl Fnv {
             }
         }
     }
+    /// `Original` (and strength 0, which renders the same pixels) hashes as 0, as it always did, so
+    /// a state without enhancement keeps the value it had before schema v4.
     fn enhance(&mut self, e: &Enhance) {
-        match e {
+        match e.normalised() {
             Enhance::Original => self.u8(0),
+            m => {
+                self.u8(match m.mode() {
+                    EnhanceMode::Original => 0,
+                    EnhanceMode::Clean => 1,
+                    EnhanceMode::Document => 2,
+                    EnhanceMode::Receipt => 3,
+                });
+                self.u8(m.strength());
+            }
         }
     }
     fn finish(&self) -> u64 {
@@ -459,6 +628,7 @@ mod tests {
     use super::*;
     use crate::confidence::{Forced, Reason, ReasonCode};
     use crate::geometry::Pt;
+    use crate::items::ItemsError;
     use std::sync::Arc;
 
     fn sample() -> EditState {
@@ -697,6 +867,227 @@ mod tests {
         assert_ne!(m.item_render_hash(ItemId(2)), Some(h2));
     }
 
+    // ---------------------------------------------------------------- enhancement (schema v4)
+
+    #[test]
+    fn enhance_serialises_as_a_mode_and_a_strength_and_old_documents_still_load() {
+        assert_eq!(
+            serde_json::to_value(Enhance::Original).unwrap(),
+            serde_json::json!({"mode": "original"})
+        );
+        assert_eq!(
+            serde_json::to_value(Enhance::Document { strength: 80 }).unwrap(),
+            serde_json::json!({"mode": "document", "strength": 80})
+        );
+        for (m, name) in [
+            (EnhanceMode::Clean, "clean"),
+            (EnhanceMode::Document, "document"),
+            (EnhanceMode::Receipt, "receipt"),
+        ] {
+            let e = Enhance::new(m, 100);
+            let v = serde_json::to_value(e).unwrap();
+            assert_eq!(v["mode"], name);
+            assert_eq!(serde_json::from_value::<Enhance>(v).unwrap(), e);
+        }
+        // A v3 document ({"mode":"original"}) and a mode without a strength (100) load.
+        assert_eq!(
+            serde_json::from_str::<Enhance>(r#"{"mode":"original"}"#).unwrap(),
+            Enhance::Original
+        );
+        assert_eq!(
+            serde_json::from_str::<Enhance>(r#"{"mode":"receipt"}"#).unwrap(),
+            Enhance::Receipt { strength: 100 }
+        );
+        assert!(serde_json::from_str::<Enhance>(r#"{"mode":"magic"}"#).is_err());
+        // The default is Original, in the state and per item.
+        assert_eq!(EditState::default().enhance, Enhance::Original);
+        assert_eq!(Item::default().enhance_override, None);
+    }
+
+    #[test]
+    fn enhance_accessors_clamp_and_name_the_identity() {
+        assert!(Enhance::Original.is_identity());
+        assert!(Enhance::Clean { strength: 0 }.is_identity());
+        assert!(!Enhance::Clean { strength: 1 }.is_identity());
+        assert_eq!(Enhance::Document { strength: 250 }.strength(), 100);
+        assert_eq!(
+            Enhance::from_fraction(EnhanceMode::Receipt, 0.456).strength(),
+            46
+        );
+        assert_eq!(
+            Enhance::from_fraction(EnhanceMode::Receipt, f32::NAN).strength(),
+            0
+        );
+        assert_eq!(
+            Enhance::from_fraction(EnhanceMode::Clean, 7.0).strength(),
+            100
+        );
+        assert_eq!(
+            Enhance::from_fraction(EnhanceMode::Original, 1.0),
+            Enhance::Original
+        );
+        assert_eq!(
+            Enhance::Clean { strength: 40 }.with_strength(90).strength(),
+            90
+        );
+        assert!(EnhanceMode::Document.is_gray_output() && !EnhanceMode::Clean.is_gray_output());
+        assert_eq!(EnhanceMode::Receipt.name(), "receipt");
+    }
+
+    #[test]
+    fn enhancement_is_part_of_the_render_hash_and_of_the_item_key() {
+        let base = sample();
+        let h0 = base.render_hash();
+        let k0 = base.item_render_hash(ItemId(1)).unwrap();
+        let p0 = base.item_page_hash(ItemId(1)).unwrap();
+        let mut seen = std::collections::HashSet::new();
+        seen.insert(h0);
+        for e in [
+            Enhance::Clean { strength: 100 },
+            Enhance::Clean { strength: 60 },
+            Enhance::Document { strength: 100 },
+            Enhance::Receipt { strength: 100 },
+        ] {
+            // The default of the state.
+            let mut d = base.clone();
+            d.enhance = e;
+            assert!(seen.insert(d.render_hash()), "default {e:?}");
+            assert_ne!(d.item_render_hash(ItemId(1)).unwrap(), k0);
+            // An override on the item gives the same item key as the default does.
+            let mut o = base.clone();
+            o.items[0].enhance_override = Some(e);
+            assert_eq!(
+                o.item_render_hash(ItemId(1)),
+                d.item_render_hash(ItemId(1)),
+                "{e:?}"
+            );
+            // The page (the suggestion's key) does not see the enhancement.
+            assert_eq!(d.item_page_hash(ItemId(1)), Some(p0));
+        }
+        // Strength 0 renders the original pixels, so it keys like Original; so does a strength
+        // above 100 like 100.
+        let mut z = base.clone();
+        z.enhance = Enhance::Document { strength: 0 };
+        assert_eq!(z.render_hash(), h0);
+        let (mut a, mut b) = (base.clone(), base.clone());
+        a.enhance = Enhance::Clean { strength: 100 };
+        b.enhance = Enhance::Clean { strength: 220 };
+        assert_eq!(a.render_hash(), b.render_hash());
+        // An override of Original beats a non-original default.
+        let mut x = base.clone();
+        x.enhance = Enhance::Document { strength: 100 };
+        x.items[0].enhance_override = Some(Enhance::Original);
+        assert_eq!(x.item_render_hash(ItemId(1)), Some(k0));
+        assert_eq!(x.effective_enhance(ItemId(1)), Some(Enhance::Original));
+        assert!(!x.is_enhanced());
+        x.items[0].enhance_override = None;
+        assert!(x.is_enhanced());
+        assert_eq!(x.effective_enhance(ItemId(9)), None);
+    }
+
+    #[test]
+    fn enhancing_item_two_changes_item_twos_key_only() {
+        let mut s = EditState::single(QuadWarp::inset_frame(0.1));
+        s.items.push(Item::quad(
+            ItemId(2),
+            QuadWarp::inset_frame(0.3),
+            Origin::Manual,
+        ));
+        let (k1, k2) = (
+            s.item_render_hash(ItemId(1)).unwrap(),
+            s.item_render_hash(ItemId(2)).unwrap(),
+        );
+        s.set_item_enhance(ItemId(2), Some(Enhance::Receipt { strength: 100 }))
+            .unwrap();
+        assert_eq!(s.item_render_hash(ItemId(1)), Some(k1));
+        assert_ne!(s.item_render_hash(ItemId(2)), Some(k2));
+        assert_eq!(
+            s.set_item_enhance(ItemId(7), None),
+            Err(ItemsError::UnknownItem(ItemId(7)))
+        );
+        s.set_item_enhance(ItemId(2), None).unwrap();
+        assert_eq!(s.item_render_hash(ItemId(2)), Some(k2));
+        // Setting it records no review: the provenance stays as it was.
+        assert_eq!(s.items[1].origin, Origin::Manual);
+    }
+
+    #[test]
+    fn a_v3_document_loads_and_an_enhanced_state_round_trips() {
+        let v3 = r#"{"version":3,"items":[],"enhance":{"mode":"original"}}"#;
+        let s: EditState = serde_json::from_str(v3).unwrap();
+        assert_eq!(s.enhance, Enhance::Original);
+        let mut e = sample();
+        e.enhance = Enhance::Clean { strength: 70 };
+        e.items[0].enhance_override = Some(Enhance::Receipt { strength: 100 });
+        let json = serde_json::to_string(&e).unwrap();
+        assert_eq!(serde_json::from_str::<EditState>(&json).unwrap(), e);
+        let v = serde_json::to_value(&e).unwrap();
+        assert_eq!(v["enhance"]["mode"], "clean");
+        assert_eq!(v["enhance"]["strength"], 70);
+        assert_eq!(v["items"][0]["enhanceOverride"]["mode"], "receipt");
+    }
+
+    proptest::proptest! {
+        /// Undo and redo through the history restore any enhancement exactly, and the state
+        /// survives JSON byte for byte.
+        #[test]
+        fn enhancement_survives_history_and_json(
+            m1 in 0u8..4, s1 in 0u8..=100,
+            m2 in 0u8..4, s2 in 0u8..=100,
+            over in proptest::bool::ANY,
+        ) {
+            use crate::history::History;
+            let mode = |m: u8| match m {
+                0 => EnhanceMode::Original,
+                1 => EnhanceMode::Clean,
+                2 => EnhanceMode::Document,
+                _ => EnhanceMode::Receipt,
+            };
+            let base = sample();
+            let mut h = History::for_edit(base.clone());
+            // A step that changes nothing the render sees (an identity enhancement on top of
+            // Original) is not recorded; the history holds exactly the steps that did.
+            let mut expect = vec![base.clone()];
+            let mut a = base.clone();
+            a.enhance = Enhance::new(mode(m1), s1);
+            if h.commit("Enhance", a.clone()) {
+                expect.push(a.clone());
+            }
+            let mut b = a.clone();
+            if over {
+                b.items[0].enhance_override = Some(Enhance::new(mode(m2), s2));
+            } else {
+                b.enhance = Enhance::new(mode(m2), s2);
+            }
+            if h.commit("Enhance again", b.clone()) {
+                expect.push(b.clone());
+            }
+            proptest::prop_assert_eq!(h.current(), expect.last().unwrap());
+            let mut states = vec![h.current().clone()];
+            while let Some(s) = h.undo() { states.push(s.clone()); }
+            states.reverse();
+            proptest::prop_assert_eq!(&states, &expect);
+            while h.redo().is_some() {}
+            proptest::prop_assert_eq!(h.current(), expect.last().unwrap());
+            for s in &states {
+                let json = serde_json::to_string(s).unwrap();
+                let back: EditState = serde_json::from_str(&json).unwrap();
+                proptest::prop_assert_eq!(&back, s);
+                proptest::prop_assert_eq!(back.render_hash(), s.render_hash());
+                proptest::prop_assert_eq!(serde_json::to_string(&back).unwrap(), json);
+            }
+            // An override and a default that say the same thing key alike.
+            let mut by_default = base.clone();
+            by_default.enhance = Enhance::new(mode(m2), s2);
+            let mut by_override = base.clone();
+            by_override.items[0].enhance_override = Some(Enhance::new(mode(m2), s2));
+            proptest::prop_assert_eq!(
+                by_default.item_render_hash(ItemId(1)),
+                by_override.item_render_hash(ItemId(1))
+            );
+        }
+    }
+
     // ---------------------------------------------------------------- curved pages (schema v3)
 
     fn curve_pts(p: &[(f64, f64)]) -> crate::curve::Curve {
@@ -723,10 +1114,10 @@ mod tests {
     }
 
     #[test]
-    fn the_schema_is_v3_and_a_curved_state_round_trips_through_json() {
-        assert_eq!(EDIT_STATE_VERSION, 3);
+    fn the_schema_is_v4_and_a_curved_state_round_trips_through_json() {
+        assert_eq!(EDIT_STATE_VERSION, 4);
         let s = curved_state();
-        assert_eq!(s.version, 3);
+        assert_eq!(s.version, 4);
         let json = serde_json::to_string(&s).unwrap();
         assert_eq!(serde_json::from_str::<EditState>(&json).unwrap(), s);
         let v = serde_json::to_value(&s).unwrap();

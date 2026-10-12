@@ -8,8 +8,8 @@
 use crate::error::ErrKind;
 use crate::store::BackupKind;
 use auto_crop_core::{
-    Band, Confidence, CurveWarp, EditState, OrderMode, Pt, QuadWarp, ScanTriage, SplitPolicy,
-    SplitProfile,
+    Band, Confidence, CurveWarp, EditState, Enhance, OrderMode, Pt, QuadWarp, ScanTriage,
+    SplitPolicy, SplitProfile,
 };
 use serde::{Deserialize, Serialize};
 
@@ -123,6 +123,10 @@ pub struct ItemView {
     /// image is still being analysed. Saving such a source writes copies only.
     #[serde(default)]
     pub open_only: Option<String>,
+    /// The default enhancement of this image (crops without their own override get it). Original
+    /// until a person (or `process --enhance`) chose another.
+    #[serde(default)]
+    pub enhance: Enhance,
 }
 
 /// One step of the session history (a multi-image command): its label and the new view of every
@@ -161,6 +165,14 @@ pub struct CropView {
     /// held (band Check, scan triage `heldForReview`) until the scan is accepted.
     #[serde(default)]
     pub curves: Option<CurveWarp>,
+    /// The enhancement this crop is previewed and saved with: its own override, else the image's
+    /// default (`ItemView.enhance`). `{"mode": "original"}` until a person chose another.
+    #[serde(default)]
+    pub enhance: Enhance,
+    /// The crop's own enhancement, if it has one (`null`: it follows the default). A UI that
+    /// shows "customised" dots reads this.
+    #[serde(default)]
+    pub enhance_override: Option<Enhance>,
     pub origin: CropOrigin,
     pub confidence: Option<Confidence>,
     /// Band at the Strict cutoff (icon plus word in the UI); a crop the user placed or edited
@@ -467,6 +479,7 @@ mod tests {
             split: None,
             history_position: 0,
             open_only: Some("tiff.multi_page".into()),
+            enhance: Enhance::Original,
         };
         let mut v = serde_json::to_value(&view).unwrap();
         assert_eq!(v["openOnly"], "tiff.multi_page");

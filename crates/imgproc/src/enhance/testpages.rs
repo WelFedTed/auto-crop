@@ -443,6 +443,231 @@ pub fn fade(truth: &Raster, paper: [u8; 3], keep: f32) -> Raster {
     out
 }
 
+// ------------------------------------------------------------------------------ photographs
+
+/// Kinds of synthetic photograph, the false-positive suite of the suggestion (`measures`): scenes
+/// that are NOT receipts or documents, with continuous tones, texture at every scale, regular
+/// patterns (bricks, tiles) and large bright areas. They are procedural stand-ins, not
+/// photographs: a clean result here is evidence against crude false positives, not a measurement
+/// on real photos (which stays with the private slice, B21).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhotoKind {
+    Landscape,
+    Foliage,
+    Interior,
+    BrickWall,
+    PosterWall,
+    NightCity,
+    Portrait,
+    Tiles,
+}
+
+impl PhotoKind {
+    pub const ALL: [PhotoKind; 8] = [
+        PhotoKind::Landscape,
+        PhotoKind::Foliage,
+        PhotoKind::Interior,
+        PhotoKind::BrickWall,
+        PhotoKind::PosterWall,
+        PhotoKind::NightCity,
+        PhotoKind::Portrait,
+        PhotoKind::Tiles,
+    ];
+}
+
+fn lattice(ix: i32, iy: i32, seed: u64) -> f32 {
+    let mut h = (ix as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        ^ (iy as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F)
+        ^ seed.wrapping_mul(0x1656_67B1_9E37_79F9);
+    h ^= h >> 29;
+    h = h.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    h ^= h >> 32;
+    (h >> 40) as f32 / (1u64 << 24) as f32
+}
+
+/// Smooth value noise in 0..1.
+fn value_noise(x: f32, y: f32, seed: u64) -> f32 {
+    let (x0, y0) = (x.floor(), y.floor());
+    let (fx, fy) = (x - x0, y - y0);
+    let (sx, sy) = (fx * fx * (3.0 - 2.0 * fx), fy * fy * (3.0 - 2.0 * fy));
+    let (ix, iy) = (x0 as i32, y0 as i32);
+    let a = lattice(ix, iy, seed) * (1.0 - sx) + lattice(ix + 1, iy, seed) * sx;
+    let b = lattice(ix, iy + 1, seed) * (1.0 - sx) + lattice(ix + 1, iy + 1, seed) * sx;
+    a * (1.0 - sy) + b * sy
+}
+
+/// Fractal noise in 0..1: `octaves` octaves from the base wavelength `base` pixels.
+fn fbm(x: f32, y: f32, base: f32, octaves: u32, seed: u64) -> f32 {
+    let (mut sum, mut amp, mut norm, mut f) = (0.0, 1.0, 0.0, 1.0 / base);
+    for o in 0..octaves {
+        sum += amp * value_noise(x * f, y * f, seed.wrapping_add(u64::from(o) * 977));
+        norm += amp;
+        amp *= 0.5;
+        f *= 2.0;
+    }
+    sum / norm
+}
+
+fn mix(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
+    [
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+        a[2] + (b[2] - a[2]) * t,
+    ]
+}
+
+/// A synthetic photograph of `kind`, `w` x `h`, a pure function of the seed. Lit like a photo (a
+/// smooth gradient) with sensor noise of 2 levels.
+pub fn photo(kind: PhotoKind, seed: u64, w: u32, h: u32) -> Raster {
+    let mut img = Raster::new(w, h);
+    let mut rng = Rng::new(seed ^ 0x5EED);
+    let wf = w as f32;
+    let hf = h as f32;
+    // Per-brick or per-object random numbers must not depend on pixel order.
+    let rect_hash = |a: i32, b: i32| lattice(a, b, seed ^ 0xB41C);
+    for y in 0..h {
+        for x in 0..w {
+            let (xf, yf) = (x as f32, y as f32);
+            let (u, v) = (xf / wf, yf / hf);
+            let rgb: [f32; 3] = match kind {
+                PhotoKind::Landscape => {
+                    let horizon = 0.45 + 0.08 * fbm(xf, 0.0, wf / 3.0, 3, seed);
+                    if v < horizon {
+                        let t = v / horizon;
+                        let sun = (-(((u - 0.7).powi(2) + (v - 0.2).powi(2)) / 0.02)).exp();
+                        let cloud = fbm(xf, yf, 90.0, 5, seed ^ 1);
+                        let sky = mix([70.0, 120.0, 200.0], [190.0, 215.0, 240.0], t);
+                        mix(
+                            sky,
+                            [255.0, 250.0, 235.0],
+                            (0.55 * sun + 0.5 * cloud * cloud).min(1.0),
+                        )
+                    } else {
+                        let g = fbm(xf, yf, 40.0, 6, seed ^ 2);
+                        mix([40.0, 70.0, 30.0], [150.0, 140.0, 80.0], g)
+                    }
+                }
+                PhotoKind::Foliage => {
+                    let g = fbm(xf, yf, 14.0, 6, seed);
+                    let l = fbm(xf, yf, 5.0, 3, seed ^ 3);
+                    mix([20.0, 50.0, 15.0], [150.0, 190.0, 70.0], g * 0.7 + l * 0.5)
+                }
+                PhotoKind::Interior => {
+                    let wall = [200.0, 190.0, 170.0];
+                    let floor = [110.0, 80.0, 55.0];
+                    let base = if v < 0.62 { wall } else { floor };
+                    let mut c = mix(base, [base[0] * 0.8, base[1] * 0.8, base[2] * 0.8], u);
+                    // A few pieces of furniture: random rectangles with their own colour.
+                    for k in 0..5 {
+                        let (x0, y0) = (rect_hash(k, 1) * 0.7, 0.3 + rect_hash(k, 2) * 0.5);
+                        let (x1, y1) = (
+                            x0 + 0.1 + rect_hash(k, 3) * 0.2,
+                            y0 + 0.1 + rect_hash(k, 4) * 0.2,
+                        );
+                        if (x0..x1).contains(&u) && (y0..y1).contains(&v) {
+                            c = [
+                                rect_hash(k, 5) * 200.0 + 30.0,
+                                rect_hash(k, 6) * 200.0 + 30.0,
+                                rect_hash(k, 7) * 200.0 + 30.0,
+                            ];
+                        }
+                    }
+                    let n = fbm(xf, yf, 60.0, 3, seed ^ 4);
+                    mix(c, [c[0] * 0.7, c[1] * 0.7, c[2] * 0.7], n)
+                }
+                PhotoKind::BrickWall => {
+                    let (bw, bh) = (wf / 12.0, hf / 22.0);
+                    let row = (yf / bh).floor();
+                    let off = if row as i32 % 2 == 0 { 0.0 } else { bw / 2.0 };
+                    let col = ((xf + off) / bw).floor();
+                    let (fx, fy) = ((xf + off) / bw - col, yf / bh - row);
+                    let mortar = fx < 0.04 || fy < 0.08;
+                    let tint = rect_hash(col as i32, row as i32);
+                    let n = fbm(xf, yf, 6.0, 3, seed ^ 5);
+                    if mortar {
+                        [190.0 - 30.0 * n, 185.0 - 30.0 * n, 175.0 - 30.0 * n]
+                    } else {
+                        [
+                            150.0 + 60.0 * tint - 40.0 * n,
+                            70.0 + 30.0 * tint - 30.0 * n,
+                            50.0 + 20.0 * tint - 25.0 * n,
+                        ]
+                    }
+                }
+                PhotoKind::PosterWall => {
+                    let mut c = [228.0, 226.0, 220.0];
+                    for k in 0..3 {
+                        let x0 = 0.08 + 0.3 * k as f32;
+                        if (x0..x0 + 0.25).contains(&u) && (0.15..0.8).contains(&v) {
+                            let t = fbm(xf, yf, 30.0, 4, seed ^ (10 + k as u64));
+                            let pal = [
+                                [200.0, 60.0, 50.0],
+                                [50.0, 90.0, 190.0],
+                                [60.0, 160.0, 90.0],
+                            ][k];
+                            c = mix([30.0, 30.0, 30.0], pal, t);
+                            // A headline bar near the top of each poster.
+                            if (0.17..0.22).contains(&v) {
+                                c = [235.0, 235.0, 235.0];
+                            }
+                        }
+                    }
+                    c
+                }
+                PhotoKind::NightCity => {
+                    let g = fbm(xf, yf, 120.0, 3, seed) * 40.0 + 8.0;
+                    let lamp = lattice(x as i32 / 7, y as i32 / 7, seed ^ 6);
+                    let on = if lamp > 0.93 && (x % 7 < 3 && y % 7 < 3) {
+                        230.0
+                    } else {
+                        0.0
+                    };
+                    [g + on, g + on * 0.9, g + on * 0.6]
+                }
+                PhotoKind::Portrait => {
+                    let bg = mix([90.0, 110.0, 140.0], [200.0, 200.0, 210.0], v);
+                    let (cx, cy) = (0.5, 0.45);
+                    let d = ((u - cx) / 0.22).powi(2) + ((v - cy) / 0.3).powi(2);
+                    if d < 1.0 {
+                        let shade = 0.75 + 0.25 * (1.0 - d);
+                        let skin = fbm(xf, yf, 25.0, 3, seed ^ 7);
+                        [
+                            (205.0 + 20.0 * skin) * shade,
+                            (155.0 + 20.0 * skin) * shade,
+                            (125.0 + 15.0 * skin) * shade,
+                        ]
+                    } else {
+                        bg
+                    }
+                }
+                PhotoKind::Tiles => {
+                    let n = 9.0;
+                    let (fx, fy) = ((u * n).fract(), (v * n * hf / wf * wf / hf).fract());
+                    let grout = fx < 0.025 || fy < 0.025;
+                    let stone = fbm(xf, yf, 9.0, 4, seed ^ 8);
+                    if grout {
+                        [120.0, 120.0, 115.0]
+                    } else {
+                        let t = rect_hash((u * n) as i32, (v * n) as i32) * 0.2;
+                        [
+                            205.0 - 40.0 * stone - 20.0 * t,
+                            200.0 - 40.0 * stone - 20.0 * t,
+                            190.0 - 45.0 * stone - 20.0 * t,
+                        ]
+                    }
+                }
+            };
+            // A smooth photographic light and sensor noise.
+            let light = 0.85 + 0.15 * (1.0 - ((u - 0.4).powi(2) + (v - 0.4).powi(2)));
+            for (c, v) in rgb.iter().enumerate() {
+                let n = (rng.unit() + rng.unit() + rng.unit() - 1.5) * 4.0;
+                img.data[((y * w + x) * 3) as usize + c] = (v * light + n).clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+    img
+}
+
 /// Rec. 709 luma of an RGB raster.
 pub fn luma_of(r: &Raster) -> Vec<u8> {
     r.data

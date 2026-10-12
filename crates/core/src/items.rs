@@ -19,7 +19,7 @@
 //! items or a quad that cannot be warped.
 
 use crate::curve::CurveWarp;
-use crate::edit::{EditState, Item, ItemId, OrderMode, Origin};
+use crate::edit::{EditState, Enhance, Item, ItemId, OrderMode, Origin};
 use crate::geometry::{Geometry, Pt, QuadWarp};
 use crate::{Confidence, ErrKind};
 use serde::{Deserialize, Serialize};
@@ -446,6 +446,20 @@ impl EditState {
         Ok(())
     }
 
+    /// Sets (`Some`) or clears (`None`: the item follows the default again) the enhancement of one
+    /// item. Geometry and provenance are untouched: enhancement is not a geometry review, so a
+    /// crop's band and its re-detection behaviour do not change.
+    pub fn set_item_enhance(
+        &mut self,
+        id: ItemId,
+        enhance: Option<Enhance>,
+    ) -> Result<(), ItemsError> {
+        self.item_mut(id)
+            .ok_or(ItemsError::UnknownItem(id))?
+            .enhance_override = enhance;
+        Ok(())
+    }
+
     /// Replaces an item's quad (a corner drag, a nudge). An auto item becomes `AutoThenEdited`.
     pub fn edit_item_quad(&mut self, id: ItemId, quad: QuadWarp) -> Result<(), ItemsError> {
         let quad = quad.sanitised();
@@ -743,6 +757,8 @@ impl EditState {
                     next.push(Item {
                         id: it.id,
                         include: true,
+                        // A person's enhancement choice survives a new detection of the page.
+                        enhance_override: it.enhance_override,
                         ..d
                     });
                     report.replaced += 1;
@@ -1110,6 +1126,22 @@ mod tests {
             s.items.iter().any(|i| i.id.0 > 5),
             "the new one has a fresh id"
         );
+    }
+
+    #[test]
+    fn a_persons_enhancement_survives_a_new_detection_of_the_page() {
+        let mut s = two_by_two();
+        let c = s.items[2].id;
+        let e = Enhance::Receipt { strength: 100 };
+        s.set_item_enhance(c, Some(e)).unwrap();
+        // Enhancement is not a geometry edit: the item is still an untouched auto item ...
+        assert!(matches!(s.item(c).unwrap().origin, Origin::Auto { .. }));
+        let det = auto_item(rect(0.05, 0.55, 0.45, 0.95), 2, None);
+        let r = s.redetect(vec![det], DIMS).unwrap();
+        assert_eq!(r.replaced, 1);
+        // ... that the new detection replaces, and the choice is carried over.
+        assert_eq!(s.item(c).unwrap().origin, Origin::Auto { pipeline_ver: 2 });
+        assert_eq!(s.item(c).unwrap().enhance_override, Some(e));
     }
 
     #[test]

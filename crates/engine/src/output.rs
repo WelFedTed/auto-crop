@@ -323,6 +323,94 @@ pub(crate) fn png_insert_exif(png: &[u8], exif: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Notice codes of an enhanced save (the UI looks the text up by them).
+pub const NOTICE_ICC_DROPPED: &str = "enhance.icc_dropped";
+pub const NOTICE_PNG_RECOMMENDED: &str = "enhance.png_recommended";
+
+/// A grey JPEG is never written below this quality (PLAN 5.9: low quality rings around text).
+pub const GRAY_JPEG_MIN_QUALITY: u8 = 90;
+
+/// An enhanced page encoded, with the notices it earns.
+pub struct EncodedPage {
+    pub encoded: Encoded,
+    pub notices: Vec<&'static str>,
+}
+
+/// Encodes the result of the enhancer as `format` (JPEG or PNG).
+///
+/// * **Colour** (Clean): exactly as [`encode_raster`]; the pixels are in the source's colour space
+///   (the gain is applied there), so its ICC profile is kept byte-exact.
+/// * **Grey** (Document, Receipt): ONE channel, 8 bits. A grey file carries no RGB profile, so the
+///   source's is dropped (`enhance.icc_dropped`; an sRGB or grey reader shows it correctly with no
+///   profile), EXIF, XMP and the density follow the same policy as any save, and a JPEG is written
+///   at no less than [`GRAY_JPEG_MIN_QUALITY`] (PNG is lossless and keeps faint marks: a JPEG save
+///   says so with `enhance.png_recommended`).
+pub fn encode_enhanced(
+    page: &auto_crop_imgproc::enhance::Enhanced,
+    format: Format,
+    meta: &SourceMeta,
+    o: &EngineOptions,
+) -> Result<EncodedPage> {
+    use auto_crop_imgproc::enhance::Enhanced;
+    match page {
+        Enhanced::Rgb(r) => Ok(EncodedPage {
+            encoded: encode_raster(r, format, meta, o)?,
+            notices: Vec::new(),
+        }),
+        Enhanced::Gray(g) => {
+            let mut notices = Vec::new();
+            if meta.icc.as_ref().is_some_and(|p| !p.is_empty()) {
+                notices.push(NOTICE_ICC_DROPPED);
+            }
+            let dpi = meta.jpeg.as_ref().and_then(|m| m.dpi);
+            let encode_meta = EncodeMeta { icc: None, dpi };
+            let cancel = CancelToken::never();
+            let view = RasterView::new(
+                g.width,
+                g.height,
+                PixelFormat::Gray8,
+                g.width as usize,
+                SampleSlice::U8(&g.data),
+            )
+            .ok_or(ErrKind::Internal)?;
+            let dims = (g.width, g.height);
+            let bytes = match format {
+                Format::Jpeg => {
+                    notices.push(NOTICE_PNG_RECOMMENDED);
+                    let spec = OutputSpec {
+                        quality: Quality::Fixed {
+                            value: o
+                                .quality
+                                .jpeg_quality(meta.q_est())
+                                .max(GRAY_JPEG_MIN_QUALITY),
+                        },
+                        ..OutputSpec::default()
+                    };
+                    let raw = default_jpeg_encoder()
+                        .encode(&view, &spec, &encode_meta, &cancel)
+                        .map_err(|_| ErrKind::EncodeFailed)?;
+                    match &meta.jpeg {
+                        Some(jm) => jpeg_meta::rewrite_metadata(&raw, jm, &meta_policy(o, dims))
+                            .map_err(|_| ErrKind::EncodeFailed)?,
+                        None => raw,
+                    }
+                }
+                Format::Png => PngEncoder
+                    .encode(&view, &OutputSpec::default(), &encode_meta, &cancel)
+                    .map_err(|_| ErrKind::EncodeFailed)?,
+                _ => return Err(ErrKind::UnsupportedOutput),
+            };
+            Ok(EncodedPage {
+                encoded: Encoded {
+                    bytes,
+                    expect: Expect::for_gray(g, format),
+                },
+                notices,
+            })
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

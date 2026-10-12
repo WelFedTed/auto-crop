@@ -29,8 +29,8 @@ use crate::store::NewBackup;
 use crate::util::blake3_hex;
 use auto_crop_codecs::Format;
 use auto_crop_core::{
-    Band, Cut, EditState, GestureId, ItemId, ItemsError, Origin, Pt, QuadWarp, STRICT_CUTOFF,
-    ScanTriage, SplitPolicy, scan_triage,
+    Band, Cut, EditState, Enhance, GestureId, ItemId, ItemsError, Origin, Pt, QuadWarp,
+    STRICT_CUTOFF, ScanTriage, SplitPolicy, scan_triage,
 };
 use auto_crop_imgproc::cancel::{Cancel, NeverCancel};
 use auto_crop_imgproc::render::Limits;
@@ -123,6 +123,8 @@ pub(crate) fn crop_views(img: &Image, st: &EditState) -> (Vec<CropView>, Option<
                     .map(Edit::from),
                 mirror: quad.as_ref().is_some_and(|q| q.mirror),
                 curves: it.geometry.curves().cloned(),
+                enhance: it.enhance_override.unwrap_or(st.enhance),
+                enhance_override: it.enhance_override,
                 origin: crop_origin(&it.origin),
                 confidence: it.confidence.clone(),
                 band,
@@ -579,6 +581,22 @@ impl Engine {
         kind: CropImage,
         cancel: &dyn Cancel,
     ) -> Result<(Arc<Vec<u8>>, &'static str)> {
+        self.crop_jpeg(id, crop, kind, None, cancel, true)
+    }
+
+    /// The pixels of one crop as JPEG: the committed crop (`enhance_override` `None`: its
+    /// effective enhancement, cached by the crop's key, which includes it) or a candidate
+    /// enhancement (`Some`, never cached: a slider drag). An enhanced crop is rendered at the
+    /// display proxy's edge so the text stays legible, then enhanced at that size.
+    pub(crate) fn crop_jpeg(
+        &self,
+        id: u32,
+        crop: u32,
+        kind: CropImage,
+        candidate: Option<Enhance>,
+        cancel: &dyn Cancel,
+        cache: bool,
+    ) -> Result<(Arc<Vec<u8>>, &'static str)> {
         let item = self.item(id).ok_or(ErrKind::Internal)?;
         let (state, ready) = {
             let it = lock(&item);
@@ -593,22 +611,34 @@ impl Engine {
             .item(c)
             .and_then(|i| PageShape::of(&i.geometry))
             .ok_or(ErrKind::NoCrop)?;
+        let enhance = match candidate {
+            Some(e) => e,
+            None => state.effective_enhance(c).ok_or(ErrKind::NoCrop)?,
+        };
         let hash = crop_key(&state, c).ok_or(ErrKind::NoCrop)?;
         let key = (id, 0x40 | kind as u8, hash);
-        if let Some(b) = lock(&self.inner.renders).get(&key) {
+        if cache && let Some(b) = lock(&self.inner.renders).get(&key) {
             return Ok((b, "image/jpeg"));
         }
         let proxy = self.proxy(id)?;
         let (edge, quality) = preview_edge(kind);
+        // Legible text needs resolution: an enhanced result is rendered at the proxy's edge.
+        let edge = if kind == CropImage::Result && !enhance.is_identity() {
+            edge.max(crate::engine::DISPLAY_EDGE)
+        } else {
+            edge
+        };
         let bytes = crate::run_isolated(std::panic::AssertUnwindSafe(|| -> Result<Vec<u8>> {
-            let out = shape.render_cancellable(
+            let page = shape.render_enhanced(
                 &proxy,
                 Limits {
                     max_pixels: u64::MAX,
                     max_edge: edge,
                 },
+                enhance,
                 cancel,
             )?;
+            let out = page.pixels.into_rgb();
             let out = if kind == CropImage::Thumb {
                 resize_to_fit(&out, THUMB_EDGE)
             } else {
@@ -618,7 +648,9 @@ impl Engine {
         }))
         .unwrap_or(Err(ErrKind::InternalPanic))?;
         let bytes = Arc::new(bytes);
-        lock(&self.inner.renders).put(key, bytes.clone());
+        if cache {
+            lock(&self.inner.renders).put(key, bytes.clone());
+        }
         Ok((bytes, "image/jpeg"))
     }
 
@@ -1047,18 +1079,32 @@ impl Engine {
         let raster = &decoded.raster;
         let mut produce = |i: usize| -> Result<Output> {
             let shape = crops[i].1.clone();
+            // Each crop is enhanced on its own render: estimates never mix items.
+            let enhance = state.effective_enhance(crops[i].0).unwrap_or_default();
             crate::run_isolated(std::panic::AssertUnwindSafe(|| -> Result<Output> {
-                let out = shape
-                    .render(raster, Limits::pixels(opts.max_pixels))
+                let page = shape
+                    .render_enhanced(
+                        raster,
+                        Limits::pixels(opts.max_pixels),
+                        enhance,
+                        &NeverCancel,
+                    )
                     .map_err(|_| ErrKind::NoCrop)?;
-                let enc = crate::output::encode_raster(&out, out_fmt, &source_meta, &opts)?;
+                let dims = page.pixels.dims();
+                let enc =
+                    crate::output::encode_enhanced(&page.pixels, out_fmt, &source_meta, &opts)?;
+                for n in enc.notices {
+                    if !notices.iter().any(|x| x == n) {
+                        notices.push(n.to_owned());
+                    }
+                }
                 Ok(Output {
                     produced: crate::group::Produced {
-                        bytes: enc.bytes,
-                        dims: (out.width, out.height),
+                        bytes: enc.encoded.bytes,
+                        dims,
                         format: out_fmt,
                     },
-                    expect: Some(enc.expect),
+                    expect: Some(enc.encoded.expect),
                 })
             }))
             .unwrap_or(Err(ErrKind::InternalPanic))

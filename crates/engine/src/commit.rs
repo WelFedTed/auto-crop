@@ -158,6 +158,66 @@ impl Expect {
     }
 }
 
+impl Expect {
+    /// The expectation for a grey page written as a one-channel file: a decoder gives it back as
+    /// RGB with the three channels equal, so the pixel hash and the luma fingerprint are those of
+    /// the expanded image (computed without building it). No colour profile is expected (a grey
+    /// output carries none).
+    pub fn for_gray(g: &auto_crop_imgproc::enhance::GrayImage, format: Format) -> Self {
+        Self {
+            dims: (g.width, g.height),
+            format,
+            icc: None,
+            content: if format == Format::Png {
+                Content::Pixels(gray_pixel_hash(g))
+            } else {
+                Content::Luma(luma_fingerprint_gray(g))
+            },
+        }
+    }
+}
+
+/// [`pixel_hash`] of the RGB expansion (R = G = B) of a grey image, row by row.
+pub fn gray_pixel_hash(g: &auto_crop_imgproc::enhance::GrayImage) -> String {
+    let mut hasher = blake3::Hasher::new();
+    let w = g.width as usize;
+    let mut row = vec![0u8; w * 3];
+    for line in g.data.chunks_exact(w.max(1)) {
+        for (px, v) in row.as_chunks_mut::<3>().0.iter_mut().zip(line) {
+            px.fill(*v);
+        }
+        hasher.update(&row);
+    }
+    hasher.finalize().to_hex().to_string()
+}
+
+/// [`luma_fingerprint`] of a grey image: the same cells and the same mean (the Rec. 601 luma of
+/// R = G = B = v is exactly v).
+pub fn luma_fingerprint_gray(g: &auto_crop_imgproc::enhance::GrayImage) -> Vec<u8> {
+    let (w, h) = (g.width as usize, g.height as usize);
+    let (gx, gy) = (
+        grid(g.width).clamp(1, w.max(1)),
+        grid(g.height).clamp(1, h.max(1)),
+    );
+    let mut out = Vec::with_capacity(gx * gy);
+    for j in 0..gy {
+        let (y0, y1) = (j * h / gy, ((j + 1) * h / gy).max(j * h / gy + 1).min(h));
+        for i in 0..gx {
+            let (x0, x1) = (i * w / gx, ((i + 1) * w / gx).max(i * w / gx + 1).min(w));
+            let mut sum = 0u64;
+            for y in y0..y1 {
+                sum += g.data[y * w + x0..y * w + x1]
+                    .iter()
+                    .map(|v| u64::from(*v))
+                    .sum::<u64>();
+            }
+            let n = ((y1 - y0) * (x1 - x0)).max(1) as u64;
+            out.push(((sum + n / 2) / n) as u8);
+        }
+    }
+    out
+}
+
 /// blake3 of the RGB8 samples, row by row.
 pub fn pixel_hash(r: &Raster) -> String {
     blake3_hex(&r.data)

@@ -26,7 +26,7 @@ use serde_json::{Value, json};
 pub type Step = fn(Value) -> Result<Value, ErrKind>;
 
 /// The real migration chain. `STEPS[n - 1]` upgrades version `n` to `n + 1`.
-pub const STEPS: &[Step] = &[v1_to_v2, v2_to_v3];
+pub const STEPS: &[Step] = &[v1_to_v2, v2_to_v3, v3_to_v4];
 
 /// `v1 -> v2` (M10.17): adds the `split` block (policy `never`, which is what a single-item state
 /// written before M10 means, profile `photos`, reading order, and `nextId` above every id in
@@ -72,6 +72,17 @@ pub fn v1_to_v2(mut doc: Value) -> Result<Value, ErrKind> {
 pub fn v2_to_v3(mut doc: Value) -> Result<Value, ErrKind> {
     let obj = doc.as_object_mut().ok_or(ErrKind::Corrupt)?;
     obj.insert("version".to_owned(), json!(3));
+    Ok(doc)
+}
+
+/// `v3 -> v4` (enhancement): `enhance` and `enhanceOverride` gain the modes `clean`, `document` and
+/// `receipt` with a `strength`. The only value a v3 document can hold, `{"mode": "original"}`,
+/// keeps its shape and its meaning, so only the version is raised and the migration is lossless.
+/// The bump exists so that an older build, which has no such modes, refuses an enhanced document
+/// (`SchemaTooNew`) instead of failing to parse it as corrupt.
+pub fn v3_to_v4(mut doc: Value) -> Result<Value, ErrKind> {
+    let obj = doc.as_object_mut().ok_or(ErrKind::Corrupt)?;
+    obj.insert("version".to_owned(), json!(4));
     Ok(doc)
 }
 
@@ -189,7 +200,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use auto_crop_core::{Geometry, Origin};
+    use auto_crop_core::{Enhance, Geometry, Origin};
     use std::fs;
     use std::path::PathBuf;
 
@@ -244,13 +255,15 @@ mod tests {
             "v2_split_manual_order",
             "v3_curved_receipt",
             "v3_curved_and_quad",
+            "v4_enhance_receipt",
+            "v4_enhance_override",
         ] {
             assert!(names.iter().any(|n| n == want), "missing fixture {want}");
         }
         assert!(
-            names
+            names.iter().all(|n| ["v1_", "v2_", "v3_", "v4_"]
                 .iter()
-                .all(|n| n.starts_with("v1_") || n.starts_with("v2_") || n.starts_with("v3_")),
+                .any(|p| n.starts_with(p))),
             "{names:?}"
         );
     }
@@ -264,7 +277,7 @@ mod tests {
             let json = serde_json::to_value(&state).unwrap();
             assert_eq!(migrate_ref(&json).unwrap(), state, "{name}");
             // Canonical current-version documents reserialise byte for byte.
-            if name.starts_with("v3_") {
+            if name.starts_with("v4_") {
                 assert_eq!(json, doc, "{name} is not in canonical form");
             }
             // And the text path agrees.
@@ -338,7 +351,11 @@ mod tests {
             let migrated = serde_json::to_value(migrate_ref(&doc).unwrap()).unwrap();
             let mut got = migrated.as_object().unwrap().clone();
             let mut want = doc.as_object().unwrap().clone();
-            assert_eq!(got.remove("version"), Some(json!(3)), "{name}");
+            assert_eq!(
+                got.remove("version"),
+                Some(json!(EDIT_STATE_VERSION)),
+                "{name}"
+            );
             want.remove("version");
             assert_eq!(Value::Object(got), Value::Object(want), "{name}");
         }
@@ -360,6 +377,56 @@ mod tests {
             assert_eq!(c.validate(), Ok(()), "{name}");
             assert!(c.top.points().len() >= 3, "{name}: interior points kept");
         }
+    }
+
+    /// Enhancement: a v3 document migrates to v4 changing nothing but its version, an enhanced v4
+    /// document loads with its modes and strengths, and an unknown mode is corrupt, never defaulted.
+    #[test]
+    fn v3_documents_migrate_losslessly_to_v4_and_enhancement_survives() {
+        let mut n = 0;
+        for (name, doc) in fixtures() {
+            if !name.starts_with("v3_") {
+                continue;
+            }
+            n += 1;
+            let migrated = serde_json::to_value(migrate_ref(&doc).unwrap()).unwrap();
+            let mut got = migrated.as_object().unwrap().clone();
+            let mut want = doc.as_object().unwrap().clone();
+            assert_eq!(got.remove("version"), Some(json!(4)), "{name}");
+            want.remove("version");
+            assert_eq!(Value::Object(got), Value::Object(want), "{name}");
+            // Nothing enhanced a v3 document, and the default stays Original.
+            assert_eq!(migrate_ref(&doc).unwrap().enhance, Enhance::Original);
+        }
+        assert!(n >= 2);
+        // The step on its own: only the version changes.
+        let v3 = json!({"version": 3, "items": [], "enhance": {"mode": "original"}});
+        assert_eq!(
+            v3_to_v4(v3).unwrap(),
+            json!({"version": 4, "items": [], "enhance": {"mode": "original"}})
+        );
+        assert_eq!(v3_to_v4(json!(5)), Err(ErrKind::Corrupt));
+
+        let by_name = |want: &str| fixtures().into_iter().find(|f| f.0 == want).unwrap().1;
+        let s = migrate_ref(&by_name("v4_enhance_receipt")).unwrap();
+        assert_eq!(s.enhance, Enhance::Receipt { strength: 100 });
+        let t = migrate_ref(&by_name("v4_enhance_override")).unwrap();
+        assert_eq!(t.enhance, Enhance::Clean { strength: 70 });
+        assert_eq!(t.items[0].enhance_override, None);
+        assert_eq!(
+            t.items[1].enhance_override,
+            Some(Enhance::Document { strength: 80 })
+        );
+        assert_eq!(
+            t.effective_enhance(auto_crop_core::ItemId(1)),
+            Some(Enhance::Clean { strength: 70 })
+        );
+        let mut bad = by_name("v4_enhance_receipt");
+        bad["enhance"] = json!({"mode": "sparkle", "strength": 10});
+        assert_eq!(migrate_ref(&bad), Err(ErrKind::Corrupt));
+        // A v4 enhanced document is too new for a build that stops at v3.
+        let too_new = json!({"version": 5, "enhance": {"mode": "clean"}});
+        assert_eq!(migrate_ref(&too_new), Err(ErrKind::SchemaTooNew));
     }
 
     #[test]

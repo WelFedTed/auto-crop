@@ -168,15 +168,17 @@ impl Item {
                 .then(|| crate::fsplan::replace_refusal(self.format, self.frames, &self.notices))
                 .flatten()
                 .map(str::to_owned),
+            enhance: current.map(|c| c.enhance).unwrap_or_default(),
         }
     }
 
     /// What the first included crop is cut with: a quad or a curved page.
-    fn shape(&self) -> Option<PageShape> {
+    fn shape(&self) -> Option<(PageShape, auto_crop_core::Enhance)> {
         self.history.as_ref().and_then(|h| {
-            h.current()
-                .included()
-                .find_map(|i| PageShape::of(&i.geometry))
+            let st = h.current();
+            st.included().find_map(|i| {
+                PageShape::of(&i.geometry).map(|s| (s, i.enhance_override.unwrap_or(st.enhance)))
+            })
         })
     }
 
@@ -289,6 +291,9 @@ pub(crate) struct Inner {
     pub(crate) run: Mutex<RunOptions>,
     /// The files of the Convert flow and the state of its run (`crate::convert_batch`).
     pub(crate) convert: Mutex<crate::convert_batch::Session>,
+    /// Enhancement suggestions by (image, crop page hash): the measure costs a render and an
+    /// analysis.
+    pub(crate) suggestions: Mutex<crate::enhance::SuggestionCache>,
 }
 
 /// What an engine does on start-up besides being created (see [`Engine::with_settings`]).
@@ -379,6 +384,7 @@ impl Engine {
                 session: Mutex::new(auto_crop_core::SessionHistory::new()),
                 run: Mutex::new(RunOptions::default()),
                 convert: Mutex::new(crate::convert_batch::Session::default()),
+                suggestions: Mutex::new(crate::enhance::SuggestionCache::default()),
             }),
         };
         if housekeeping != Housekeeping::None {
@@ -533,6 +539,7 @@ impl Engine {
             lock(&self.inner.items).remove(id);
             lock(&self.inner.proxies).drop_item(*id);
             lock(&self.inner.renders).drop_item(*id);
+            lock(&self.inner.suggestions).drop_item(*id);
         }
     }
 
@@ -869,34 +876,46 @@ impl Engine {
         let bytes = match kind {
             ImageKind::Src => jpeg(self.proxy(id)?.as_ref(), JPEG_PREVIEW_QUALITY)?,
             ImageKind::Result => {
-                let q = geometry.ok_or(ErrKind::NoCrop)?;
+                let (q, enhance) = geometry.ok_or(ErrKind::NoCrop)?;
                 let proxy = self.proxy(id)?;
-                let out = q
-                    .render(
+                // An enhanced result is rendered at the proxy's edge: text must stay legible.
+                let edge = if enhance.is_identity() {
+                    RESULT_EDGE
+                } else {
+                    RESULT_EDGE.max(DISPLAY_EDGE)
+                };
+                let page = q
+                    .render_enhanced(
                         &proxy,
                         Limits {
                             max_pixels: u64::MAX,
-                            max_edge: RESULT_EDGE,
+                            max_edge: edge,
                         },
+                        enhance,
+                        &auto_crop_imgproc::cancel::NeverCancel,
                     )
                     .map_err(|_| ErrKind::NoCrop)?;
-                jpeg(&out, JPEG_PREVIEW_QUALITY)?
+                jpeg(&page.pixels.into_rgb(), JPEG_PREVIEW_QUALITY)?
             }
             ImageKind::Thumb => {
                 let src = thumb_src.ok_or(ErrKind::Internal)?;
                 let out = match (&geometry, failed_unedited) {
-                    (Some(q), false) => {
+                    (Some((q, enhance)), false) => {
                         // Render a little larger, then area-average down: much cleaner than
                         // point-sampling a large reduction.
                         let big = q
-                            .render(
+                            .render_enhanced(
                                 &src,
                                 Limits {
                                     max_pixels: u64::MAX,
                                     max_edge: THUMB_EDGE * 2,
                                 },
+                                *enhance,
+                                &auto_crop_imgproc::cancel::NeverCancel,
                             )
-                            .map_err(|_| ErrKind::NoCrop)?;
+                            .map_err(|_| ErrKind::NoCrop)?
+                            .pixels
+                            .into_rgb();
                         resize_to_fit(&big, THUMB_EDGE)
                     }
                     _ => resize_to_fit(&src, THUMB_EDGE),
