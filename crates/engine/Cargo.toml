@@ -43,7 +43,7 @@ toml = "0.9"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
 tracing-appender = "0.2"
-sysinfo = { version = "0.37", default-features = false, features = ["system"] }
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 
 # Colour conversion of a format conversion (Display P3 or Adobe RGB to sRGB, M6.29): pure Rust, BSD-3-Clause
 # OR Apache-2.0, and already in the tree through `image`. Exact version: the one `image` resolves to.
