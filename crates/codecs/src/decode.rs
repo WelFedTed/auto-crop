@@ -100,6 +100,29 @@ pub fn decode_with(bytes: &[u8], limits: &DecodeLimits) -> Result<Decoded, Codec
     guard_item(|| decode_inner(bytes, limits))
 }
 
+/// What a decode does with the alpha channel of a source that has one (the raster is RGB8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Alpha {
+    /// The colour channels as stored; the notice `alpha.dropped` says transparency was lost. What
+    /// the crop pipeline has always done.
+    Drop,
+    /// Translucent pixels are composited over white (notice `alpha.flattened`): what a conversion
+    /// to a format with no transparency writes, so a transparent logo is not a black square.
+    OverWhite,
+}
+
+/// [`decode_with`] for a conversion: translucent pixels are composited over white and the notice
+/// is `alpha.flattened` instead of `alpha.dropped`. Everything else is identical, so the two
+/// agree on a source without transparency.
+pub fn decode_flattened_with(bytes: &[u8], limits: &DecodeLimits) -> Result<Decoded, CodecError> {
+    guard_item(|| decode_raw_alpha(bytes, limits, true, Alpha::OverWhite))
+}
+
+/// `c` over white at opacity `a` (0..=255), rounded.
+pub(crate) fn over_white(c: u8, a: u8) -> u8 {
+    ((u32::from(c) * u32::from(a) + 255 * u32::from(255 - a) + 127) / 255) as u8
+}
+
 fn image_format(f: Format) -> ImageFormat {
     match f {
         Format::Jpeg => ImageFormat::Jpeg,
@@ -185,6 +208,15 @@ pub(crate) fn decode_raw(
     limits: &DecodeLimits,
     apply_orientation: bool,
 ) -> Result<Decoded, CodecError> {
+    decode_raw_alpha(bytes, limits, apply_orientation, Alpha::Drop)
+}
+
+pub(crate) fn decode_raw_alpha(
+    bytes: &[u8],
+    limits: &DecodeLimits,
+    apply_orientation: bool,
+    alpha: Alpha,
+) -> Result<Decoded, CodecError> {
     let (format, h) = precheck(bytes, limits)?;
 
     // HEIC and AVIF go through libheif, which applies `irot`, `imir` and `clap` itself: the pixels
@@ -192,7 +224,7 @@ pub(crate) fn decode_raw(
     // that was applied (never the Exif tag, which is informational in HEIF and would double-rotate).
     #[cfg(feature = "heif")]
     if matches!(format, Format::Heic | Format::Avif) {
-        return crate::heif::decode(bytes, &h, limits);
+        return crate::heif::decode(bytes, &h, limits, alpha);
     }
 
     let mut reader = ImageReader::with_format(Cursor::new(bytes), image_format(format));
@@ -245,11 +277,25 @@ pub(crate) fn decode_raw(
     {
         notices.push("cmyk.naive_conversion");
     }
+    let mut flattened = None;
     if colour.has_alpha() && has_translucent_pixels(&img) {
-        notices.push("alpha.dropped");
+        if alpha == Alpha::OverWhite {
+            notices.push("alpha.flattened");
+            let mut rgba = img.to_rgba8();
+            for px in rgba.pixels_mut() {
+                let a = px.0[3];
+                for c in &mut px.0[..3] {
+                    *c = over_white(*c, a);
+                }
+                px.0[3] = 255;
+            }
+            flattened = Some(DynamicImage::ImageRgba8(rgba).into_rgb8());
+        } else {
+            notices.push("alpha.dropped");
+        }
     }
 
-    let rgb = img.into_rgb8();
+    let rgb = flattened.unwrap_or_else(|| img.into_rgb8());
     let mut img = DynamicImage::ImageRgb8(rgb);
     if let Some(o) = Orientation::from_exif(h.orientation).filter(|_| apply_orientation) {
         img.apply_orientation(o);

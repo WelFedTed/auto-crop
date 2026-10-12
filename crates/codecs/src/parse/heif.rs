@@ -734,6 +734,128 @@ fn iloc_lengths(w: &Walk<'_>, iloc: Bx, ids: &[u32]) -> Result<Vec<u64>, CodecEr
     Ok(out)
 }
 
+/// The bytes of the first `Exif` item of a HEIF or AVIF file, as the TIFF blob (`II*\0` or `MM\0*`
+/// first): the item starts with a 4-byte offset to the TIFF header (ISO/IEC 23008-12 Annex A.2.1),
+/// which is skipped; a wrong offset falls back to a scan of the first 32 bytes, and a payload that
+/// still has no TIFF header gives `None` (the caller then carries no EXIF rather than garbage).
+/// Only items stored in the file's own `mdat` (construction method 0) are read, the size is capped
+/// by `max_metadata_bytes`, and every offset is range-checked. Never fails: a file that cannot be
+/// walked has no EXIF as far as this is concerned.
+pub(crate) fn exif_blob(b: &[u8], limits: &DecodeLimits) -> Option<Vec<u8>> {
+    let mut w = Walk { b, boxes: 0 };
+    let mut meta = None;
+    w.each(0, b.len(), |_, bx| {
+        if &bx.typ == b"meta" && meta.is_none() {
+            meta = Some(bx);
+        }
+        Ok(())
+    })
+    .ok()?;
+    let meta = meta?;
+    let (mut iinf, mut iloc) = (None, None);
+    w.each(meta.body + 4, meta.end, |_, bx| {
+        match &bx.typ {
+            b"iinf" => {
+                iinf.get_or_insert(bx);
+            }
+            b"iloc" => {
+                iloc.get_or_insert(bx);
+            }
+            _ => {}
+        }
+        Ok(())
+    })
+    .ok()?;
+    let items = parse_iinf(&mut w, iinf?, limits).ok()?;
+    let exif_id = items.iter().find(|i| &i.typ == b"Exif")?.id;
+    let extents = iloc_extents(&w, iloc?, exif_id)?;
+    let total: u64 = extents.iter().map(|e| e.1).sum();
+    if total == 0 || total > limits.max_metadata_bytes {
+        return None;
+    }
+    let mut item = Vec::with_capacity(total as usize);
+    for (off, len) in extents {
+        let end = off.checked_add(len)?;
+        item.extend_from_slice(b.get(usize::try_from(off).ok()?..usize::try_from(end).ok()?)?);
+    }
+    let is_tiff = |s: &[u8]| s.starts_with(b"II*\0") || s.starts_with(b"MM\0*");
+    let skip = u32::from_be_bytes(item.get(..4)?.try_into().ok()?) as usize;
+    let at = 4usize.checked_add(skip)?;
+    if item.get(at..).is_some_and(is_tiff) {
+        return Some(item[at..].to_vec());
+    }
+    // A wrong offset (some writers store 0 and an `Exif\0\0` prefix): look near the front.
+    let head = item.len().min(36);
+    (4..head)
+        .find(|&i| is_tiff(&item[i..]))
+        .map(|i| item[i..].to_vec())
+}
+
+/// (absolute file offset, length) of every extent of item `id`, construction method 0 only.
+fn iloc_extents(w: &Walk<'_>, iloc: Bx, id: u32) -> Option<Vec<(u64, u64)>> {
+    let version = w.u8(iloc.body)?;
+    let sizes = w.u8(iloc.body + 4)?;
+    let sizes2 = w.u8(iloc.body + 5)?;
+    let (off_sz, len_sz) = (usize::from(sizes >> 4), usize::from(sizes & 15));
+    let (base_sz, idx_sz) = (
+        usize::from(sizes2 >> 4),
+        if version >= 1 {
+            usize::from(sizes2 & 15)
+        } else {
+            0
+        },
+    );
+    if [off_sz, len_sz, base_sz, idx_sz].iter().any(|n| *n > 8) {
+        return None;
+    }
+    let (count, mut at) = if version < 2 {
+        (w.u16(iloc.body + 6).map(u32::from)?, iloc.body + 8)
+    } else {
+        (w.u32(iloc.body + 6)?, iloc.body + 10)
+    };
+    for _ in 0..count {
+        let this = if version < 2 {
+            let v = w.u16(at).map(u32::from);
+            at += 2;
+            v
+        } else {
+            let v = w.u32(at);
+            at += 4;
+            v
+        }?;
+        let method = if version >= 1 {
+            let m = w.u16(at)? & 15;
+            at += 2;
+            m
+        } else {
+            0
+        };
+        at += 2; // data reference index
+        let base = w.uint(at, base_sz)?;
+        at += base_sz;
+        let n = w.u16(at)?;
+        at += 2;
+        let mut out = Vec::new();
+        for _ in 0..n {
+            at += idx_sz;
+            let off = w.uint(at, off_sz)?;
+            at += off_sz;
+            let len = w.uint(at, len_sz)?;
+            at += len_sz;
+            if out.len() < 64 {
+                out.push((base.checked_add(off)?, len));
+            }
+        }
+        if at > iloc.end {
+            return None;
+        }
+        if this == id {
+            return (method == 0).then_some(out);
+        }
+    }
+    None
+}
+
 /// The size (`tkhd`, 16.16 fixed point) and sample count (`stsz`) of the first track of a `moov`.
 fn read_moov(w: &mut Walk<'_>, moov: Bx) -> Result<(Option<(u32, u32)>, u32), CodecError> {
     let mut dims = None;

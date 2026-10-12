@@ -35,6 +35,7 @@ pub mod hostile;
 pub mod jpeg_lossless;
 pub mod jpeg_meta;
 mod limits;
+mod meta_extract;
 // The pinned-header readers shared with build.rs; included here so the version gate has unit tests.
 #[cfg(feature = "heif")]
 pub mod heif;
@@ -49,7 +50,7 @@ mod suite;
 #[cfg(feature = "turbojpeg")]
 pub mod turbo;
 
-pub use decode::{Decoded, decode, decode_with, probe, probe_with};
+pub use decode::{Decoded, decode, decode_flattened_with, decode_with, probe, probe_with};
 pub use error::CodecError;
 pub use exif::orientation as exif_orientation;
 pub use format::{Format, sniff};
@@ -59,6 +60,7 @@ pub use limits::{
     DEFAULT_MAX_METADATA_BYTES, DEFAULT_MAX_PIXELS, DEFAULT_MAX_SCANS, DecodeLimits,
     HARD_MAX_PIXELS, Limit, est_bytes, est_bytes_for_pixels,
 };
+pub use meta_extract::extract_exif;
 pub use scaled::{DENOMS, ScaledDecoded, decode_scaled, pick_denom};
 
 use auto_crop_imgproc::Raster;

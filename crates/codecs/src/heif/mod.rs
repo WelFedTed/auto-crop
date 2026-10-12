@@ -147,11 +147,17 @@ pub(crate) fn decode(
     bytes: &[u8],
     h: &Header,
     limits: &DecodeLimits,
+    alpha: crate::decode::Alpha,
 ) -> Result<Decoded, CodecError> {
-    guard_item(|| decode_inner(bytes, h, limits))
+    guard_item(|| decode_inner(bytes, h, limits, alpha))
 }
 
-fn decode_inner(bytes: &[u8], h: &Header, limits: &DecodeLimits) -> Result<Decoded, CodecError> {
+fn decode_inner(
+    bytes: &[u8],
+    h: &Header,
+    limits: &DecodeLimits,
+    alpha: crate::decode::Alpha,
+) -> Result<Decoded, CodecError> {
     let info = h
         .heif
         .ok_or_else(|| CodecError::corrupt("the HEIF header walk was not run"))?;
@@ -209,11 +215,17 @@ fn decode_inner(bytes: &[u8], h: &Header, limits: &DecodeLimits) -> Result<Decod
     data.try_reserve_exact(len)
         .map_err(|_| limit_err(limits, w as u64 * ht as u64))?;
     let mut translucent = false;
+    let flatten = alpha == crate::decode::Alpha::OverWhite;
     img.rows(bpp, |_, row| {
         if rgba {
             for px in row.as_chunks::<4>().0 {
                 translucent |= px[3] != 255;
-                data.extend_from_slice(&px[..3]);
+                if flatten {
+                    let a = px[3];
+                    data.extend(px[..3].iter().map(|c| crate::decode::over_white(*c, a)));
+                } else {
+                    data.extend_from_slice(&px[..3]);
+                }
             }
         } else {
             data.extend_from_slice(row);
@@ -240,7 +252,11 @@ fn decode_inner(bytes: &[u8], h: &Header, limits: &DecodeLimits) -> Result<Decod
         notices.push("depth.reduced_to_8");
     }
     if translucent {
-        notices.push("alpha.dropped");
+        notices.push(if flatten {
+            "alpha.flattened"
+        } else {
+            "alpha.dropped"
+        });
     }
     let icc = extract_icc(bytes, h, None, &mut notices);
     if let Some(n) = info.nclx {

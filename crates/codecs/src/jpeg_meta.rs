@@ -257,6 +257,7 @@ const TAG_JPEG_OFFSET: u16 = 0x0201;
 const TAG_JPEG_LENGTH: u16 = 0x0202;
 const TAG_PIXEL_X: u16 = 0xA002;
 const TAG_PIXEL_Y: u16 = 0xA003;
+const TAG_COLOR_SPACE: u16 = 0xA001;
 
 /// What [`exif_patch`] changes besides resetting the Orientation.
 #[derive(Debug, Clone, Copy)]
@@ -536,6 +537,44 @@ pub fn exif_patch(exif: &[u8], p: &ExifPatch) -> Option<Vec<u8>> {
     // A zeroed tail is dead weight: cut it.
     t.trim_zeroed_tail();
     Some(blob)
+}
+
+/// Sets the EXIF `ColorSpace` tag (0xA001, in the Exif sub-IFD) to 1 (sRGB) in the TIFF blob
+/// `exif`, in place (a conversion that turned the pixels into sRGB must say so; PLAN 3.5). A blob
+/// with no such tag, or one this function does not understand, is returned as it was: no tag is
+/// ever added.
+pub fn exif_set_srgb(exif: &[u8]) -> Vec<u8> {
+    let mut blob = exif.to_vec();
+    let le = match blob.get(..2) {
+        Some(b"II") => true,
+        Some(b"MM") => false,
+        _ => return blob,
+    };
+    let mut t = Tiff {
+        b: &mut blob,
+        le,
+        zeroed: Vec::new(),
+    };
+    let done = (|| -> Option<()> {
+        if t.u16_at(2)? != 42 {
+            return None;
+        }
+        let ifd0 = t.u32_at(4)? as usize;
+        let (entries, _) = t.ifd(ifd0)?;
+        let sub = entries
+            .iter()
+            .find(|e| e.tag == TAG_EXIF_IFD)
+            .and_then(|e| t.u32_at(e.at + 8))?;
+        let (sub_entries, _) = t.ifd(sub as usize)?;
+        for e in sub_entries {
+            if e.tag == TAG_COLOR_SPACE && e.ty == 3 && e.count == 1 {
+                t.put_u16(e.at + 8, 1)?;
+            }
+        }
+        Some(())
+    })();
+    let _ = done;
+    blob
 }
 
 /// Rewrites `tiff:Orientation` in an XMP packet to 1 (same length, so nothing moves).
