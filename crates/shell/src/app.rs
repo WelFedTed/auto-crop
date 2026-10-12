@@ -3,6 +3,10 @@
 
 //! The Tauri side: commands, the `acimg` scheme, pickers and drag-and-drop.
 
+use auto_crop_engine::convert::ConvertOptions;
+use auto_crop_engine::convert_batch::{
+    ConvertAdded, ConvertFileView, ConvertPreview, ConvertProgress, ConvertSummary,
+};
 use auto_crop_engine::curved::CurveSuggestion;
 use auto_crop_engine::{
     AppPaths, CurveWarp, Cut, DerivedAction, Edit, Engine, ErrKind, ItemView, Notify, OpenSummary,
@@ -12,7 +16,7 @@ use auto_crop_engine::{
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tauri::http::{Response, StatusCode};
 use tauri::{AppHandle, DragDropEvent, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
@@ -30,6 +34,9 @@ struct Shared {
     /// is still rendering cancels the older one (a drag makes many, only the last matters).
     live_preview: Arc<AtomicU64>,
     full_preview: Arc<AtomicU64>,
+    /// The Convert screen is showing: files dropped on the window go to its list, not to the crop
+    /// flow. Set by the webview (`convert_mode`), read by the drop handler.
+    convert_mode: Arc<AtomicBool>,
 }
 
 type Cmd<T> = Result<T, ErrKind>;
@@ -524,6 +531,132 @@ fn open_backups_folder(shared: State<'_, Shared>) -> Cmd<()> {
         .map_err(|_| ErrKind::Unreadable)
 }
 
+// ---------------------------------------------------------------- Convert (ids and counts only)
+
+/// The webview tells the shell whether the Convert screen is showing, so a drop goes to its list.
+#[tauri::command]
+fn convert_mode(shared: State<'_, Shared>, on: bool) {
+    shared.convert_mode.store(on, Ordering::SeqCst);
+}
+
+#[tauri::command]
+async fn convert_pick_files(app: AppHandle, shared: State<'_, Shared>) -> Cmd<ConvertAdded> {
+    let picked = app
+        .dialog()
+        .file()
+        .add_filter("Images", &auto_crop_engine::enumerate::convert_extensions())
+        .blocking_pick_files();
+    let paths: Vec<PathBuf> = picked
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|p| p.into_path().ok())
+        .collect();
+    let engine = shared.engine.clone();
+    blocking(move || engine.convert_add(&paths, false)).await
+}
+
+#[tauri::command]
+async fn convert_pick_folder(
+    app: AppHandle,
+    shared: State<'_, Shared>,
+    include_subfolders: bool,
+) -> Cmd<ConvertAdded> {
+    let paths: Vec<PathBuf> = app
+        .dialog()
+        .file()
+        .blocking_pick_folder()
+        .and_then(|p| p.into_path().ok())
+        .into_iter()
+        .collect();
+    let engine = shared.engine.clone();
+    blocking(move || engine.convert_add(&paths, include_subfolders)).await
+}
+
+/// The folder of "Save to a folder": picked here, the webview only ever sees its name.
+#[tauri::command]
+async fn convert_pick_output_folder(
+    app: AppHandle,
+    shared: State<'_, Shared>,
+) -> Cmd<Option<String>> {
+    let picked = app
+        .dialog()
+        .file()
+        .blocking_pick_folder()
+        .and_then(|p| p.into_path().ok());
+    Ok(match picked {
+        Some(p) => shared.engine.convert_set_folder(Some(p)),
+        None => shared.engine.convert_folder_name(),
+    })
+}
+
+#[tauri::command]
+fn convert_list(shared: State<'_, Shared>) -> Vec<ConvertFileView> {
+    shared.engine.convert_list()
+}
+
+#[tauri::command]
+fn convert_remove(shared: State<'_, Shared>, ids: Vec<u32>) {
+    shared.engine.convert_remove(&ids);
+}
+
+#[tauri::command]
+fn convert_clear(shared: State<'_, Shared>) {
+    shared.engine.convert_clear();
+}
+
+#[tauri::command]
+fn convert_preview(shared: State<'_, Shared>, options: ConvertOptions) -> ConvertPreview {
+    shared.engine.convert_preview(&options)
+}
+
+/// Converts the list. Progress is emitted as `convert-progress` events (one per finished file).
+#[tauri::command]
+async fn convert_run(
+    app: AppHandle,
+    shared: State<'_, Shared>,
+    options: ConvertOptions,
+    run_name: String,
+) -> Cmd<ConvertSummary> {
+    let engine = shared.engine.clone();
+    let jobs = std::thread::available_parallelism()
+        .map_or(1, usize::from)
+        .div_euclid(2)
+        .clamp(1, 4);
+    blocking(move || {
+        engine.convert_run(&options, &run_name, jobs, &|p: ConvertProgress| {
+            let _ = app.emit("convert-progress", p);
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+fn convert_cancel(shared: State<'_, Shared>) {
+    shared.engine.convert_cancel();
+}
+
+/// Opens the folder a converted file went to in the file manager. The path is ours, never the
+/// webview's.
+#[tauri::command]
+fn convert_open_folder(shared: State<'_, Shared>, id: Option<u32>) -> Cmd<()> {
+    let dir = shared
+        .engine
+        .convert_output_dir(id)
+        .ok_or(ErrKind::Unreadable)?;
+    let opener = if cfg!(windows) {
+        "explorer"
+    } else if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    std::process::Command::new(opener)
+        .arg(&dir)
+        .spawn()
+        .map(|_| ())
+        .map_err(|_| ErrKind::Unreadable)
+}
+
 fn image_response(status: StatusCode, mime: &str, body: Vec<u8>) -> Response<Vec<u8>> {
     Response::builder()
         .status(status)
@@ -597,6 +730,7 @@ pub fn run() {
         token: random_token(),
         live_preview: Arc::new(AtomicU64::new(0)),
         full_preview: Arc::new(AtomicU64::new(0)),
+        convert_mode: Arc::new(AtomicBool::new(false)),
     };
     let for_scheme = shared.clone();
 
@@ -658,6 +792,17 @@ pub fn run() {
             pin_run,
             purge_now,
             open_backups_folder,
+            convert_mode,
+            convert_pick_files,
+            convert_pick_folder,
+            convert_pick_output_folder,
+            convert_list,
+            convert_remove,
+            convert_clear,
+            convert_preview,
+            convert_run,
+            convert_cancel,
+            convert_open_folder,
         ])
         .setup(|app| {
             // "Open with" and `AutoCrop.exe file-or-folder ...`: paths on the command line are opened like a
@@ -684,6 +829,15 @@ pub fn run() {
                 let app = window.app_handle().clone();
                 let paths = paths.clone();
                 if let Some(shared) = app.try_state::<Shared>() {
+                    if shared.convert_mode.load(Ordering::SeqCst) {
+                        // The Convert screen is showing: the drop goes to its list.
+                        let engine = shared.engine.clone();
+                        std::thread::spawn(move || {
+                            let added = engine.convert_add(&paths, true);
+                            let _ = app.emit("convert-added", added);
+                        });
+                        return;
+                    }
                     let summary = shared.engine.open_paths(&paths, true);
                     shared
                         .engine
