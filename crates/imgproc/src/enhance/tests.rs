@@ -121,7 +121,7 @@ fn original_and_strength_zero_never_touch_the_pixels() {
 #[test]
 fn clean_flattens_every_light_to_within_two_percent() {
     // PROVISIONAL bar of the spike: 3%. The synthetic pages are flattened much better; a hard
-    // shadow edge (40% over 60 px) is the documented limit and is held to a looser bar.
+    // shadow edge (40% over 60 px, the spike's failure case) now meets the 3% bar too (1.8%).
     let spec = PageSpec::document(11);
     let p = page(&spec);
     let lights: [(&str, Light, f32); 5] = [
@@ -141,7 +141,7 @@ fn clean_flattens_every_light_to_within_two_percent() {
                 depth: 0.4,
                 width: 60.0,
             },
-            0.08,
+            0.03,
         ),
         ("flat", Light::Flat, 0.005),
     ];
