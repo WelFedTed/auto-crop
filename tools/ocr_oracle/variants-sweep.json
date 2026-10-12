@@ -1,16 +1,17 @@
 [
   {"label": "original", "mode": "original"},
+  {"label": "clean:block1.0", "mode": "clean", "spec": "block=1.0"},
+  {"label": "clean:block1.75", "mode": "clean", "spec": "block=1.75"},
+  {"label": "clean:pct0.92", "mode": "clean", "spec": "percentile=0.92"},
+  {"label": "clean:cap2", "mode": "clean", "spec": "cap=2.0"},
+  {"label": "clean:white232", "mode": "clean", "spec": "white=232"},
+  {"label": "clean:white250", "mode": "clean", "spec": "white=250"},
+  {"label": "doc:nick", "mode": "document", "spec": "method=nick"},
   {"label": "doc:win2.0", "mode": "document", "spec": "window=2.0"},
   {"label": "doc:win3.5", "mode": "document", "spec": "window=3.5"},
   {"label": "doc:k0.34", "mode": "document", "spec": "sauvola_k=0.34"},
-  {"label": "doc:nick", "mode": "document", "spec": "method=nick"},
-  {"label": "doc:hard", "mode": "document", "spec": "edge=hard"},
-  {"label": "doc:rho16", "mode": "document", "spec": "rho=16"},
-  {"label": "doc:half", "mode": "document", "strength": 0.5},
+  {"label": "rcpt:nick-0.1", "mode": "receipt", "spec": "nick_k=-0.1"},
+  {"label": "rcpt:nick-0.3", "mode": "receipt", "spec": "nick_k=-0.3"},
   {"label": "rcpt:win2.0", "mode": "receipt", "spec": "window=2.0"},
-  {"label": "rcpt:win3.5", "mode": "receipt", "spec": "window=3.5"},
-  {"label": "rcpt:sauvola", "mode": "receipt", "spec": "method=sauvola"},
-  {"label": "rcpt:nick-0.2", "mode": "receipt", "spec": "nick_k=-0.2"},
-  {"label": "rcpt:hard", "mode": "receipt", "spec": "edge=hard"},
-  {"label": "clean:1pass", "mode": "clean", "spec": "passes=1"}
+  {"label": "rcpt:win3.5", "mode": "receipt", "spec": "window=3.5"}
 ]

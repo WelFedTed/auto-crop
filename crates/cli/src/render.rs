@@ -18,7 +18,7 @@ use crate::manifest::{ConfidenceRec, OutputRec};
 use crate::pipeline::{self, Prepared, Shared, confidence_rec, err_code};
 use crate::writer::{self, format_name, out_format};
 use auto_crop_codecs::Format;
-use auto_crop_core::{ErrKind, Geometry, QuadWarp, STRICT_CUTOFF};
+use auto_crop_core::{Enhance, ErrKind, Geometry, QuadWarp, STRICT_CUTOFF};
 use auto_crop_engine::fsplan::expand_name;
 use auto_crop_engine::{Engine, Housekeeping, RunOptions};
 use serde::Serialize;
@@ -116,9 +116,12 @@ pub fn run(args: RenderArgs, env: &Env) -> u8 {
     // The crops: from the edit file, or detected.
     let mut confidence: Option<ConfidenceRec> = None;
     let mut would_hold = None;
-    let (quads, source_format, source): (Vec<QuadWarp>, Format, &'static str) = if let Some(edit) =
-        &args.edit
-    {
+    let (quads, enhances, source_format, source): (
+        Vec<QuadWarp>,
+        Vec<Enhance>,
+        Format,
+        &'static str,
+    ) = if let Some(edit) = &args.edit {
         let text = match fs::read_to_string(edit) {
             Ok(t) => t,
             Err(e) => {
@@ -141,20 +144,25 @@ pub fn run(args: RenderArgs, env: &Env) -> u8 {
                 );
             }
         };
-        let quads: Vec<QuadWarp> = state
+        // The enhancement the edit state carries applies too (the crop's own, else its default),
+        // so `analyze --emit-edit` followed by `render --edit` is what `process` would write.
+        let (quads, enhances): (Vec<QuadWarp>, Vec<Enhance>) = state
             .included()
             .filter_map(|i| match &i.geometry {
-                Geometry::Quad(q) => Some(q.clone().sanitised()),
+                Geometry::Quad(q) => Some((
+                    q.clone().sanitised(),
+                    i.enhance_override.unwrap_or(state.enhance),
+                )),
                 _ => None,
             })
-            .filter(|q| q.check().is_ok())
-            .collect();
+            .filter(|(q, _)| q.check().is_ok())
+            .unzip();
         let fmt = fs::read(&abs)
             .ok()
             .and_then(|b| auto_crop_codecs::probe(&b).ok())
             .map(|p| p.format)
             .unwrap_or(Format::Jpeg);
-        (quads, fmt, "edit")
+        (quads, enhances, fmt, "edit")
     } else {
         let mut settings = base_settings(&env.paths, g);
         settings.split_policy = args.split;
@@ -173,6 +181,7 @@ pub fn run(args: RenderArgs, env: &Env) -> u8 {
             reprocess: true,
             replacing: false,
             delay: Duration::ZERO,
+            enhance_bytes_per_px: 0,
         };
         let ready = match pipeline::prepare(&sh, 0, &cand) {
             Prepared::Done(rec) => {
@@ -218,7 +227,8 @@ pub fn run(args: RenderArgs, env: &Env) -> u8 {
                     ))
             );
         }
-        (quads, fmt, "detected")
+        let enhances = vec![Enhance::Original; quads.len()];
+        (quads, enhances, fmt, "detected")
     };
     if quads.is_empty() {
         return fail(
@@ -253,7 +263,13 @@ pub fn run(args: RenderArgs, env: &Env) -> u8 {
     }
     let rendered = (|| -> Result<Vec<writer::Rendered>, ErrKind> {
         let bytes = fs::read(&abs).map_err(|e| ErrKind::from_io(&e))?;
-        writer::render_all(&bytes, &quads, format, &args.knobs.engine_options())
+        writer::render_all(
+            &bytes,
+            &quads,
+            &enhances,
+            format,
+            &args.knobs.engine_options(),
+        )
     })();
     let files = match rendered {
         Ok(f) => f,

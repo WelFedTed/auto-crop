@@ -36,6 +36,9 @@ pub struct Shared {
     pub replacing: bool,
     /// Test hook (`AUTO_CROP_TEST_DELAY_MS`): sleep before each item.
     pub delay: Duration,
+    /// Extra heap per output pixel an enhancement adds to a job (0 without `--enhance`; 2 for the
+    /// grey modes: the flattened luma plane and the result plane), counted by the memory budget.
+    pub enhance_bytes_per_px: u64,
 }
 
 /// An image the engine has analysed.
@@ -155,7 +158,9 @@ pub fn prepare(sh: &Shared, idx: usize, cand: &Candidate) -> Prepared {
         return fail(ErrKind::TooLarge);
     }
     drop(bytes);
-    let permit = match sh.budget.acquire(job_weight(pixels), &sh.cancel) {
+    // An enhanced save adds planes the size of its OUTPUT (never more than the source's pixels).
+    let weight = job_weight(pixels).saturating_add(pixels.saturating_mul(sh.enhance_bytes_per_px));
+    let permit = match sh.budget.acquire(weight, &sh.cancel) {
         Ok(p) => p,
         Err(ErrKind::Cancelled | ErrKind::DeadlineExceeded) => {
             return Prepared::Done(skipped(idx, cand, code::CANCELLED));

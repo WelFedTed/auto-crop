@@ -79,11 +79,12 @@ pub fn text_scale(luma: &[u8], w: usize, h: usize, valid: Option<&[u8]>) -> Text
     // fragments under it and most of its ink is then in pieces, not glyphs, so a more sensitive
     // mask is tried unless the strict one already explains the ink; it wins only when clearly
     // more of the ink sits in glyph-sized components.
-    let strict = scale_with(luma, w, h, valid, STRICT.0, STRICT.1);
-    if strict.as_ref().is_some_and(|s| s.glyph_ink_share >= 0.92) {
+    let integral = integral_of(luma, w, h);
+    let strict = scale_with(luma, &integral, w, h, valid, STRICT.0, STRICT.1);
+    if strict.as_ref().is_some_and(|s| s.glyph_ink_share >= 0.80) {
         return strict.unwrap_or(fallback);
     }
-    let sensitive = scale_with(luma, w, h, valid, SENSITIVE.0, SENSITIVE.1);
+    let sensitive = scale_with(luma, &integral, w, h, valid, SENSITIVE.0, SENSITIVE.1);
     match (strict, sensitive) {
         (Some(s), Some(t)) => {
             if t.glyph_ink_share > s.glyph_ink_share + 0.05 {
@@ -104,13 +105,14 @@ pub(super) const SENSITIVE: (f32, f32) = (INK_RATIO, INK_MIN_DROP);
 
 pub(super) fn scale_with(
     luma: &[u8],
+    integral: &[u32],
     w: usize,
     h: usize,
     valid: Option<&[u8]>,
     ratio: f32,
     drop: f32,
 ) -> Option<TextScale> {
-    let mut ink = ink_mask(luma, w, h, valid, ratio, drop);
+    let mut ink = ink_mask(luma, integral, w, h, valid, ratio, drop);
     // Faint print breaks into pieces under the sensitive mask: close one-pixel gaps.
     if ratio >= SENSITIVE.0 {
         ink = erode(&dilate(&ink, w, h), w, h);
@@ -195,15 +197,8 @@ fn pick(comps: &[Comp], max_h: u32) -> Option<Pick> {
 }
 
 /// 1 where the pixel is clearly darker than its surroundings.
-fn ink_mask(
-    luma: &[u8],
-    w: usize,
-    h: usize,
-    valid: Option<&[u8]>,
-    ratio: f32,
-    min_drop: f32,
-) -> Vec<u8> {
-    // Integral image of the luma plane, (w + 1) x (h + 1), exact in u32 up to 16 MP of 255.
+/// Integral image of the luma plane, `(w + 1) x (h + 1)`, exact in `u32` up to 16 MP of 255.
+pub(super) fn integral_of(luma: &[u8], w: usize, h: usize) -> Vec<u32> {
     let iw = w + 1;
     let mut integral = vec![0u32; iw * (h + 1)];
     for y in 0..h {
@@ -213,6 +208,19 @@ fn ink_mask(
             integral[(y + 1) * iw + x + 1] = integral[y * iw + x + 1] + row;
         }
     }
+    integral
+}
+
+fn ink_mask(
+    luma: &[u8],
+    integral: &[u32],
+    w: usize,
+    h: usize,
+    valid: Option<&[u8]>,
+    ratio: f32,
+    min_drop: f32,
+) -> Vec<u8> {
+    let iw = w + 1;
     let mut ink = vec![0u8; w * h];
     ink.par_chunks_mut(w).enumerate().for_each(|(y, out)| {
         let (y0, y1) = (y.saturating_sub(RADIUS), (y + RADIUS + 1).min(h));

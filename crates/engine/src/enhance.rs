@@ -232,10 +232,17 @@ impl OutputHint {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnhanceSuggestion {
-    /// The suggested mode (never `original`).
+    /// The suggested mode: `clean` (B13: colour kept, paper whitened). It is the mode that never
+    /// made a slice worse and read best in the OCR matrix (`docs/perf/enhance.md`); the engine
+    /// never suggests a binarising mode.
     pub mode: EnhanceMode,
     /// Strength in percent (100).
     pub strength: u8,
+    /// The black-and-white mode that fits this page if the person wants that look: `receipt` for
+    /// a long thin page or faded print, `document` otherwise. An option, not a recommendation.
+    pub black_and_white: EnhanceMode,
+    /// What that option writes (grey, PNG recommended).
+    pub black_and_white_hint: OutputHint,
     /// The main reason: `uneven_light`, `dull_paper`, `colour_cast` or `faded_print`; the UI looks
     /// its text up by it.
     pub reason: String,
@@ -291,12 +298,13 @@ fn to_suggestion(
     s: auto_crop_imgproc::enhance::measures::Suggestion,
     m: &Measures,
 ) -> EnhanceSuggestion {
-    let mode = match s.mode {
+    let back = |m: Mode| match m {
         Mode::Clean => EnhanceMode::Clean,
         Mode::Document => EnhanceMode::Document,
         Mode::Receipt => EnhanceMode::Receipt,
         Mode::Original => EnhanceMode::Original,
     };
+    let (mode, bw) = (back(s.mode), back(s.black_and_white));
     let reasons: Vec<String> = s
         .reasons
         .iter()
@@ -305,6 +313,8 @@ fn to_suggestion(
     EnhanceSuggestion {
         mode,
         strength: 100,
+        black_and_white: bw,
+        black_and_white_hint: OutputHint::for_mode(bw),
         reason: reasons.first().cloned().unwrap_or_default(),
         reasons,
         measures: EnhanceMeasures::from(m),

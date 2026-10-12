@@ -238,12 +238,16 @@ fn the_suggestion_fires_on_a_shaded_page_applies_nothing_and_is_cached() {
         .suggest_enhance(v.id, c)
         .unwrap()
         .expect("a shaded text page is suggested");
-    assert_eq!(s.mode, EnhanceMode::Document);
+    // What is suggested is Clean (colour kept, paper whitened: the mode that never made an OCR
+    // slice worse); the black-and-white look that fits the page is named as an option.
+    assert_eq!(s.mode, EnhanceMode::Clean);
     assert_eq!(s.strength, 100);
     assert_eq!(s.reason, "uneven_light");
-    assert!(s.hint.gray && s.hint.recommend_png);
+    assert!(!s.hint.gray && !s.hint.recommend_png);
+    assert_eq!(s.black_and_white, EnhanceMode::Document);
+    assert!(s.black_and_white_hint.gray && s.black_and_white_hint.recommend_png);
     assert!(s.measures.shading > 0.3 && s.measures.text_components > 100);
-    assert_eq!(s.enhance(), Enhance::Document { strength: 100 });
+    assert_eq!(s.enhance(), Enhance::Clean { strength: 100 });
     // Nothing changed: no history entry, no override, the same picture key.
     let after = e.engine.item_view(v.id).unwrap();
     assert_eq!(after.history_position, pos);
@@ -251,8 +255,10 @@ fn the_suggestion_fires_on_a_shaded_page_applies_nothing_and_is_cached() {
     assert_eq!(after.crops[0].render_key, v.crops[0].render_key);
     // The JSON the UI reads.
     let j = serde_json::to_value(&s).unwrap();
-    assert_eq!(j["mode"], "document");
-    assert_eq!(j["hint"]["recommendPng"], true);
+    assert_eq!(j["mode"], "clean");
+    assert_eq!(j["blackAndWhite"], "document");
+    assert_eq!(j["blackAndWhiteHint"]["recommendPng"], true);
+    assert_eq!(j["hint"]["gray"], false);
     assert!(j["measures"]["paperFraction"].is_number());
     // Asking again is answered from the cache, and enhancing meanwhile does not change the answer
     // (it measures the page, not the enhancement).
@@ -306,7 +312,7 @@ fn the_suggestion_is_silent_on_a_photograph_and_on_a_clean_scan() {
 }
 
 #[test]
-fn a_faded_long_page_is_a_receipt_suggestion() {
+fn a_faded_long_page_suggests_clean_and_names_receipt_as_its_black_and_white_look() {
     let e = env();
     let spec = PageSpec::receipt(5).sized(300, 900, 3);
     let p = page(&spec);
@@ -324,7 +330,8 @@ fn a_faded_long_page_is_a_receipt_suggestion() {
         .suggest_enhance(v.id, v.crops[0].id)
         .unwrap()
         .expect("suggested");
-    assert_eq!(s.mode, EnhanceMode::Receipt);
+    assert_eq!(s.mode, EnhanceMode::Clean);
+    assert_eq!(s.black_and_white, EnhanceMode::Receipt);
     assert!(s.reasons.iter().any(|r| r == "faded_print"));
 }
 

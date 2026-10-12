@@ -37,6 +37,13 @@ pub struct CropOut {
     pub fine_deg: f32,
     pub mirror: bool,
     pub confidence: Option<ConfidenceRec>,
+    /// Whether enhancement would visibly help this crop (a receipt or a document under uneven
+    /// light, dull or cast paper, faded print): the mode (`clean`), why, the black-and-white look
+    /// that fits and what it writes, and the numbers measured. Absent when the crop should be left
+    /// alone (a photograph, a clean scan). A report only: `analyze` applies and writes nothing; the
+    /// one automatic application is `process --enhance auto`, which a run must ask for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enhance_suggestion: Option<auto_crop_engine::EnhanceSuggestion>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -154,6 +161,7 @@ fn analyse_one(
                 fine_deg: e.fine_deg,
                 mirror: c.mirror,
                 confidence: c.confidence.as_ref().map(|c| confidence_rec(c, sh.cutoff)),
+                enhance_suggestion: sh.engine.suggest_enhance(ready.id, c.id).ok().flatten(),
             })
         })
         .collect();
@@ -303,6 +311,7 @@ pub fn run(args: AnalyzeArgs, env: &Env) -> u8 {
         reprocess: true,
         replacing: false,
         delay: Duration::from_millis(test_hook("AUTO_CROP_TEST_DELAY_MS").unwrap_or(0)),
+        enhance_bytes_per_px: 0,
     };
     let taken = std::sync::Mutex::new(std::collections::HashSet::new());
     let mut results: Vec<Option<AnalysisItem>> = vec![None; exp.candidates.len()];

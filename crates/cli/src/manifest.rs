@@ -138,6 +138,10 @@ pub struct ItemRecord {
     /// What a `convert` did to this file (absent in a `process` manifest).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub convert: Option<ConvertRec>,
+    /// `process --enhance`: what each crop got, in output order (`clean:100`, `document:80`,
+    /// `original` when `auto` suggested nothing). Absent without `--enhance`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub enhance: Vec<String>,
 }
 
 /// The conversion of one file (`convert` runs only; added to schema version 1 with `convert`).
@@ -170,6 +174,7 @@ impl ItemRecord {
             backup_id: None,
             ms: None,
             convert: None,
+            enhance: Vec::new(),
         }
     }
 
@@ -229,6 +234,9 @@ pub struct Options {
     pub reprocess: bool,
     pub recursive: bool,
     pub jobs: usize,
+    /// `--enhance` (and the strength) when given: `original` is never written, the field is absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enhance: Option<String>,
 }
 
 /// The options of a `convert` run.

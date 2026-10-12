@@ -146,7 +146,9 @@ impl Default for Tuning {
             document_method: Binariser::Sauvola,
             receipt_method: Binariser::Nick,
             sauvola_k: 0.25,
-            nick_k: -0.10,
+            // PLAN 5.4: -0.10. The OCR sweep (docs/perf/enhance.md): -0.2 read best on every
+            // slice of the synthetic suite (mean CER 0.06% against 0.21%).
+            nick_k: -0.20,
             clamp_lo: 64.0,
             clamp_hi: 208.0,
             nick_hi: 232.0,
@@ -312,6 +314,34 @@ pub struct Report {
     /// part of any determinism claim).
     pub analysis_ms: f32,
     pub apply_ms: f32,
+    /// Where those milliseconds went.
+    pub stage_ms: StageMs,
+}
+
+/// Wall time per stage, in milliseconds (informational).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct StageMs {
+    /// Proxy and mask sampling.
+    pub proxy: f32,
+    /// Text scale (ink mask, components).
+    pub text_scale: f32,
+    /// First illumination estimate, its statistics and the first flatten of the proxy.
+    pub illumination: f32,
+    /// Second round (re-estimate on the flattened proxy) and the final proxy flatten.
+    pub second_round: f32,
+    /// Levels (histogram, LUT).
+    pub tone: f32,
+    /// Application: gain, levels and blend over the full image (for Document and Receipt: the
+    /// flattened luma plane).
+    pub flatten: f32,
+    /// Application: the local threshold and the final pass (Document and Receipt).
+    pub threshold: f32,
+}
+
+fn lap_ms(lap: &mut std::time::Instant) -> f32 {
+    let ms = lap.elapsed().as_secs_f32() * 1e3;
+    *lap = std::time::Instant::now();
+    ms
 }
 
 /// The gain, the tone and the numbers the application needs. Cloneable and cheap to keep: a
@@ -495,17 +525,20 @@ fn analyse_inner(
     cancel: &dyn Cancel,
 ) -> Result<Analysis, Cancelled> {
     an.report.applied = true;
+    let mut lap = std::time::Instant::now();
     let proxy = build_proxy(src);
     let (pw, ph) = (proxy.w, proxy.h);
     let vmask = validity.map(|v| proxy_mask(v, pw, ph));
     let vm = vmask.as_deref();
     let scale = src.width as f32 / pw as f32;
     an.report.proxy = (pw as u32, ph as u32);
+    an.report.stage_ms.proxy = lap_ms(&mut lap);
     if cancel.is_cancelled() {
         return Err(Cancelled);
     }
 
     let ts = textscale::text_scale(&proxy.luma, pw, ph, vm);
+    an.report.stage_ms.text_scale = lap_ms(&mut lap);
     an.text_h = ts.height * scale;
     an.report.text_h = an.text_h;
     an.report.text_confident = ts.confident;
@@ -591,6 +624,7 @@ fn analyse_inner(
         })
         .count();
     an.report.colour_fraction = coloured as f32 / n1f;
+    an.report.stage_ms.illumination = lap_ms(&mut lap);
 
     let (gain, final_luma) = if tuning.passes >= 2 {
         let p1 = Proxy {
@@ -619,6 +653,7 @@ fn analyse_inner(
     if cancel.is_cancelled() {
         return Err(Cancelled);
     }
+    an.report.stage_ms.second_round = lap_ms(&mut lap);
     an.report.max_gain = gain.max_gain();
     an.report.flattened = !gain.is_identity();
     an.gain = gain;
@@ -629,9 +664,13 @@ fn analyse_inner(
     an.report.low_contrast = low;
     an.report.ink_contrast = (paper_level - f32::from(b_raw)).max(0.0);
     an.report.faded = !low && an.report.ink_contrast < 100.0;
-    if matches!(mode, Mode::Clean | Mode::Receipt) {
+    // Clean and Receipt always set the levels. Document does only for faded print: Sauvola alone
+    // loses faint ink (the OCR matrix: Document on thermal fade read nothing at all), and with
+    // the stretch it reads as well as Receipt.
+    if matches!(mode, Mode::Clean | Mode::Receipt) || (mode == Mode::Document && an.report.faded) {
         an.lut = lut;
     }
+    an.report.stage_ms.tone = lap_ms(&mut lap);
     Ok(an)
 }
 
@@ -650,7 +689,11 @@ pub fn apply(
     let started = std::time::Instant::now();
     let r = apply_inner(src, an, params, validity, cancel);
     report.apply_ms = started.elapsed().as_secs_f32() * 1e3;
-    r.map(|e| (e, report))
+    r.map(|(e, flatten, threshold)| {
+        report.stage_ms.flatten = flatten;
+        report.stage_ms.threshold = threshold;
+        (e, report)
+    })
 }
 
 fn apply_inner(
@@ -659,23 +702,25 @@ fn apply_inner(
     params: &Params,
     validity: Option<&Validity<'_>>,
     cancel: &dyn Cancel,
-) -> Result<Enhanced, Cancelled> {
+) -> Result<(Enhanced, f32, f32), Cancelled> {
     let (w, h) = (src.width as usize, src.height as usize);
     if w == 0 || h == 0 {
-        return Ok(Enhanced::Rgb(src));
+        return Ok((Enhanced::Rgb(src), 0.0, 0.0));
     }
     let weight = apply::weight256(params.strength01());
     let t = &params.tuning;
+    let mut lap = std::time::Instant::now();
     match an.mode {
-        Mode::Original => Ok(Enhanced::Rgb(src)),
+        Mode::Original => Ok((Enhanced::Rgb(src), 0.0, 0.0)),
         Mode::Clean => {
             let mut src = src;
             apply::clean_in_place(&mut src.data, w, h, &an.gain, &an.lut, weight, cancel)?;
-            Ok(Enhanced::Rgb(src))
+            Ok((Enhanced::Rgb(src), lap_ms(&mut lap), 0.0))
         }
         Mode::Document | Mode::Receipt => {
             let vm = validity.map(|v| (v.data, v.width as usize, v.height as usize));
             let luma = apply::flat_luma(&src.data, w, h, &an.gain, &an.lut, vm, cancel)?;
+            let flatten_ms = lap_ms(&mut lap);
             // The original is needed again only to blend at a strength below 1.
             let orig = (weight < 256).then_some(src.data);
             let radius = (an.report.window as usize | 1) / 2;
@@ -712,11 +757,15 @@ fn apply_inner(
             let mut out = local_map(&luma, w, h, radius, STRIP_ROWS, &thr, &emit, cancel)?;
             drop(luma);
             apply::finish_gray(&mut out, orig.as_deref(), w, h, weight, vm, cancel)?;
-            Ok(Enhanced::Gray(GrayImage {
-                width: src.width,
-                height: src.height,
-                data: out,
-            }))
+            Ok((
+                Enhanced::Gray(GrayImage {
+                    width: src.width,
+                    height: src.height,
+                    data: out,
+                }),
+                flatten_ms,
+                lap_ms(&mut lap),
+            ))
         }
     }
 }

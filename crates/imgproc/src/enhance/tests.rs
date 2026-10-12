@@ -626,6 +626,12 @@ fn a_faded_receipt_is_stretched_and_flagged() {
     let (recall, clean) = ink_scores(&gray_of(&out), &p, spec.width, spec.height);
     assert!(recall > 0.80, "recall {recall}");
     assert!(clean > 0.99, "clean {clean}");
+    // Document mode on faded print used to read nothing (Sauvola alone loses faint ink: the OCR
+    // matrix). It takes the levels stretch when the print is faded and keeps the strokes.
+    let (doc, drep) = run(&img, Mode::Document, 1.0);
+    let (drecall, dclean) = ink_scores(&gray_of(&doc), &p, spec.width, spec.height);
+    assert!(drep.faded);
+    assert!(drecall > 0.80 && dclean > 0.99, "{drecall} {dclean}");
     // A strong print is not flagged.
     let strong = lit(&p.truth, Light::Flat, [1.0; 3], 2.0, 3);
     assert!(!run(&strong, Mode::Receipt, 1.0).1.faded);
@@ -786,6 +792,44 @@ fn the_suggestion_is_precise_on_pages_and_silent_on_photographs() {
 }
 
 #[test]
+#[ignore = "timing print"]
+fn time_the_text_scale_stages() {
+    let p = page(&PageSpec::document(5).with_objects());
+    let img = lit(
+        &p.truth,
+        Light::Tilt { dx: 0.4, dy: 0.15 },
+        [1.0; 3],
+        2.0,
+        3,
+    );
+    let lu = luma_of(&img);
+    let (w, h) = (img.width as usize, img.height as usize);
+    for _ in 0..3 {
+        let t = std::time::Instant::now();
+        let ig = textscale::integral_of(&lu, w, h);
+        let t1 = t.elapsed().as_secs_f64() * 1e3;
+        let t = std::time::Instant::now();
+        let ts = textscale::scale_with(
+            &lu,
+            &ig,
+            w,
+            h,
+            None,
+            textscale::STRICT.0,
+            textscale::STRICT.1,
+        );
+        let t2 = t.elapsed().as_secs_f64() * 1e3;
+        let t = std::time::Instant::now();
+        let full = textscale::text_scale(&lu, w, h, None);
+        let t3 = t.elapsed().as_secs_f64() * 1e3;
+        println!(
+            "integral {t1:.1} ms, strict scale_with {t2:.1} ms, text_scale {t3:.1} ms ({:?} / {full:?})",
+            ts.map(|s| s.glyph_ink_share)
+        );
+    }
+}
+
+#[test]
 #[ignore = "debug print"]
 fn debug_text_scale_faded() {
     let spec = PageSpec::receipt(121);
@@ -798,7 +842,8 @@ fn debug_text_scale_faded() {
             ("strict", textscale::STRICT),
             ("sensitive", textscale::SENSITIVE),
         ] {
-            let ts = textscale::scale_with(&lu, 600, 1800, None, r, d);
+            let ig = textscale::integral_of(&lu, 600, 1800);
+            let ts = textscale::scale_with(&lu, &ig, 600, 1800, None, r, d);
             println!("keep {keep}: {name}: {ts:?}");
         }
     }

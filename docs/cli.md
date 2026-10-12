@@ -242,10 +242,48 @@ Options: the [input](#inputs) and [output](#output-modes) options above, the det
 | `--manifest FILE` | Also write the [run manifest](#the-run-manifest) to FILE (atomically). |
 | `--hold-exit-zero` | Exit 0 when the only problem is held items. |
 | `--progress auto\|always\|never` | The progress line on stderr (default: only on a terminal). |
+| `--enhance original\|clean\|document\|receipt\|auto` | [Enhance the pages](#enhancement---enhance). Default `original`: no pixel is changed. |
+| `--enhance-strength N` | How much of the enhancement to apply, 0 to 100 percent (default 100). Needs `--enhance`. |
 | `--json`, `--ndjson` | The manifest as one document, or one event per line, on stdout. |
 
 Reports on stderr: failed items always; held and skipped items and a summary unless `--quiet`; every item with
 `--verbose`.
+
+#### Enhancement (`--enhance`)
+
+Enhancement flattens uneven lighting and whitens the paper of a receipt or a document, and can turn it into
+black on white. It is **never applied unless the run asks for it**: the default is `--enhance original`, a
+preset never turns it on, and `analyze` only reports what it would suggest. The modes:
+
+| `--enhance` | What it does | Output |
+|---|---|---|
+| `original` | Nothing. The pixels are never touched (a JPEG still takes the lossless path). | as the source |
+| `clean` | Flatten the lighting, whiten the paper, set the levels; colour is kept. | colour, the source's format and colour profile |
+| `document` | Flatten, then a local threshold (Sauvola) with anti-aliased edges: black on white. | one 8-bit grey channel |
+| `receipt` | Flatten, stretch the contrast, then a local threshold tuned for faint thermal print (NICK). | one 8-bit grey channel |
+| `auto` | **The one place an enhancement is applied automatically**, and only because this run asked for `auto`: per crop, apply *only what `analyze` reports as its suggestion* (`clean`, for a page that looks like a receipt or a document and would visibly improve); a crop the engine would leave alone (a photograph, an already clean scan) stays `original`. | as `clean`, or unchanged |
+
+`--enhance-strength N` blends the result with the original (`0` is the original, `100` the mode itself).
+
+- The order on a save is geometry (one resample from the full-resolution source; a straight crop, a curved
+  page or a grid) -> flatten -> threshold -> encode. Estimates come from each crop's own pixels, so on a scan
+  with several items they never mix.
+- An enhanced crop is **re-encoded** (the lossless JPEG path is only for `original`), and its output is
+  verified like every other. A JPEG keeps its quality settings, but a grey JPEG is never written below
+  quality 90. **PNG is the recommended format for `document` and `receipt`** (lossless, keeps faint marks):
+  use `--format png` with a copy mode, or expect the notice `enhance.png_recommended` on a JPEG.
+- `document` and `receipt` write one grey channel and **drop the colour profile** (notice
+  `enhance.icc_dropped`); `clean` keeps the source's colour space and profile byte for byte. EXIF and the
+  rest of the metadata follow the usual rules (`--strip-location`).
+- The originals are overwritten as always: after a verified backup, and `restore` brings them back byte for
+  byte. A held result (low confidence, a split scan not accepted) is not enhanced and not written.
+- The manifest lists what each written crop got in `items[].enhance` (`clean:100`, `document:80`, `original`)
+  and the choice in `run.options.enhance`; the notices (`enhance.icc_dropped`...) are in `reasons`.
+- Measured on synthetic receipts and documents under uneven light, a cast shadow, thermal fade, a dim noisy
+  exposure and a warm lamp with the same Tesseract 5 everywhere ([docs/perf/enhance.md](perf/enhance.md)):
+  `clean` never made a slice worse and read best; `document` made thermal-faded prose unreadable before the
+  fix noted there, which is why `auto` suggests `clean` and leaves the black-and-white looks to the person.
+  These are synthetic degradations, not photographs.
 
 ### `convert`
 
@@ -312,6 +350,12 @@ quad as fractions of the image, EXIF-oriented, turn, fine angle), the confidence
 `--timings` (per-stage milliseconds) and `--emit-edit DIR`, which writes `DIR/<name>.edit.json`, the
 edit state `render --edit` applies. `--json` prints one document (`schema: auto-crop/analysis`),
 `--ndjson` one event per image. Held results are a report, not a failure: exit 0 (3 for failed inputs, 5 for no input).
+
+Each crop also carries `enhance_suggestion` when [enhancement](#enhancement---enhance) would visibly help it:
+the mode (`clean`), the reasons (`uneven_light`, `dull_paper`, `colour_cast`, `faded_print`), the
+black-and-white look that fits (`black_and_white`: `receipt` for a long thin page or faded print, else
+`document`, with what it writes), and the numbers measured on the page. The key is absent for a crop to leave
+alone (a photograph, a clean black-on-white scan). Nothing is applied or written by `analyze`.
 
 ### `render`
 
@@ -475,7 +519,7 @@ Ctrl+C does.
 
 From [PLAN 2.12](plan/02-architecture.md) and ROADMAP M2, not implemented in this tool yet (each is a
 roadmap item, not a promise of a date): `--preset receipt|document|photo|flatbed|convert-only` and the
-`convert` command, `--enhance`, `--content-tight`, `--deterministic`,
+`convert` command, `--content-tight`, `--deterministic`,
 `--require-sandbox`, `--dpi`, `--bits`, `--colour`, `--if-exists replace`, `--follow-symlinks`, `backups
 reindex`, `eval`, shell completions and man pages, and the batch scheduler shared with the app
 (M5.20). Replacing an original with a file of another format is not available. The engine commit protocol

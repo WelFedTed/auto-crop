@@ -9,7 +9,7 @@
 //! and the name planning and then stops: no temp file, backup, journal, purge, settings or notice
 //! record is written (the manifest file is written if asked for, it is the answer).
 
-use crate::args::{Global, OutputMode, ProcessArgs};
+use crate::args::{EnhanceArg, Global, OutputMode, ProcessArgs};
 use crate::env::{Env, base_settings, cpu_floor, test_hook};
 use crate::exit;
 use crate::inputs::{self, Candidate, Problem};
@@ -22,7 +22,9 @@ use crate::pipeline::{
 use crate::report::Reporter;
 use crate::writer::{self, PlanFailure, format_name, out_format};
 use auto_crop_codecs::{Format, probe};
-use auto_crop_core::{ErrKind, QuadWarp, ScanTriage};
+use auto_crop_core::Enhance;
+use auto_crop_core::{EnhanceMode, ErrKind, QuadWarp, ScanTriage};
+use auto_crop_engine::enhance::quad_enhances;
 use auto_crop_engine::fsplan::ReservedKeys;
 use auto_crop_engine::memory::{MIB, MemoryBudget, system_cap};
 use auto_crop_engine::store::{BackupState, Store};
@@ -104,15 +106,60 @@ pub(crate) fn first_write_notice(env: &Env, retention: Option<u32>, instead: &st
     true
 }
 
-fn quads_of(engine: &Engine, id: u32) -> Vec<QuadWarp> {
+/// The quads of the included crops with the enhancement each is written with (the engine's
+/// effective value: the crop's override, else the image's default).
+fn quads_of(engine: &Engine, id: u32) -> (Vec<QuadWarp>, Vec<Enhance>) {
     engine
         .edit_state(id)
-        .map(|s| {
-            s.included()
-                .filter_map(|i| i.geometry.quad().cloned())
-                .collect()
-        })
+        .map(|s| quad_enhances(&s).into_iter().unzip())
         .unwrap_or_default()
+}
+
+/// What `--enhance` does to one analysed image, before anything is written. Never forced: this
+/// runs only when the run asked for it, a fixed mode sets the image's default enhancement and
+/// `auto` applies, per crop, ONLY what `Engine::suggest_enhance` recommends (nothing for a page
+/// it would leave alone). The record lists what each written crop got, in output order. A
+/// suggestion that cannot be computed leaves the crop as it is.
+fn apply_enhance(sh: &Shared, args: &ProcessArgs, r: &Ready, rec: &mut ItemRecord) {
+    if args.enhance == EnhanceArg::Original {
+        return;
+    }
+    let strength = f32::from(args.enhance_strength) / 100.0;
+    let crops: Vec<u32> = r
+        .view
+        .crops
+        .iter()
+        .filter(|c| c.include && c.edit.is_some())
+        .map(|c| c.id)
+        .collect();
+    let label = |m: EnhanceMode| format!("{}:{}", m.name(), args.enhance_strength);
+    match args.enhance.mode() {
+        Some(mode) => {
+            if sh
+                .engine
+                .set_default_enhance(r.id, mode, strength, false, "", None)
+                .is_ok()
+            {
+                rec.enhance = crops.iter().map(|_| label(mode)).collect();
+            }
+        }
+        None => {
+            for c in crops {
+                let suggestion = sh.engine.suggest_enhance(r.id, c).ok().flatten();
+                rec.enhance.push(match suggestion {
+                    Some(s)
+                        if sh
+                            .engine
+                            .set_enhance(r.id, c, s.mode, strength, false, "Enhance (auto)", None)
+                            .is_ok() =>
+                    {
+                        label(s.mode)
+                    }
+                    _ => "original".to_owned(),
+                });
+            }
+        }
+    }
 }
 
 fn out_record(path: &Path, dims: Option<(u32, u32)>, format: Option<&'static str>) -> OutputRec {
@@ -286,10 +333,10 @@ fn save_copies(
             .collect();
         return;
     }
-    let quads = quads_of(&sh.engine, r.id);
+    let (quads, enhances) = quads_of(&sh.engine, r.id);
     let result = (|| -> Result<Vec<writer::Rendered>, ErrKind> {
         let bytes = fs::read(&cand.path).map_err(|e| ErrKind::from_io(&e))?;
-        writer::render_all(&bytes, &quads, format, &sh.engine.options())
+        writer::render_all(&bytes, &quads, &enhances, format, &sh.engine.options())
     })();
     let files = match result {
         Ok(f) if f.len() == plan.paths.len() => f,
@@ -329,6 +376,8 @@ fn run_item(sh: &Shared, w: &Work<'_>, idx: usize, cand: &Candidate) -> ItemReco
         Decision::Hold { code, reasons } => hold(&mut rec, code, reasons),
         Decision::Write { crops, split } => {
             let t_write = Instant::now();
+            // Only an image that would be written is enhanced (a held one is not touched).
+            apply_enhance(sh, w.args, &ready, &mut rec);
             if w.args.mode.replaces_originals() {
                 save_in_place(sh, w, cand, &ready, split, &mut rec);
             } else {
@@ -490,6 +539,11 @@ pub fn run(args: ProcessArgs, env: &Env) -> u8 {
         reprocess: args.reprocess,
         replacing,
         delay: Duration::from_millis(test_hook("AUTO_CROP_TEST_DELAY_MS").unwrap_or(0)),
+        // The grey modes (and `auto`, which may pick one) add two planes of the output's size.
+        enhance_bytes_per_px: match args.enhance {
+            EnhanceArg::Original | EnhanceArg::Clean => 0,
+            EnhanceArg::Document | EnhanceArg::Receipt | EnhanceArg::Auto => 2,
+        },
     };
     let run_name = format!("auto-crop {}", rfc3339(started));
     let work = Work {
@@ -641,6 +695,8 @@ pub fn run(args: ProcessArgs, env: &Env) -> u8 {
                 reprocess: args.reprocess,
                 recursive: args.input.recursive,
                 jobs,
+                enhance: (args.enhance != EnhanceArg::Original)
+                    .then(|| format!("{}:{}", args.enhance.name(), args.enhance_strength)),
             }),
         },
         summary: summary.clone(),

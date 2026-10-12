@@ -23,6 +23,45 @@ pub enum ImagePath {
     /// candidate curve set for one crop (a drag in progress). The curves come in the query, see
     /// [`parse_curve_query`]; nothing is committed or cached.
     CurvePreview(u32, u32, auto_crop_engine::CropImage),
+    /// `/<token>/<id>/crop/<crop>/enhance-<thumb|result>?mode=<m>&s=<0..100>`: one crop with a
+    /// CANDIDATE enhancement (a strength slider in motion), see [`parse_enhance_query`]; nothing
+    /// is committed or cached.
+    EnhancePreview(u32, u32, auto_crop_engine::CropImage),
+}
+
+/// Parses the query of an enhancement preview: `mode=<original|clean|document|receipt>&s=<0..100>`
+/// (strength in whole percent). Strict: both keys exactly once, nothing else, digits only for the
+/// strength, at most 100.
+pub fn parse_enhance_query(query: &str) -> Option<auto_crop_engine::Enhance> {
+    use auto_crop_engine::{Enhance, EnhanceMode};
+    if query.is_empty() || query.len() > 64 {
+        return None;
+    }
+    let (mut mode, mut strength) = (None, None);
+    for pair in query.split('&') {
+        let (key, value) = pair.split_once('=')?;
+        let slot = match key {
+            "mode" => &mut mode,
+            "s" => &mut strength,
+            _ => return None,
+        };
+        if slot.replace(value).is_some() {
+            return None;
+        }
+    }
+    let mode = match mode? {
+        "original" => EnhanceMode::Original,
+        "clean" => EnhanceMode::Clean,
+        "document" => EnhanceMode::Document,
+        "receipt" => EnhanceMode::Receipt,
+        _ => return None,
+    };
+    let s = strength?;
+    if s.is_empty() || s.len() > 3 || !s.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let s: u8 = s.parse().ok().filter(|v| *v <= 100)?;
+    Some(Enhance::new(mode, s))
 }
 
 /// The longest query of a curve preview that is accepted: 4 curves of at most 32 points, 2 numbers
@@ -125,6 +164,16 @@ pub fn parse_image_path(path: &str, token: &str) -> Option<ImagePath> {
             auto_crop_engine::CropImage::Thumb,
         )),
         ["crop", crop, "curve-result"] => Some(ImagePath::CurvePreview(
+            id,
+            parse_id(crop)?,
+            auto_crop_engine::CropImage::Result,
+        )),
+        ["crop", crop, "enhance-thumb"] => Some(ImagePath::EnhancePreview(
+            id,
+            parse_id(crop)?,
+            auto_crop_engine::CropImage::Thumb,
+        )),
+        ["crop", crop, "enhance-result"] => Some(ImagePath::EnhancePreview(
             id,
             parse_id(crop)?,
             auto_crop_engine::CropImage::Result,
@@ -245,6 +294,62 @@ mod tests {
             format!("/{}/7/crop/3/curve-thumb", "0".repeat(32)),
         ] {
             assert_eq!(p(bad.clone()), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_enhance_preview_path_and_query_are_strict() {
+        use auto_crop_engine::Enhance;
+        let t = "0123456789abcdef0123456789abcdef";
+        let p = |path: String| parse_image_path(&path, t);
+        assert_eq!(
+            p(format!("/{t}/7/crop/3/enhance-thumb")),
+            Some(ImagePath::EnhancePreview(7, 3, CropImage::Thumb))
+        );
+        assert_eq!(
+            p(format!("/{t}/7/crop/12/enhance-result")),
+            Some(ImagePath::EnhancePreview(7, 12, CropImage::Result))
+        );
+        for bad in [
+            format!("/{t}/7/enhance-thumb"),
+            format!("/{t}/7/crop/enhance-thumb"),
+            format!("/{t}/7/crop/3/enhance-src"),
+            format!("/{t}/7/crop/3/enhance-thumb/x"),
+            format!("/{t}/7/crop/-1/enhance-result"),
+            format!("/{t}/7/crop/3/Enhance-result"),
+            format!("/{}/7/crop/3/enhance-result", "0".repeat(32)),
+        ] {
+            assert_eq!(p(bad.clone()), None, "{bad}");
+        }
+        assert_eq!(
+            parse_enhance_query("mode=document&s=80"),
+            Some(Enhance::Document { strength: 80 })
+        );
+        assert_eq!(
+            parse_enhance_query("s=100&mode=clean"),
+            Some(Enhance::Clean { strength: 100 })
+        );
+        assert_eq!(
+            parse_enhance_query("mode=original&s=0"),
+            Some(Enhance::Original)
+        );
+        for bad in [
+            "",
+            "mode=document",
+            "s=50",
+            "mode=document&s=101",
+            "mode=document&s=-1",
+            "mode=document&s=1e1",
+            "mode=document&s=+5",
+            "mode=document&s=",
+            "mode=document&s=1000",
+            "mode=sparkle&s=10",
+            "mode=document&s=10&s=20",
+            "mode=document&s=10&x=1",
+            "mode=document&s=10&mode=clean",
+            "mode=Document&s=10",
+        ] {
+            assert_eq!(parse_enhance_query(bad), None, "{bad}");
         }
     }
 

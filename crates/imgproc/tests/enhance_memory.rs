@@ -138,8 +138,8 @@ fn time_the_modes_at_12_mp() {
         }
         let r = report.unwrap();
         println!(
-            "{mode:?}: best of 5 {best:.1} ms (analysis {:.1} ms, apply {:.1} ms), text_h {:.0}, window {}",
-            r.analysis_ms, r.apply_ms, r.text_h, r.window
+            "{mode:?}: best of 5 {best:.1} ms (last run: analysis {:.1} ms, apply {:.1} ms), text_h {:.0}, window {}\n    stages {:?}",
+            r.analysis_ms, r.apply_ms, r.text_h, r.window, r.stage_ms
         );
     }
 }

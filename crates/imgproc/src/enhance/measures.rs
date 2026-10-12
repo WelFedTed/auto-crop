@@ -18,8 +18,11 @@
 //!    white scan gets no suggestion: the original is already what the modes would produce.
 //! 3. **Reliable.** The estimate did not reject most of the page.
 //!
-//! The mode follows what the page is: colour content keeps colour ([`Mode::Clean`]), a long thin
-//! page is a receipt, anything else a document. `suggest` never applies anything.
+//! What is suggested is [`Mode::Clean`] (B13: colour kept, paper whitened): measured on the OCR
+//! matrix it never made a slice worse and read best, where the binarising modes did make some
+//! slices worse. The black-and-white mode that fits the page (Receipt for a long thin page or
+//! faded print, Document otherwise) is named too, as an option for the person to take.
+//! `suggest` never applies anything.
 
 use super::{Mode, Report, Tuning, analyse};
 use crate::Raster;
@@ -44,8 +47,6 @@ pub const MIN_SHADING: f32 = 0.08;
 pub const DULL_PAPER_LUMA: f32 = 228.0;
 /// Spread of the paper channels that counts as a colour cast.
 pub const MIN_CAST: f32 = 0.06;
-/// Share of saturated pixels above which the page keeps its colour.
-pub const COLOUR_PAGE_FRACTION: f32 = 0.04;
 /// Long side over short side from which a page is a receipt.
 pub const RECEIPT_ASPECT: f32 = 2.2;
 /// More rejected cells than this and the estimate is not trusted.
@@ -152,7 +153,14 @@ impl Measures {
 /// A recommendation. Nothing is applied by it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Suggestion {
+    /// What is suggested: always [`Mode::Clean`] (B13: colour kept, paper whitened). On every
+    /// slice of the OCR matrix (`docs/perf/enhance.md`, ROADMAP M7.50) Clean is the one mode that
+    /// never made a result worse and read best; the binarising modes are a look the person
+    /// chooses, not a recommendation.
     pub mode: Mode,
+    /// The black-and-white mode that fits this page if the person wants it: Receipt for a long
+    /// thin page or faded print, Document otherwise.
+    pub black_and_white: Mode,
     pub reasons: Vec<Reason>,
 }
 
@@ -165,14 +173,16 @@ pub fn suggest(m: &Measures) -> Option<Suggestion> {
     if reasons.is_empty() {
         return None;
     }
-    let mode = if m.colour_fraction > COLOUR_PAGE_FRACTION {
-        Mode::Clean
-    } else if m.aspect >= RECEIPT_ASPECT {
+    let black_and_white = if m.faded || m.aspect >= RECEIPT_ASPECT {
         Mode::Receipt
     } else {
         Mode::Document
     };
-    Some(Suggestion { mode, reasons })
+    Some(Suggestion {
+        mode: Mode::Clean,
+        black_and_white,
+        reasons,
+    })
 }
 
 /// Measures a crop (the page as it would be saved, or a preview of it). Runs the analysis of the
@@ -206,22 +216,25 @@ mod tests {
     }
 
     #[test]
-    fn a_shaded_page_gets_a_document_suggestion_and_a_long_one_a_receipt() {
+    fn the_suggestion_is_clean_and_names_the_black_and_white_look_that_fits() {
         let s = suggest(&page()).expect("suggested");
-        assert_eq!(s.mode, Mode::Document);
+        assert_eq!(s.mode, Mode::Clean, "the measured winner of the OCR matrix");
+        assert_eq!(s.black_and_white, Mode::Document);
         assert!(s.reasons.contains(&Reason::UnevenLight) && s.reasons.contains(&Reason::DullPaper));
-        let r = suggest(&Measures {
-            aspect: 4.0,
-            ..page()
-        })
-        .unwrap();
-        assert_eq!(r.mode, Mode::Receipt);
-        let c = suggest(&Measures {
-            colour_fraction: 0.2,
-            ..page()
-        })
-        .unwrap();
-        assert_eq!(c.mode, Mode::Clean);
+        // A long thin page, or faint print, fits Receipt.
+        for m in [
+            Measures {
+                aspect: 4.0,
+                ..page()
+            },
+            Measures {
+                faded: true,
+                ..page()
+            },
+        ] {
+            let r = suggest(&m).unwrap();
+            assert_eq!((r.mode, r.black_and_white), (Mode::Clean, Mode::Receipt));
+        }
     }
 
     #[test]

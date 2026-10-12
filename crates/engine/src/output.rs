@@ -252,26 +252,7 @@ pub fn encode_raster(
             let raw = PngEncoder
                 .encode(&src, &OutputSpec::default(), &encode_meta, &cancel)
                 .map_err(|_| ErrKind::EncodeFailed)?;
-            // The EXIF of the source (orientation reset, size rewritten) goes in as an `eXIf`
-            // chunk; XMP and IPTC have no place in a PNG this writer makes.
-            let exif = meta
-                .jpeg
-                .as_ref()
-                .filter(|_| !o.strip_metadata)
-                .and_then(|jm| jm.exif.as_deref())
-                .and_then(|e| {
-                    jpeg_meta::exif_patch(
-                        e,
-                        &jpeg_meta::ExifPatch {
-                            dims,
-                            strip_location: o.strip_location,
-                        },
-                    )
-                });
-            match exif {
-                Some(e) => png_insert_exif(&raw, &e),
-                None => raw,
-            }
+            png_with_exif(raw, meta, o, dims)
         }
         // The writers that do not exist yet (M2.26, M11): never reached for a replace (the
         // replaceability gate stops these formats) and refused for a copy.
@@ -281,6 +262,29 @@ pub fn encode_raster(
         bytes,
         expect: Expect::for_raster(raster, format, icc.as_deref()),
     })
+}
+
+/// The EXIF of the source (orientation reset, size rewritten) goes into a PNG as an `eXIf` chunk;
+/// XMP and IPTC have no place in a PNG this writer makes.
+fn png_with_exif(raw: Vec<u8>, meta: &SourceMeta, o: &EngineOptions, dims: (u32, u32)) -> Vec<u8> {
+    let exif = meta
+        .jpeg
+        .as_ref()
+        .filter(|_| !o.strip_metadata)
+        .and_then(|jm| jm.exif.as_deref())
+        .and_then(|e| {
+            jpeg_meta::exif_patch(
+                e,
+                &jpeg_meta::ExifPatch {
+                    dims,
+                    strip_location: o.strip_location,
+                },
+            )
+        });
+    match exif {
+        Some(e) => png_insert_exif(&raw, &e),
+        None => raw,
+    }
 }
 
 /// CRC-32 (IEEE) as PNG chunks use it. Bitwise: only ever run over an EXIF blob.
@@ -395,9 +399,12 @@ pub fn encode_enhanced(
                         None => raw,
                     }
                 }
-                Format::Png => PngEncoder
-                    .encode(&view, &OutputSpec::default(), &encode_meta, &cancel)
-                    .map_err(|_| ErrKind::EncodeFailed)?,
+                Format::Png => {
+                    let raw = PngEncoder
+                        .encode(&view, &OutputSpec::default(), &encode_meta, &cancel)
+                        .map_err(|_| ErrKind::EncodeFailed)?;
+                    png_with_exif(raw, meta, o, dims)
+                }
                 _ => return Err(ErrKind::UnsupportedOutput),
             };
             Ok(EncodedPage {

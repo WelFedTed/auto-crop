@@ -133,6 +133,7 @@
         "written": { "type": "boolean", "description": "Files were written (false in a dry run, and for held, failed and skipped items)." },
         "outputs": { "type": "array", "items": { "$ref": "#/$defs/output" } },
         "backup_id": { "type": ["string", "null"] },
+        "enhance": { "type": "array", "items": { "type": "string" }, "description": "Present in a `process --enhance` run: what each written crop got, in output order, as `<mode>:<strength percent>` (`clean:100`, `document:80`) or `original` (an `auto` run that suggested nothing for that crop). Absent when --enhance was not given." },
         "convert": { "$ref": "#/$defs/convertRecord", "description": "Present in a `convert` manifest for a converted file; absent otherwise." },
         "ms": {
           "oneOf": [

@@ -9,9 +9,9 @@ use auto_crop_engine::convert_batch::{
 };
 use auto_crop_engine::curved::CurveSuggestion;
 use auto_crop_engine::{
-    AppPaths, CurveWarp, Cut, DerivedAction, Edit, Engine, ErrKind, ItemView, Notify, OpenSummary,
-    Pt, RestoreMode, RestoreOutcome, RevertTo, SaveOutcome, SaveTarget, SessionStep, Settings,
-    SplitPatch, Superseded,
+    AppPaths, CurveWarp, Cut, DerivedAction, Edit, Engine, EnhanceMode, EnhanceSuggestion, ErrKind,
+    ItemView, Notify, OpenSummary, Pt, RestoreMode, RestoreOutcome, RevertTo, SaveOutcome,
+    SaveTarget, SessionStep, Settings, SplitPatch, Superseded,
 };
 use serde::Serialize;
 use std::path::PathBuf;
@@ -253,6 +253,67 @@ async fn suggest_curves(
 ) -> Cmd<Option<CurveSuggestion>> {
     let engine = shared.engine.clone();
     blocking(move || engine.suggest_curves(id, crop)).await?
+}
+
+// ---------------------------------------------------------------- enhancement (ids and numbers only)
+
+/// Sets one crop's enhancement: `mode` is `original`, `clean`, `document` or `receipt`, `strength`
+/// 0 to 1. `phase: "live"` validates and returns the view without recording anything (a slider in
+/// motion; the picture comes from the `enhance-result` route of the `acimg` scheme); anything else
+/// is one undo step, and the same `gesture` coalesces a drag into one. Never applied by anything
+/// but the person's choice.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn set_enhance(
+    shared: State<'_, Shared>,
+    id: u32,
+    crop: u32,
+    mode: EnhanceMode,
+    strength: f32,
+    phase: String,
+    label: String,
+    gesture: Option<u64>,
+) -> Cmd<ItemView> {
+    shared
+        .engine
+        .set_enhance(id, crop, mode, strength, phase == "live", &label, gesture)
+}
+
+/// The crop follows the image's default enhancement again.
+#[tauri::command]
+fn clear_enhance(shared: State<'_, Shared>, id: u32, crop: u32) -> Cmd<ItemView> {
+    shared.engine.clear_enhance(id, crop)
+}
+
+/// Sets the default enhancement of the image (crops without their own override get it).
+#[tauri::command]
+fn set_default_enhance(
+    shared: State<'_, Shared>,
+    id: u32,
+    mode: EnhanceMode,
+    strength: f32,
+    phase: String,
+    label: String,
+    gesture: Option<u64>,
+) -> Cmd<ItemView> {
+    shared
+        .engine
+        .set_default_enhance(id, mode, strength, phase == "live", &label, gesture)
+}
+
+/// The engine's RECOMMENDATION for one crop (`Engine::suggest_enhance`): the mode, why, the
+/// black-and-white look that fits and what it writes. `None` when the crop should be left alone
+/// (a photograph, a clean scan) and while the image is not ready. It records and applies nothing:
+/// the UI shows a chip and, on the person's tap, calls `set_enhance`. A few tens of milliseconds
+/// the first time (cached after), so it runs on the blocking pool.
+#[tauri::command]
+async fn suggest_enhance(
+    shared: State<'_, Shared>,
+    id: u32,
+    crop: u32,
+) -> Cmd<Option<EnhanceSuggestion>> {
+    let engine = shared.engine.clone();
+    blocking(move || engine.suggest_enhance(id, crop)).await?
 }
 
 /// A curved crop becomes the straight quad through its corners.
@@ -701,6 +762,26 @@ fn serve_image(shared: &Shared, path: &str, query: Option<&str>) -> Response<Vec
                 other => other,
             }
         }
+        crate::ImagePath::EnhancePreview(id, crop, kind) => {
+            let Some(candidate) = query.and_then(crate::parse_enhance_query) else {
+                return empty(StatusCode::BAD_REQUEST);
+            };
+            // The same supersession rule as the curve previews: a slider drag makes many requests,
+            // only the last one matters.
+            let counter = if kind == auto_crop_engine::CropImage::Thumb {
+                &shared.live_preview
+            } else {
+                &shared.full_preview
+            };
+            let token = Superseded::begin(counter);
+            match shared
+                .engine
+                .preview_enhance(id, crop, candidate, kind, &token)
+            {
+                Err(ErrKind::Cancelled) => return empty(StatusCode::NO_CONTENT),
+                other => other,
+            }
+        }
     };
     match result {
         Ok((bytes, mime)) if bytes.len() <= MAX_BODY => {
@@ -768,6 +849,10 @@ pub fn run() {
             set_crop_edit,
             curve_from_quad,
             set_curves,
+            set_enhance,
+            clear_enhance,
+            set_default_enhance,
+            suggest_enhance,
             suggest_curves,
             clear_curves,
             add_crop,

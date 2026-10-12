@@ -22,10 +22,10 @@
 use crate::args::{FormatArg, IfExists, OutputMode};
 use crate::inputs::Candidate;
 use auto_crop_codecs::{Format, decode};
-use auto_crop_core::{ErrKind, QuadWarp};
+use auto_crop_core::{Enhance, ErrKind, QuadWarp};
 use auto_crop_engine::EngineOptions;
 use auto_crop_engine::fsplan::{OnCollision, PlanError, PlanInput, ReservedKeys, plan_group};
-use auto_crop_engine::outputs::{default_output_format, render_outputs};
+use auto_crop_engine::outputs::{default_output_format, render_outputs_enhanced};
 use auto_crop_engine::util::{blake3_hex, new_id};
 use std::fs;
 use std::io::Write;
@@ -151,18 +151,21 @@ pub struct Rendered {
 pub fn render_all(
     bytes: &[u8],
     quads: &[QuadWarp],
+    enhances: &[Enhance],
     format: Format,
     opts: &EngineOptions,
 ) -> Result<Vec<Rendered>, ErrKind> {
-    Ok(render_outputs(bytes, quads, Some(format), opts)?
-        .into_iter()
-        .map(|r| Rendered {
-            bytes: r.bytes,
-            width: r.width,
-            height: r.height,
-            format: r.format,
-        })
-        .collect())
+    Ok(
+        render_outputs_enhanced(bytes, quads, enhances, Some(format), opts)?
+            .into_iter()
+            .map(|r| Rendered {
+                bytes: r.bytes,
+                width: r.width,
+                height: r.height,
+                format: r.format,
+            })
+            .collect(),
+    )
 }
 
 struct Temp {

@@ -243,6 +243,18 @@ pub fn process_flags() -> Vec<Flag> {
             "N",
             "Refuse images larger than N pixels (default 100 million, at most 500 million)",
         ),
+        val(
+            "enhance",
+            None,
+            "original|clean|document|receipt|auto",
+            "Enhance the pages: flatten uneven light and whiten the paper (clean), or also make black on white 8-bit grey (document, receipt); auto applies only what the engine suggests. Default original: nothing is changed",
+        ),
+        val(
+            "enhance-strength",
+            None,
+            "N",
+            "How much of the enhancement to apply, 0 to 100 percent (default 100); needs --enhance",
+        ),
     ]);
     f.extend(detect_flags());
     f.extend([
@@ -770,6 +782,62 @@ fn detect(p: &Parsed) -> Res<DetectArgs> {
     })
 }
 
+/// `--enhance`: what to do to the pages. `Original` (the default) changes nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EnhanceArg {
+    #[default]
+    Original,
+    Clean,
+    Document,
+    Receipt,
+    /// Apply only what `Engine::suggest_enhance` recommends, per crop. The one place an automatic
+    /// application of an enhancement exists, and only because this run asked for it.
+    Auto,
+}
+
+impl EnhanceArg {
+    pub fn name(self) -> &'static str {
+        match self {
+            EnhanceArg::Original => "original",
+            EnhanceArg::Clean => "clean",
+            EnhanceArg::Document => "document",
+            EnhanceArg::Receipt => "receipt",
+            EnhanceArg::Auto => "auto",
+        }
+    }
+
+    /// The mode a fixed choice applies; `None` for `original` and `auto`.
+    pub fn mode(self) -> Option<auto_crop_core::EnhanceMode> {
+        use auto_crop_core::EnhanceMode;
+        match self {
+            EnhanceArg::Clean => Some(EnhanceMode::Clean),
+            EnhanceArg::Document => Some(EnhanceMode::Document),
+            EnhanceArg::Receipt => Some(EnhanceMode::Receipt),
+            EnhanceArg::Original | EnhanceArg::Auto => None,
+        }
+    }
+}
+
+fn enhance_arg(p: &Parsed) -> Res<(EnhanceArg, u8)> {
+    let arg = match p.value("enhance") {
+        None | Some("original" | "off") => EnhanceArg::Original,
+        Some("clean") => EnhanceArg::Clean,
+        Some("document") => EnhanceArg::Document,
+        Some("receipt") => EnhanceArg::Receipt,
+        Some("auto") => EnhanceArg::Auto,
+        Some(o) => {
+            return usage(format!(
+                "unknown --enhance `{o}` (original, clean, document, receipt or auto)"
+            ));
+        }
+    };
+    let strength = number(p, "enhance-strength", 0u8, 100)?;
+    if strength.is_some() && arg == EnhanceArg::Original {
+        return usage("`--enhance-strength` needs `--enhance clean|document|receipt|auto`");
+    }
+    Ok((arg, strength.unwrap_or(100)))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormatArg {
     Keep,
@@ -909,6 +977,9 @@ pub struct ProcessArgs {
     pub if_exists: IfExists,
     pub format: FormatArg,
     pub knobs: Knobs,
+    /// `--enhance` and `--enhance-strength` (percent). Off by default.
+    pub enhance: EnhanceArg,
+    pub enhance_strength: u8,
     pub accept_splits: bool,
     pub reprocess: bool,
     pub dry_run: bool,
@@ -991,6 +1062,7 @@ fn process(p: &Parsed) -> Res<ProcessArgs> {
         return usage("`--if-exists` needs --output, --suffix or --copy");
     }
     let (jobs, mem_limit_mb) = pool(p)?;
+    let (enhance, enhance_strength) = enhance_arg(p)?;
     Ok(ProcessArgs {
         input: inputs(p, "process")?,
         detect: detect(p)?,
@@ -999,6 +1071,8 @@ fn process(p: &Parsed) -> Res<ProcessArgs> {
         if_exists,
         format,
         knobs: knobs(p)?,
+        enhance,
+        enhance_strength,
         accept_splits: p.has("accept-splits"),
         reprocess: p.has("reprocess"),
         dry_run: p.has("dry-run"),
