@@ -3,8 +3,8 @@
 For the GUI session that builds the enhance panel (ROADMAP M7.33 to M7.48). Everything below is in
 `crates/imgproc/src/enhance`, `crates/core` and `crates/engine`, and is additive: no existing method,
 type or JSON field changed its meaning. The shell exposes it as Tauri commands and an `acimg` route
-(`crates/shell`); the TypeScript contract in `ui/src/lib/types.ts`, the mock and the Svelte side are not
-written. Names follow `docs/dev/multi-item-engine.md` (ids only, no pixels over IPC, no paths).
+(`crates/shell`); the TypeScript contract in `ui/src/lib/types.ts`, the mock and the Svelte side are written
+(see "The editor (shell and UI)" at the end). Names follow `docs/dev/multi-item-engine.md` (ids only, no pixels over IPC, no paths).
 
 Design: [PLAN 5](../plan/05-enhancement.md). Measured numbers: [perf/enhance.md](../perf/enhance.md).
 
@@ -143,3 +143,64 @@ the algorithm), full-resolution tiles at 100% zoom (M7.25), the five fine-tune s
 switches (M7.20 to M7.23: despeckle, colour marks, CLAHE), 1-bit output (M7.28 and following),
 readability-risk holds in triage (M7.24; the enhancer's `Report` already carries `faded`, `low_contrast` and
 `unreliable`), wide-gamut conversion (M7.26), SIMD (M7.13).
+
+## The editor (shell and UI)
+
+`crates/shell` exposes the engine calls above as the commands `set_enhance`, `clear_enhance`, `set_default_enhance`,
+`suggest_enhance` (async, on the blocking pool) and, added with the UI, `set_scan_enhance` and `enhance_suggested`:
+
+* `Engine::set_scan_enhance(id, mode, strength, live, label, gesture)` is the "All items in this scan" scope: it sets the
+  default AND drops every crop's own override, as ONE undo step (Undo brings the crops' own values back).
+  `set_default_enhance` keeps the overrides, as before; the UI does not call it.
+* `Engine::enhance_suggested(ids) -> EnhanceBatch` is the grid's "Enhance all suggested": for every included crop of the
+  images that has no look yet and has a recommendation, it applies that recommendation as the crop's own override, as ONE
+  step of the session history (`session_undo`, label "Enhance suggested (N images)"). Crops that already have a look, crops
+  with no recommendation and failures are counted, never touched. Only a click calls it.
+* `Settings.suggestEnhance` (additive, default on, `settings.toml` key `suggest_enhance`) only decides whether a
+  suggestion is SHOWN. It never applies anything. The CLI sets it off.
+* "Try sample images" has two pages the suggestion fires on (`samples::SHADED_SAMPLES`: a text page in uneven light and a
+  faded receipt under a warm lamp, both from the enhancer's own test pages). No other sample gets a suggestion
+  (`exactly_the_shaded_samples_get_a_suggestion`).
+
+The strength crosses the IPC as a fraction (0 to 1), as the engine takes it; the UI speaks whole percent
+(`backend.ts` divides). `crates/shell/tests/enhance_json.rs` pins the wire shape on the real engine and writes
+`ui/src/lib/fixtures/enhance-*.json` (`AUTOCROP_REGEN_FIXTURES=1`), which `ui/src/lib/enhance.test.ts` reads.
+
+`ui/src`: `enhance.ts` is the pure logic (looks, strength, the preview query, counts and badges, the suggestion's life:
+asked for a page, ready, previewing, dismissed), `EnhancePanel.svelte` the inspector section, `EnhanceBanner.svelte` the
+suggestion, `SwapImage.svelte` the picture that never goes blank while a new address loads. Behaviour:
+
+* **Looks.** Original, Clean, Document, Receipt, each with a plain line. A look keeps the strength it had; from Original it
+  starts at 100. Strength 0 is Original (the engine keys it that way too). Choosing Original on a crop that follows an
+  Original default calls `clear_enhance` (no override kept).
+* **Live preview.** While the slider moves the picture comes from the `enhance-thumb` route (about every 90 ms, the older
+  request is superseded by the shell); when it lands the commit is ONE `set_enhance` with a fresh gesture id (a burst of key
+  presses shares one, `GestureClock`), and the picture settles to the `enhance-result` route and then to the committed crop
+  image. Previews of the same kind supersede each other in the shell (one counter per kind, shared with the curve previews),
+  so the panel never has two `result` requests in flight: the original for Compare is asked for only after the look has
+  arrived, and a request answered with 204 is asked again twice at most.
+* **Compare.** Press and hold (or hold Space or Enter) on "Show original"; a tap under 350 ms keeps it showing (the same
+  rule as the editor's Compare). A split view puts the original on the left of a line on the picture itself.
+* **Suggestion.** Asked for when the setting is on, the image is ready and the crop has no look, a moment (350 ms) after
+  the last change of the crop or its page; the answer is cached by the engine. A gentle banner under the header says
+  "This looks like a document: Clean makes it easier to read" (receipt for a long thin page) with the engine's reasons
+  (`reasons[]`, copy by code), and Preview, Apply, Not now. Preview shows the result in the panel without recording
+  anything (Esc or Stop preview ends it); Apply is `set_enhance` labelled "Enhance: Clean (suggested)", one undo step; Not now
+  hides it for that crop until the app closes (`store.enhanceDismissed`, not saved). A change of crop, page or look drops it.
+  The suggested look is tagged "Suggested" and the black-and-white look that fits "Fits this page" (an option).
+* **Several items.** "This item" | "All items in this scan"; the count "Enhancement is on for 2 of 3 items"; a crop with its
+  own look says so and can follow the scan look again (`clear_enhance`). The chip bar shows each item's look.
+* **Held and accept.** Unchanged: enhancement alone never makes a crop held. The engine binds an acceptance to the render
+  hash, which includes the look, so changing the look of a scan that was accepted (a split or a curved page) withdraws the
+  acceptance, exactly like any other edit; the panel says so for held scans.
+* **Output.** A black-and-white look on a JPEG source shows the PNG hint near Save (the UI has no output-format choice, so no
+  one-click "Save as PNG": it points to the Convert screen) and the grey note (one grey channel, no colour profile); after a
+  save the engine's `enhance.icc_dropped` and `enhance.png_recommended` notices are shown in plain language.
+* **Grid.** "Enhance all suggested" (the whole batch) and "Enhance suggested" (the selection) call `enhance_suggested`, one
+  session undo and a summary toast with Undo; tiles show "Enhanced" (or "Enhanced 2 of 3"). Settings has the switch
+  "Suggest enhancement for documents and receipts".
+* **Honest limits in the UI.** The help text says Clean was measured only on made-up test pages (OCR, never worse), that the
+  black-and-white looks can lose faint marks (keep Original if unsure), and that the preview comes from a reduced copy.
+
+The browser mock (`mock-enhance.ts`) is a canvas stand-in for the enhancer (flatten the paper level per channel, whiten,
+threshold): it shows the panel working and says nothing about the real algorithm's quality.

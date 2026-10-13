@@ -860,7 +860,7 @@ fn exactly_the_shaded_samples_get_a_suggestion() {
     let files = auto_crop_engine::samples::write_samples(&e.dir.join("samples")).unwrap();
     let mut fired = Vec::new();
     for f in files {
-        let id = e.engine.open_paths(&[f.clone()], false).ids[0];
+        let id = e.engine.open_paths(std::slice::from_ref(&f), false).ids[0];
         let v = e.engine.analyse(id).unwrap();
         for c in &v.crops {
             if e.engine.suggest_enhance(id, c.id).unwrap().is_some() {

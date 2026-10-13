@@ -570,7 +570,7 @@
             : api.setEnhance(id, cropId, mode, pct, 'end', label, gesture),
       null,
     );
-    say(S.enhance.announceChanged(name, pct));
+    // The panel's own polite status line says what is on show once the look has landed: no second announcement here.
   }
 
   function followScan(): void {

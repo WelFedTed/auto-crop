@@ -8,6 +8,7 @@
   //   * Reorder: drag the grip, or Alt+Arrow on a chip, or the Move earlier / Move later buttons that the
   //     editor shows for the selected item (WCAG 2.5.7: a drag is never the only way).
   // Removed items sit in their own group with a Restore button.
+  import { isEnhanced, modeOf, strengthOf } from '../enhance.ts';
   import { dropSlot, includedCrops, removedCrops } from '../items.ts';
   import { S } from '../strings.ts';
   import type { Band, CropView, ItemView } from '../types.ts';
@@ -203,7 +204,7 @@
           tabindex={c.id === tabId ? 0 : -1}
           aria-current={c.id === selectedId ? 'true' : undefined}
           aria-pressed={mergeMode ? mergeIds.includes(c.id) : undefined}
-          aria-label={[S.items.itemN(c.order), word(c), reasonOf(c), c.outputName].filter(Boolean).join(', ')}
+          aria-label={[S.items.itemN(c.order), word(c), reasonOf(c), c.outputName, isEnhanced(c.enhance) ? S.enhance.chipLook(S.enhance.looks[modeOf(c.enhance)].name, strengthOf(c.enhance)) : null].filter(Boolean).join(', ')}
           onclick={() => pick(c.id)}
           onfocus={() => (focusId = c.id)}
           onkeydown={(e) => keyOn(e, c)}
@@ -222,6 +223,7 @@
             <span class="band"><Icon name={iconOf(c.band)} size={14} stroke={2.2} /> {word(c)}</span>
             {#if reasonOf(c)}<span class="reason">{reasonOf(c)}</span>{/if}
             {#if c.outputName}<span class="file mono">{c.outputName}</span>{/if}
+            {#if isEnhanced(c.enhance)}<span class="look" data-chip-look title={c.enhanceOverride ? S.enhance.chipOwn : undefined}><Icon name="sparkle" size={12} /> {S.enhance.chipLook(S.enhance.looks[modeOf(c.enhance)].name, strengthOf(c.enhance))}</span>{/if}
           </span>
         </button>
         <button type="button" class="more" tabindex="-1" aria-haspopup="menu" aria-label={S.items.menuFor(c.order)} title={S.items.menuButton} onclick={(e) => {
@@ -443,6 +445,15 @@
 
   .gone .band {
     color: var(--text-2);
+  }
+
+  .look {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--accent-text);
   }
 
   .reason {

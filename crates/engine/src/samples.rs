@@ -321,8 +321,8 @@ pub const SHADED_SAMPLES: [&str; 2] = ["document_5_shaded.jpg", "receipt_5_faded
 /// `page` lying on a dark desk, centred, `W x H` like the other samples.
 fn on_desk(page: &auto_crop_imgproc::Raster, desk: [u8; 3]) -> auto_crop_imgproc::Raster {
     let mut out = auto_crop_imgproc::Raster::new(W, H);
-    for px in out.data.chunks_exact_mut(3) {
-        px.copy_from_slice(&desk);
+    for px in out.data.as_chunks_mut::<3>().0 {
+        *px = desk;
     }
     let (x0, y0) = ((W - page.width) / 2, (H - page.height) / 2);
     for y in 0..page.height {
