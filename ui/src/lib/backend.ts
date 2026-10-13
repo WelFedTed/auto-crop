@@ -9,6 +9,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { curveQuery } from './curve.ts';
+import { enhanceQuery } from './enhance.ts';
 import type {
   Api,
   BackupsView,
@@ -20,6 +21,10 @@ import type {
   ConvertSummary,
   CropImageKind,
   CurvePreviewKind,
+  EnhanceBatch,
+  EnhanceMode,
+  EnhancePreviewKind,
+  EnhanceSuggestion,
   CurveSet,
   CurveSuggestion,
   Cut,
@@ -101,6 +106,15 @@ const tauriApi: Api = {
   clearCurves: (id: number, crop: number) => invoke<ItemView>('clear_curves', { id, crop }),
   suggestCurves: (id: number, crop: number) => invoke<CurveSuggestion | null>('suggest_curves', { id, crop }),
 
+  // The shell takes the strength as a fraction (0 to 1); the contract of this UI is whole percent.
+  setEnhance: (id: number, crop: number, mode: EnhanceMode, strength: number, phase: 'live' | 'end', label: string, gesture: number | null) =>
+    invoke<ItemView>('set_enhance', { id, crop, mode, strength: strength / 100, phase, label, gesture }),
+  clearEnhance: (id: number, crop: number) => invoke<ItemView>('clear_enhance', { id, crop }),
+  setScanEnhance: (id: number, mode: EnhanceMode, strength: number, phase: 'live' | 'end', label: string, gesture: number | null) =>
+    invoke<ItemView>('set_scan_enhance', { id, mode, strength: strength / 100, phase, label, gesture }),
+  suggestEnhance: (id: number, crop: number) => invoke<EnhanceSuggestion | null>('suggest_enhance', { id, crop }),
+  enhanceSuggested: (ids: number[]) => invoke<EnhanceBatch>('enhance_suggested', { ids }),
+
   convertMode: (on: boolean) => invoke<void>('convert_mode', { on }),
   convertPickFiles: () => invoke<ConvertAdded>('convert_pick_files'),
   convertPickFolder: (includeSubfolders: boolean) => invoke<ConvertAdded>('convert_pick_folder', { includeSubfolders }),
@@ -122,6 +136,8 @@ interface Impl {
   cropImageUrl(kind: CropImageKind, id: number, crop: number, renderKey: string): string;
   /** The engine's flattened preview of a candidate curve set, rendered without committing anything. */
   curvePreviewUrl(kind: CurvePreviewKind, id: number, crop: number, curves: CurveSet): string;
+  /** The engine's preview of a candidate enhancement of one crop (`mode`, `strength` in percent), nothing committed. */
+  enhancePreviewUrl(kind: EnhancePreviewKind, id: number, crop: number, mode: EnhanceMode, strength: number): string;
   on<K extends keyof Events>(event: K, cb: (payload: Events[K]) => void): Promise<Unlisten>;
   /** Mock only: a file dropped on the window in a plain browser. */
   dropFiles?: (files: File[]) => Promise<OpenSummary>;
@@ -149,6 +165,10 @@ const tauriImpl: Impl = {
     // The curves ride in the query (digits and commas only); the Rust side parses them strictly and renders from the
     // display proxy at preview size. Nothing is committed or cached; a newer request cancels an older one.
     return schemeUrl(`${token}/${id}/crop/${crop}/curve-${kind}?${curveQuery(curves)}`);
+  },
+  enhancePreviewUrl(kind, id, crop, mode, strength) {
+    // `mode=<m>&s=<0..100>`: the Rust side parses it strictly. A newer request of the same kind supersedes an older one.
+    return schemeUrl(`${token}/${id}/crop/${crop}/enhance-${kind}?${enhanceQuery(mode, strength)}`);
   },
   async on(event, cb) {
     const un = await listen<Events[typeof event]>(event, (e) => cb(e.payload));
@@ -221,6 +241,12 @@ export const api: Api = {
   clearCurves: (id, crop) => impl.api.clearCurves(id, crop),
   suggestCurves: (id, crop) => impl.api.suggestCurves(id, crop),
 
+  setEnhance: (id, crop, mode, strength, phase, label, gesture) => impl.api.setEnhance(id, crop, mode, strength, phase, label, gesture),
+  clearEnhance: (id, crop) => impl.api.clearEnhance(id, crop),
+  setScanEnhance: (id, mode, strength, phase, label, gesture) => impl.api.setScanEnhance(id, mode, strength, phase, label, gesture),
+  suggestEnhance: (id, crop) => impl.api.suggestEnhance(id, crop),
+  enhanceSuggested: (ids) => impl.api.enhanceSuggested(ids),
+
   convertMode: (on) => impl.api.convertMode(on),
   convertPickFiles: () => impl.api.convertPickFiles(),
   convertPickFolder: (sub) => impl.api.convertPickFolder(sub),
@@ -253,6 +279,15 @@ export function cropImageUrl(kind: CropImageKind, id: number, crop: number, rend
  */
 export function curvePreviewUrl(kind: CurvePreviewKind, id: number, crop: number, curves: CurveSet): string {
   return impl.curvePreviewUrl(kind, id, crop, curves);
+}
+
+/**
+ * URL of the engine's preview of a CANDIDATE enhancement of one crop (`preview_enhance`): `thumb` while a slider moves,
+ * `result` for the settled picture, the comparison with the original and the suggestion's Preview. Nothing is committed.
+ * The committed picture (already enhanced with the crop's effective look) is `cropImageUrl`.
+ */
+export function enhancePreviewUrl(kind: EnhancePreviewKind, id: number, crop: number, mode: EnhanceMode, strength: number): string {
+  return impl.enhancePreviewUrl(kind, id, crop, mode, strength);
 }
 
 export function onItemsAdded(cb: (s: OpenSummary) => void): Promise<Unlisten> {

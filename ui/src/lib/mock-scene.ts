@@ -27,6 +27,9 @@ export interface SceneSpec {
   /** A scene with no paper edge to find at all. */
   invisible: boolean;
   seed: number;
+  /** Uneven light across the paper (a lamp from one side), and faded print: what the enhancement suggestion fires on. */
+  shade?: boolean;
+  faded?: boolean;
 }
 
 export { mulberry32 };
@@ -166,8 +169,8 @@ export function drawScene(spec: SceneSpec): HTMLCanvasElement {
       style,
     );
   };
-  const ink = 'rgba(38,42,52,0.78)';
-  const soft = 'rgba(38,42,52,0.42)';
+  const ink = spec.faded ? 'rgba(38,42,52,0.4)' : 'rgba(38,42,52,0.78)';
+  const soft = spec.faded ? 'rgba(38,42,52,0.22)' : 'rgba(38,42,52,0.42)';
   const m = lw * 0.09;
   const inner = lw - 2 * m;
   if (spec.kind === 'receipt') {
@@ -205,6 +208,24 @@ export function drawScene(spec: SceneSpec): HTMLCanvasElement {
       bar(m, y + 2 + r * 3.2, inner * 0.9, 0.5, soft);
     }
     bar(lw - m - inner * 0.36, 92, inner * 0.36, 0.7, ink);
+  }
+  if (spec.shade) {
+    // A lamp from the top left: the paper (and only the paper) falls off towards the bottom right, with a warm tint.
+    const xs = quad.map((p) => p.x);
+    const ys = quad.map((p) => p.y);
+    g.save();
+    g.beginPath();
+    g.moveTo(quad[0].x, quad[0].y);
+    for (let i = 1; i < quad.length; i++) g.lineTo(quad[i].x, quad[i].y);
+    g.closePath();
+    g.clip();
+    g.globalCompositeOperation = 'multiply';
+    const fall = g.createLinearGradient(Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys));
+    fall.addColorStop(0, 'rgb(255,252,246)');
+    fall.addColorStop(1, 'rgb(120,106,88)');
+    g.fillStyle = fall;
+    g.fillRect(0, 0, spec.w, spec.h);
+    g.restore();
   }
   return c;
 }

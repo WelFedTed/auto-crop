@@ -42,6 +42,7 @@ import { cornersOf, curveQuery, validateCurves } from './curve.ts';
 import { curvedDetectedQuad } from './curved-model.ts';
 import { gestureKey, pushEntry } from './history.ts';
 import { createConvertMock } from './mock-convert.ts';
+import { enhanceCanvas, mockEnhanceSuggestion } from './mock-enhance.ts';
 import { mockSuggestion } from './mock-suggest.ts';
 import type { BedSpec, SceneSpec } from './mock-scene.ts';
 import { cloneEdit, type Quad } from './quad.ts';
@@ -50,7 +51,12 @@ import {
   addCrop,
   angleCrop,
   clearCurves as clearCurvesState,
+  effectiveEnhance,
+  normaliseEnhance,
+  setCropEnhance,
+  setScanEnhance as setScanEnhanceState,
   cloneState,
+  cropKey,
   cropViews,
   curveCrop,
   cutCrop,
@@ -88,6 +94,11 @@ import type {
   Confidence,
   CropImageKind,
   CurvePreviewKind,
+  Enhance,
+  EnhanceBatch,
+  EnhanceMode,
+  EnhancePreviewKind,
+  EnhanceSuggestion,
   CurveSet,
   DerivedFile,
   Edit,
@@ -142,6 +153,8 @@ interface MockItem {
   openOnly: string | null;
   /** The curved sample: the one page the mock's `suggestCurves` can see a curve on. */
   curvedSample: boolean;
+  /** The pages the mock's `suggestEnhance` recommends something for (shaded documents and receipts). */
+  suggestable: { kind: 'document' | 'receipt'; faded: boolean } | null;
 }
 
 const items = new Map<number, MockItem>();
@@ -219,11 +232,17 @@ function flipped(c: HTMLCanvasElement): HTMLCanvasElement {
   return out;
 }
 
-function renderCrop(src: HTMLCanvasElement, c: ModelCrop): HTMLCanvasElement {
-  // A curved page is flattened through its curves (turns and mirror included); a quad goes through the homography.
+/** The crop's geometry only: a curved page is flattened through its curves, a quad goes through the homography. */
+function renderGeometry(src: HTMLCanvasElement, c: ModelCrop): HTMLCanvasElement {
   if (c.curves) return renderCurvedResult(src, { ...c.curves, quarterTurns: c.quarterTurns, mirror: c.mirror });
   const out = renderResult(src, toEdit(c));
   return c.mirror ? flipped(out) : out;
+}
+
+/** The crop as it is saved: geometry first, then its effective enhancement (Original leaves the pixels alone). */
+function renderCrop(src: HTMLCanvasElement, c: ModelCrop, look: Enhance): HTMLCanvasElement {
+  const e = normaliseEnhance(look);
+  return enhanceCanvas(renderGeometry(src, c), e.mode, e.mode === 'original' ? 0 : (e.strength ?? 100));
 }
 
 const current = (m: MockItem): ScanState => m.hist[m.cursor].state;
@@ -236,7 +255,7 @@ async function renderItem(m: MockItem): Promise<void> {
   const first = inc[0] ?? state.crops[0];
   const split = inc.length >= 2;
   const failedUntouched = !!first && first.confidence !== null && bandFailed(first) && !isEdited(state, m.auto);
-  const firstResult = first ? renderCrop(m.src, first) : m.src;
+  const firstResult = first ? renderCrop(m.src, first, effectiveEnhance(state, first)) : m.src;
   await publish(m.id, 'result', m.gen, firstResult);
   await publish(m.id, 'thumb', m.gen, scaleToLongEdge(split || failedUntouched || !first ? m.src : firstResult, 256));
   const views = cropViews(state, { stem: m.stem, ext: m.ext, baseline: m.auto });
@@ -244,7 +263,7 @@ async function renderItem(m: MockItem): Promise<void> {
     const c = state.crops.find((x) => x.id === v.id)!;
     const rk = `${m.id}/${v.id}/result/${v.renderKey}`;
     if (urlCrop.has(rk)) continue;
-    const res = c === first ? firstResult : renderCrop(m.src, c);
+    const res = c === first ? firstResult : renderCrop(m.src, c, effectiveEnhance(state, c));
     urlCrop.set(rk, await canvasToBlobUrl(res));
     urlCrop.set(`${m.id}/${v.id}/thumb/${v.renderKey}`, await canvasToBlobUrl(scaleToLongEdge(res, 256)));
   }
@@ -285,6 +304,7 @@ function viewOf(m: MockItem, shown?: ScanState): ItemView {
     split: ready ? splitView(state, m.accepted === sig, m.groupSaved) : null,
     historyPosition: m.cursor,
     openOnly: ready ? m.openOnly : null,
+    enhance: { ...state.enhance },
   };
 }
 
@@ -324,6 +344,7 @@ function newAnalysingItem(name: string): MockItem {
     groupSaved: false,
     openOnly: null,
     curvedSample: false,
+    suggestable: null,
   };
   items.set(id, m);
   return m;
@@ -398,6 +419,9 @@ interface SampleDef {
   openOnly?: string;
   /** The curved sample: a receipt whose four edges are bent (curved-model.ts). */
   curved?: boolean;
+  /** Lit from one side (and, if `faded`, with faded print): the pages the enhancement suggestion fires on. */
+  shade?: boolean;
+  faded?: boolean;
 }
 
 function sampleDefs(): SampleDef[] {
@@ -452,7 +476,13 @@ function sampleDefs(): SampleDef[] {
     reasons: [{ code: 'WEAK_EDGE', side: 'top' }, { code: 'WEAK_EDGE', side: 'bottom' }],
     curved: true,
   };
-  return [curved, ...multi, ...defs];
+  // The two pages the enhancement suggestion fires on (like the real app's shaded samples): a document lit from one side
+  // and a faded receipt. They sit right after the curved page.
+  const shaded: SampleDef[] = [
+    { name: 'document_5_shaded.jpg', kind: 'document', score: 0.98, forced: null, reasons: [], noise: 0.003, shade: true },
+    { name: 'receipt_5_faded_warm.jpg', kind: 'receipt', score: 0.98, forced: null, reasons: [], noise: 0.003, shade: true, faded: true },
+  ];
+  return [curved, ...shaded, ...multi, ...defs];
 }
 
 async function analyseSample(m: MockItem, d: SampleDef, seed: number): Promise<void> {
@@ -475,6 +505,8 @@ async function analyseSample(m: MockItem, d: SampleDef, seed: number): Promise<v
   if (d.bed) {
     const spec = bedLayout(d.bed);
     m.bed = spec;
+    // Receipts lying on a scanner bed are pale: the mock recommends Clean for them (to try the several-items scope).
+    if (d.bed === 'receipts') m.suggestable = { kind: 'receipt', faded: false };
     const src = drawBed(spec);
     const dims: Dims = [src.width, src.height];
     await finishAnalysis(m, src, Math.round(src.width * 2.9), Math.round(src.height * 2.9), bedState(spec, settings.splitPolicy, settings.splitProfile, dims));
@@ -482,6 +514,9 @@ async function analyseSample(m: MockItem, d: SampleDef, seed: number): Promise<v
   }
   const rnd = mulberry32(seed * 31 + 5);
   const spec = makeSpec(rnd, d.kind, { ...d.opts, seed });
+  spec.shade = d.shade;
+  spec.faded = d.faded;
+  if (d.shade) m.suggestable = { kind: d.kind, faded: !!d.faded };
   const src = drawScene(spec);
   let edit: Edit;
   if (d.forced === 'failed' && !d.skinny) edit = failedPlaceholderEdit();
@@ -1099,6 +1134,69 @@ const api: Api = {
       size: [m.src?.width ?? 1000, m.src?.height ?? 1000],
     });
   },
+
+  // ---- enhancement ----------------------------------------------------------------------------------------
+  async setEnhance(id, crop, mode, strength, phase, label, gesture) {
+    const m = ready(id);
+    const look: Enhance = mode === 'original' ? { mode: 'original' } : { mode, strength };
+    if (phase === 'live') {
+      // Nothing is recorded; the picture of a slider in motion comes from the preview route.
+      return viewOf(m, setCropEnhance(current(m), crop, look));
+    }
+    return commitOp(m, (b) => labelled(label || `Enhance: ${mode}`, b, crop), (s) => setCropEnhance(s, crop, look), gestureKey(gesture, crop));
+  },
+  async clearEnhance(id, crop) {
+    const m = ready(id);
+    return commitOp(m, (b) => labelled('Reset enhancement', b, crop), (s) => setCropEnhance(s, crop, null));
+  },
+  async setScanEnhance(id, mode, strength, phase, label, gesture) {
+    const m = ready(id);
+    const look: Enhance = mode === 'original' ? { mode: 'original' } : { mode, strength };
+    if (phase === 'live') return viewOf(m, setScanEnhanceState(current(m), look, true));
+    return commitOp(m, () => label || `Enhance all: ${mode}`, (s) => setScanEnhanceState(s, look, true), gestureKey(gesture, -1));
+  },
+  async suggestEnhance(id, crop) {
+    const m = ready(id);
+    // A few tens of milliseconds on the engine's worker. Asking records nothing: no history entry, no gen bump.
+    await sleep(120);
+    if (!current(m).crops.some((c) => c.id === crop)) throw 'NO_CROP';
+    return m.suggestable ? mockEnhanceSuggestion(m.suggestable.kind, m.suggestable.faded) : null;
+  },
+  async enhanceSuggested(ids): Promise<EnhanceBatch> {
+    const batch: EnhanceBatch = { views: [], images: 0, crops: 0, already: 0, none: 0, failed: 0 };
+    const cmd: SessionCmd = { label: '', moves: [] };
+    for (const id of ids) {
+      const m = items.get(id);
+      if (!m || m.status !== 'ready') continue;
+      const before = m.cursor;
+      let view: ItemView | null = null;
+      for (const c of included(current(m))) {
+        if (effectiveEnhance(current(m), c).mode !== 'original') {
+          batch.already++;
+          continue;
+        }
+        const s = await api.suggestEnhance(id, c.id);
+        if (!s) {
+          batch.none++;
+          continue;
+        }
+        view = await api.setEnhance(id, c.id, s.mode, s.strength, 'end', `Enhance: ${s.mode}`, null);
+        batch.crops++;
+      }
+      if (view) {
+        cmd.moves.push({ id, before, after: m.cursor });
+        batch.images++;
+        batch.views.push(view);
+      }
+    }
+    if (cmd.moves.length > 0) {
+      cmd.label = `Enhance suggested (${batch.images} ${batch.images === 1 ? 'image' : 'images'})`;
+      sessionLog = sessionLog.slice(0, sessionCursor);
+      sessionLog.push(cmd);
+      sessionCursor = sessionLog.length;
+    }
+    return batch;
+  },
 };
 
 // ---------------------------------------------------------------------------------------------- curve previews
@@ -1117,6 +1215,31 @@ function mockCurvePreviewUrl(kind: CurvePreviewKind, id: number, _crop: number, 
     const oldest = previews.keys().next().value as string;
     const gone = previews.get(oldest);
     previews.delete(oldest);
+    if (gone) setTimeout(() => URL.revokeObjectURL(gone), 8000);
+  }
+  return url;
+}
+
+// ---------------------------------------------------------------------------------------------- enhance previews
+const enhancePreviews = new Map<string, string>();
+
+/** The mock's `preview_enhance`: the crop's geometry with a CANDIDATE look, rendered on a canvas; nothing is committed. */
+function mockEnhancePreviewUrl(kind: EnhancePreviewKind, id: number, crop: number, mode: EnhanceMode, strength: number): string {
+  const m = items.get(id);
+  const c = m?.src ? current(m).crops.find((x) => x.id === crop) : undefined;
+  if (!m?.src || !c) return ensurePlaceholder();
+  const s = mode === 'original' ? 0 : Math.min(100, Math.max(0, Math.round(strength)));
+  const key = `${id}/${kind}/${mode}/${s}/${cropKey({ ...c, enhanceOverride: null })}`;
+  const hit = enhancePreviews.get(key);
+  if (hit) return hit;
+  let base = renderGeometry(m.src, c);
+  if (kind === 'thumb') base = scaleToLongEdge(base, 256);
+  const url = canvasToBlobUrlSync(enhanceCanvas(base, mode, s));
+  enhancePreviews.set(key, url);
+  if (enhancePreviews.size > 40) {
+    const oldest = enhancePreviews.keys().next().value as string;
+    const gone = enhancePreviews.get(oldest);
+    enhancePreviews.delete(oldest);
     if (gone) setTimeout(() => URL.revokeObjectURL(gone), 8000);
   }
   return url;
@@ -1235,6 +1358,7 @@ export const mockImpl: BackendImpl = {
   imageUrl: mockImageUrl,
   cropImageUrl: mockCropImageUrl,
   curvePreviewUrl: mockCurvePreviewUrl,
+  enhancePreviewUrl: mockEnhancePreviewUrl,
   async on<K extends keyof Events>(event: K, cb: (payload: Events[K]) => void): Promise<Unlisten> {
     listeners[event].add(cb);
     return () => {

@@ -24,6 +24,7 @@ export const defaultSettings = (patch: Partial<Settings> = {}): Settings => ({
   splitProfile: 'photos',
   autoSaveSplits: false,
   curvedIntroAck: true,
+  suggestEnhance: true,
   ...patch,
 });
 
@@ -50,6 +51,7 @@ export function item(id: number, patch: Partial<ItemView> = {}): ItemView {
     split: null,
     historyPosition: 0,
     openOnly: null,
+    enhance: { mode: 'original' },
     ...patch,
   };
 }
@@ -74,6 +76,8 @@ export function crop(id: number, order: number, band: Band | null = 'good', patc
     autoEdit: sampleEdit(),
     mirror: false,
     curves: null,
+    enhance: { mode: 'original' },
+    enhanceOverride: null,
     origin: 'auto',
     confidence: { score: band === 'good' ? 0.98 : 0.8, forced: null, reasons: [] },
     band,

@@ -17,6 +17,7 @@ export function defaultSettings(): Settings {
     splitProfile: 'photos',
     autoSaveSplits: false,
     curvedIntroAck: false,
+    suggestEnhance: true,
   };
 }
 

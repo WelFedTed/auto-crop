@@ -1,0 +1,35 @@
+{
+  "original": {
+    "cropEnhance": {
+      "mode": "original"
+    },
+    "cropEnhanceOverride": null,
+    "itemEnhance": {
+      "mode": "original"
+    }
+  },
+  "scan": {
+    "cropEnhance": {
+      "mode": "receipt",
+      "strength": 100
+    },
+    "cropEnhanceOverride": null,
+    "itemEnhance": {
+      "mode": "receipt",
+      "strength": 100
+    }
+  },
+  "set": {
+    "cropEnhance": {
+      "mode": "clean",
+      "strength": 70
+    },
+    "cropEnhanceOverride": {
+      "mode": "clean",
+      "strength": 70
+    },
+    "itemEnhance": {
+      "mode": "original"
+    }
+  }
+}

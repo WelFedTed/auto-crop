@@ -246,6 +246,10 @@ export const NOTICES: Record<string, string> = {
   'sync.root':
     'This folder is kept in sync by a cloud service, which can upload a half-written file or undo the swap. Save as copy is safer here.',
   'convert.same_format': 'This file is already in the target format, so there was nothing to convert.',
+  'enhance.icc_dropped':
+    'This look is saved as a plain grey picture, so the colour profile of the original was not kept. It looks the same on ordinary screens.',
+  'enhance.png_recommended':
+    'A black-and-white look keeps faint marks best as a PNG. This JPG was saved at high quality; a PNG would be exact.',
   // Convert (crates/engine/src/convert.rs, crates/codecs): what happened to the picture itself. The five codes that
   // stop a replacement (tiff.multi_page ... cmyk.naive_conversion) read differently when the file was NOT converted:
   // CONVERT_SKIPPED_NOTICES below. `tiff.multi_page` above is the Save text; Convert uses `convertNoticeText`.
@@ -915,6 +919,104 @@ export const S = {
     legendSuggested: 'Suggested outline',
     legendCurrent: 'Current outline',
   },
+  // Enhancement (PLAN 5, B13): suggested, never forced. The words say what each look does and where it falls short.
+  enhance: {
+    heading: 'Enhance',
+    lead: 'Make a page easier to read. Nothing changes until you choose a look.',
+    looksLabel: 'Look',
+    looks: {
+      original: { name: 'Original', line: 'Leave the picture as it is.' },
+      clean: { name: 'Clean', line: 'Evens out the light and whitens the paper. Colour stays.' },
+      document: { name: 'Document', line: 'Black ink on white paper. No colour, no shading.' },
+      receipt: { name: 'Receipt', line: 'Black and white, tuned for faint printed text.' },
+    },
+    suggestedTag: 'Suggested',
+    fitsTag: 'Fits this page',
+    strength: 'Strength',
+    strengthValue: (pct: number) => `${pct}%`,
+    strengthHelp: 'How much of the look is used. 0% is the original.',
+    strengthOff: 'Choose a look to set its strength.',
+    // several items on one scan
+    scopeLabel: 'Apply to',
+    scopeThis: 'This item',
+    scopeAll: 'All items in this scan',
+    scopeAllNote: (n: number) => `Gives all ${n} items this look and replaces any look set on a single item. Undo takes it back as one step.`,
+    onCount: (on: number, total: number) => (total === 1 ? (on === 1 ? 'Enhancement is on' : 'Enhancement is off') : `Enhancement is on for ${on} of ${total} items`),
+    customised: 'This item has its own look.',
+    followScan: 'Use the scan look again',
+    followed: 'This item follows the scan look again.',
+    // looking
+    previewHeading: 'Preview',
+    compareHold: 'Show original',
+    compareHint: 'Press and hold to see the original. A quick tap keeps it showing.',
+    splitView: 'Split view',
+    splitSlider: 'Split position',
+    splitHint: 'Original on the left, enhanced on the right.',
+    capOriginal: 'Original',
+    capEnhanced: 'Enhanced',
+    capPreview: 'Preview, not applied',
+    capLoading: 'Loading the preview',
+    previewAlt: (look: string) => `Preview of this crop with the ${look} look`,
+    originalAlt: 'This crop without enhancement',
+    statusApplied: (look: string, pct: number) => `Showing ${look} at ${pct}%.`,
+    statusOriginal: 'Showing the original.',
+    statusPreview: (look: string, pct: number) => `Previewing ${look} at ${pct}%. Nothing has been changed yet.`,
+    statusHeld: 'Showing the original while you hold the button.',
+    // the suggestion
+    bannerDoc: 'This looks like a document: Clean makes it easier to read',
+    bannerReceipt: 'This looks like a receipt: Clean makes it easier to read',
+    bannerLabel: 'Enhancement suggestion',
+    reasons: {
+      uneven_light: 'The light on the page is uneven.',
+      dull_paper: 'The paper looks grey instead of white.',
+      colour_cast: 'The page has a colour tint.',
+      faded_print: 'The print looks faded.',
+    } as Record<string, string>,
+    bannerNote: 'A simple check of the picture suggested this, so it can be wrong. Preview it, then decide.',
+    preview: 'Preview',
+    stopPreview: 'Stop preview',
+    apply: 'Apply',
+    applyHint: 'Applies Clean to this page as one step. Undo takes it back.',
+    notNow: 'Not now',
+    notNowHint: 'Hides this suggestion for this picture until you close the app. Nothing is changed.',
+    announcePreviewOn: 'Previewing Clean. Nothing has been changed yet.',
+    announcePreviewOff: 'Preview stopped. Nothing was changed.',
+    announceApplied: (look: string) => `Applied ${look}. Undo takes it back.`,
+    announceChanged: (look: string, pct: number) => (look === 'Original' ? 'Original. No enhancement.' : `${look} at ${pct}%.`),
+    announceDismissed: 'Suggestion hidden for this picture. You can still choose a look below.',
+    announceScan: (look: string, n: number) => `${look} for all ${n} items.`,
+    announceFollow: 'This item follows the scan look again.',
+    announceStale: 'The suggestion was dropped because the page changed.',
+    failed: 'Could not change the enhancement. Nothing was changed.',
+    // honest limits
+    helpTitle: 'About these looks',
+    helpClean:
+      'Clean is the one to try first. In tests on made-up pages, text-reading software (OCR) read Clean pages as well as the original or better, never worse. It has not been measured on real photos yet.',
+    helpBw:
+      'Document and Receipt turn the page into black and white. They can lose faint marks such as pencil, light stamps and photos. If you are not sure, keep Original or Clean.',
+    helpOriginal: 'Original is never changed: the saved picture is exactly the crop.',
+    helpPreview: 'The preview is made from a reduced copy of the picture. The saved file is made from the full-size original, so thin strokes can differ a little.',
+    // what a look writes
+    greyNote: 'Document and Receipt save a black-and-white picture (one grey channel). The colour profile of the original is not kept.',
+    pngHint:
+      'Black-and-white looks keep faint marks best as a PNG. Auto Crop saves a JPG like your original, at high quality. To get a PNG, convert the saved copy on the Convert screen.',
+    convertLink: 'Open Convert',
+    heldNote: 'This scan waits for your OK. Changing its look asks you to accept it again.',
+    // the grid
+    tileBadge: 'Enhanced',
+    tileBadgeSome: (on: number, total: number) => `Enhanced ${on} of ${total}`,
+    tileBadgeTitle: 'This picture will be saved with an enhancement.',
+    gridAll: 'Enhance all suggested',
+    gridSelected: 'Enhance suggested',
+    gridHint: 'Applies Clean to every page where Auto Crop suggests it and nothing is set yet. One Undo takes it all back.',
+    gridWorking: 'Looking for pages to enhance…',
+    batchDone: (crops: number, images: number, none: number) =>
+      `Enhanced ${crops} ${crops === 1 ? 'page' : 'pages'} in ${images} ${images === 1 ? 'image' : 'images'}.${none > 0 ? ` ${none} had nothing to suggest.` : ''}`,
+    batchNone: (none: number, already: number) =>
+      already > 0 && none === 0 ? 'Everything with a suggestion is already enhanced.' : 'Nothing to enhance: no page looks like a document or receipt that needs it.',
+    batchUndo: 'Undo',
+    batchFailed: 'Could not enhance the suggested pages. Nothing was changed.',
+  },
   // The one-time sheet the first time Curved edges is entered.
   curvedIntro: {
     title: 'Before you bend the edges',
@@ -1199,8 +1301,11 @@ export const S = {
     notes: [
       'Confidence scores are uncalibrated heuristics for now. Balanced is experimental, and Strict is the safe default.',
       'Scans with several items are found and held for review. Splitting is the newest part of Auto Crop, so it never replaces a scan without your OK unless you switch on the experimental option above.',
-      'Image enhancement is not available yet.',
+      'Enhancement is always your choice. Clean has only been measured on made-up test pages so far, and the black-and-white looks can lose faint marks, so keep Original if you are not sure.',
     ],
+    enhancing: 'ENHANCEMENT',
+    suggestEnhance: 'Suggest enhancement for documents and receipts',
+    suggestEnhanceHelp: 'Shows a quiet suggestion when a page looks like a document or receipt that would read better. It never changes anything by itself.',
     splitting: 'SPLITTING SCANS',
     splitPolicy: 'Look for several items on a scan',
     splitPolicyHelp: 'Photos laid out on a scanner bed, or several receipts in one picture.',

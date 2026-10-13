@@ -14,6 +14,7 @@ import {
   undoDecision,
   type DecisionState,
 } from './decisions.ts';
+import { batchLine, dismissKey } from './enhance.ts';
 import { afterRedo, afterUndo, emptyGridHistory, nextRedo, nextUndo, pushAction, reconcile, type GridHistory } from './grid-history.ts';
 import { collisionNotice, plannedNames } from './items.ts';
 import {
@@ -164,6 +165,10 @@ class Store {
   /** The first split sheet ("1 scan becomes 4 files") has been answered. */
   firstSplitAck = $state(lsGet(LS.firstSplitAck) === '1');
   gridHistory = $state.raw<GridHistory>(emptyGridHistory());
+  /** "Enhance all suggested" is running. */
+  enhancing = $state(false);
+  /** Crops whose enhancement suggestion the person put away with "Not now" (`item:crop`), for this session only. */
+  enhanceDismissed = $state.raw<ReadonlySet<string>>(new Set());
 
   /** The settings that change what the grid does with scans that have several items. */
   reviewOpts = $derived({ autoSaveSplits: this.settings.autoSaveSplits, saveAsCopy: this.settings.saveAsCopy });
@@ -342,6 +347,39 @@ class Store {
     } catch (e) {
       this.fail(e);
     }
+  }
+
+  /**
+   * "Enhance all suggested": the engine's recommendation for every crop of `ids` that has one and no look yet, as ONE
+   * undo step of the session. Only ever called by a click on that action; nothing is applied by merely asking.
+   */
+  async enhanceSuggested(ids: number[]): Promise<void> {
+    if (this.enhancing || ids.length === 0) return;
+    this.enhancing = true;
+    this.announce(S.enhance.gridWorking);
+    try {
+      const batch = await api.enhanceSuggested(ids);
+      for (const v of batch.views) this.upsert(v);
+      const line = batchLine(batch);
+      if (batch.crops > 0) {
+        const label = `Enhance suggested (${batch.images} ${batch.images === 1 ? 'image' : 'images'})`;
+        this.gridHistory = pushAction(this.gridHistory, { kind: 'session', label });
+        this.toast(line, 'success', { label: S.enhance.batchUndo, run: () => void this.undoGrid() });
+      } else {
+        this.toast(line, 'info');
+      }
+      this.announce(line);
+    } catch (e) {
+      console.error(e);
+      this.toast(S.enhance.batchFailed, 'error');
+    } finally {
+      this.enhancing = false;
+    }
+  }
+
+  /** "Not now" on a suggestion: hidden for this crop until the app closes (never saved to disk). */
+  dismissEnhance(item: number, crop: number): void {
+    this.enhanceDismissed = new Set([...this.enhanceDismissed, dismissKey(item, crop)]);
   }
 
   // ------------------------------------------------------------------------------------------ one scan

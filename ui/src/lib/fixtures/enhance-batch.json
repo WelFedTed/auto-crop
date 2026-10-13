@@ -1,0 +1,16 @@
+{
+  "already": 1,
+  "crops": 1,
+  "failed": 0,
+  "images": 1,
+  "none": 0,
+  "views": [
+    {
+      "enhance": {
+        "mode": "clean",
+        "strength": 100
+      },
+      "id": 2
+    }
+  ]
+}

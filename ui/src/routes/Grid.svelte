@@ -122,6 +122,8 @@
   const unreviewed = $derived(acceptable.filter((x) => x.needs));
   const hasSkippedSelected = $derived(selectedList.some((x) => x.decision === 'skipped'));
   const splittable = $derived(selectedList.filter((x) => x.item.status === 'ready').map((x) => x.item.id));
+  /** Every image of the batch that has been analysed: what "Enhance all suggested" looks at. */
+  const readyIds = $derived(store.items.filter((i) => i.status === 'ready').map((i) => i.id));
 
   function askAccept(): void {
     if (acceptable.length === 0) {
@@ -149,6 +151,12 @@
     const ids = splittable;
     clearSelection();
     void store.changeSplit(ids, { policy });
+  }
+
+  function doEnhanceSelected(): void {
+    const ids = splittable;
+    clearSelection();
+    void store.enhanceSuggested(ids);
   }
 
   function acceptOne(id: number): void {
@@ -394,6 +402,19 @@
           <input type="range" min="1" max="5" value={tileSize} oninput={(e) => setSize(Number(e.currentTarget.value))} />
         </label>
         <button type="button" class="btn btn-sm" onclick={selectShown} disabled={shownIds.length === 0}>{S.grid.selectShown}</button>
+        {#if store.settings.suggestEnhance}
+          <button
+            type="button"
+            class="btn btn-sm"
+            title={S.enhance.gridHint}
+            disabled={store.enhancing || readyIds.length === 0}
+            aria-busy={store.enhancing}
+            data-enhance-all
+            onclick={() => void store.enhanceSuggested(readyIds)}
+          >
+            <Icon name="sparkle" size={15} /> {S.enhance.gridAll}
+          </button>
+        {/if}
       </div>
     </div>
 
@@ -408,6 +429,9 @@
           <button type="button" class="bulk-btn" onclick={doSkip}>{S.grid.skip}</button>
           <button type="button" class="bulk-btn" onclick={() => doSplit('always')} data-bulk-split>{S.grid.splitSelected}</button>
           <button type="button" class="bulk-btn" onclick={() => doSplit('never')} data-bulk-one>{S.grid.oneSelected}</button>
+          {#if store.settings.suggestEnhance}
+            <button type="button" class="bulk-btn" title={S.enhance.gridHint} disabled={store.enhancing} onclick={doEnhanceSelected} data-bulk-enhance>{S.enhance.gridSelected}</button>
+          {/if}
           {#if hasSkippedSelected}
             <button type="button" class="bulk-btn" onclick={doPutBack}>{S.grid.unskip}</button>
           {/if}

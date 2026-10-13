@@ -56,6 +56,71 @@ export interface CurveSuggestion {
   fellBack: boolean;
 }
 
+/** The looks enhancement offers (docs/dev/enhance-engine.md). `original` touches nothing. */
+export type EnhanceMode = 'original' | 'clean' | 'document' | 'receipt';
+
+/**
+ * An enhancement as the engine serialises it: `{ mode: 'original' }` or `{ mode, strength }` with the strength in
+ * whole percent (0 to 100; an absent strength is 100). The pictures and the saved file are blended with the input by it.
+ */
+export type Enhance = { mode: 'original' } | { mode: Exclude<EnhanceMode, 'original'>; strength?: number };
+
+/** What a look writes, so the UI can say the right thing near Save (`OutputHint` in the engine). */
+export interface EnhanceHint {
+  /** The look writes ONE grey channel: no colour, no colour profile. */
+  gray: boolean;
+  /** PNG is the recommended format (lossless, keeps faint marks). */
+  recommendPng: boolean;
+}
+
+/** The numbers behind a suggestion. The UI shows none of them; they are in the contract so a test can pin the wire shape. */
+export interface EnhanceMeasures {
+  aspect: number;
+  paperFraction: number;
+  inkFraction: number;
+  shading: number;
+  paperLuma: number;
+  cast: number;
+  colourFraction: number;
+  textComponents: number;
+  concentration: number;
+  glyphInkShare: number;
+  inkContrast: number;
+  faded: boolean;
+}
+
+/** Why the engine suggests enhancing a page: the copy is looked up by this code (`enhance.reason.<code>`). */
+export type EnhanceReason = 'uneven_light' | 'dull_paper' | 'colour_cast' | 'faded_print';
+
+/**
+ * The engine's RECOMMENDATION for one crop (`suggest_enhance`). `mode` is `clean` and never a black-and-white look;
+ * `blackAndWhite` names the B&W look that fits the page as an OPTION. Asking records and applies nothing (B13).
+ */
+export interface EnhanceSuggestion {
+  mode: Exclude<EnhanceMode, 'original'>;
+  strength: number;
+  reason: EnhanceReason;
+  reasons: EnhanceReason[];
+  blackAndWhite: Exclude<EnhanceMode, 'original' | 'clean'>;
+  blackAndWhiteHint: EnhanceHint;
+  hint: EnhanceHint;
+  measures: EnhanceMeasures;
+}
+
+/** The answer of `enhanceSuggested`: what the one-click batch did. */
+export interface EnhanceBatch {
+  /** The new view of every image that changed. */
+  views: ItemView[];
+  /** Images with at least one enhanced crop, and crops enhanced. */
+  images: number;
+  crops: number;
+  /** Crops that already had an enhancement (left as they were). */
+  already: number;
+  /** Crops with no recommendation (photographs, clean scans). */
+  none: number;
+  failed: number;
+}
+
 /** Parameters of a crop. `quad` is TL, TR, BR, BL; `quarterTurns` is 0..3 (clockwise). */
 export interface Edit {
   quad: [Pt, Pt, Pt, Pt];
@@ -169,6 +234,10 @@ export interface CropView {
    * the crop is held for review until the scan is accepted (band `check`).
    */
   curves: CurveSet | null;
+  /** The enhancement this crop is previewed and saved with: its own override, else the image's default. */
+  enhance: Enhance;
+  /** The crop's own enhancement; `null` when it follows the default (show a "customised" dot when it is not). */
+  enhanceOverride: Enhance | null;
   origin: CropOrigin;
   confidence: Confidence | null;
   /** Band at the Strict cutoff; a crop the person placed or edited counts as reviewed (good). */
@@ -261,6 +330,8 @@ export interface ItemView {
    * `format.write_unavailable`), else null. Such a file can only be saved as a copy.
    */
   openOnly: string | null;
+  /** The default enhancement of this image (crops without their own override get it). Original until a person chose. */
+  enhance: Enhance;
 }
 
 export interface OpenSummary {
@@ -290,6 +361,8 @@ export interface Settings {
   autoSaveSplits: boolean;
   /** The one-time explanation of curved edges has been seen. */
   curvedIntroAck: boolean;
+  /** Show the enhancement suggestion in the editor and the grid (on by default). It never applies anything. */
+  suggestEnhance: boolean;
 }
 
 export type SaveTarget = 'replace' | 'copy';
@@ -377,6 +450,12 @@ export interface LaunchInfo {
  * `/<token>/<id>/crop/<crop>/curve-<kind>?<curves>`. `thumb` is the small, fast one for a drag in progress.
  */
 export type CurvePreviewKind = 'thumb' | 'result';
+
+/**
+ * An enhancement preview served by the `acimg` scheme (the engine's `preview_enhance`, nothing is committed or cached):
+ * `/<token>/<id>/crop/<crop>/enhance-<kind>?mode=<m>&s=<0..100>`. `thumb` is the small, fast one for a slider in motion.
+ */
+export type EnhancePreviewKind = 'thumb' | 'result';
 
 /** Image kinds served by the `acimg` scheme: `/<token>/<id>/<kind>?g=<gen>`. */
 export type ImageKind = 'thumb' | 'src' | 'result';
@@ -556,6 +635,21 @@ export interface Api {
    * image is not ready. Applying is `setCurves` with the suggestion's `curves`.
    */
   suggestCurves(id: number, crop: number): Promise<CurveSuggestion | null>;
+
+  // ---- enhancement (docs/dev/enhance-engine.md). Suggested, never forced (B13). Each edit is ONE undo step. ----
+  /**
+   * Sets one crop's own enhancement (`strength` in percent, 0 to 100). `phase: 'live'` records nothing; `'end'` records
+   * one step, and the same `gesture` id coalesces a slider drag or a burst of key presses into one.
+   */
+  setEnhance(id: number, crop: number, mode: EnhanceMode, strength: number, phase: 'live' | 'end', label: string, gesture: number | null): Promise<ItemView>;
+  /** The crop follows the image's default again. */
+  clearEnhance(id: number, crop: number): Promise<ItemView>;
+  /** "All items in this scan": the default AND no crop keeps its own value, as one step. */
+  setScanEnhance(id: number, mode: EnhanceMode, strength: number, phase: 'live' | 'end', label: string, gesture: number | null): Promise<ItemView>;
+  /** The engine's recommendation for a crop (a few tens of ms on a worker). Records and applies nothing; `null` = leave it alone. */
+  suggestEnhance(id: number, crop: number): Promise<EnhanceSuggestion | null>;
+  /** "Enhance all suggested": the recommendation of every crop that has one and no look yet, as ONE session step (`sessionUndo`). */
+  enhanceSuggested(ids: number[]): Promise<EnhanceBatch>;
 
   // ---- Convert: its own list of files (opaque ids and names), separate from the images opened for cropping. ----
   /** Tells the shell the Convert screen is showing, so a window drop goes to the Convert list (`convert-added`). */

@@ -1,0 +1,33 @@
+{
+  "blackAndWhite": "document",
+  "blackAndWhiteHint": {
+    "gray": true,
+    "recommendPng": true
+  },
+  "hint": {
+    "gray": false,
+    "recommendPng": false
+  },
+  "measures": {
+    "aspect": 1.3777778148651123,
+    "cast": 0.0974731519818306,
+    "colourFraction": 0.0,
+    "concentration": 0.9753086566925049,
+    "faded": false,
+    "glyphInkShare": 0.993974506855011,
+    "inkContrast": 195.0,
+    "inkFraction": 0.23886828124523163,
+    "paperFraction": 0.7483888864517212,
+    "paperLuma": 202.09303283691406,
+    "shading": 0.46115782856941223,
+    "textComponents": 1106
+  },
+  "mode": "clean",
+  "reason": "uneven_light",
+  "reasons": [
+    "uneven_light",
+    "dull_paper",
+    "colour_cast"
+  ],
+  "strength": 100
+}

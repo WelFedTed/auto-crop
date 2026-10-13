@@ -26,6 +26,7 @@ import type {
   CurveSet,
   Cut,
   Edit,
+  Enhance,
   ErrorCode,
   OrderMode,
   ScanTriage,
@@ -43,6 +44,8 @@ export interface ModelCrop {
   mirror: boolean;
   /** The four boundary curves of a curved page, else null. Its corners ARE `quad`; its turns and mirror follow the crop's. */
   curves: CurveSet | null;
+  /** The crop's own enhancement; null = it follows the scan's default (`ScanState.enhance`). */
+  enhanceOverride: Enhance | null;
   origin: CropOrigin;
   confidence: Confidence | null;
 }
@@ -53,6 +56,8 @@ export interface ScanState {
   profile: SplitProfile;
   orderMode: OrderMode;
   nextId: number;
+  /** The default enhancement of every crop without its own. Original until a person chose another. */
+  enhance: Enhance;
 }
 
 /** A refused operation: the state is unchanged. */
@@ -68,7 +73,7 @@ export const STRICT = 0.95;
 export const FAILED_FLOOR = 0.6;
 
 export function emptyState(policy: SplitPolicy = 'auto', profile: SplitProfile = 'photos'): ScanState {
-  return { crops: [], policy, profile, orderMode: 'reading', nextId: 1 };
+  return { crops: [], policy, profile, orderMode: 'reading', nextId: 1, enhance: { mode: 'original' } };
 }
 
 export function cloneCrop(c: ModelCrop): ModelCrop {
@@ -133,13 +138,28 @@ export function outputNames(stem: string, ext: string, total: number): string[] 
 
 /** Everything that decides the pixels: acceptance and the render key are tied to it. */
 export function renderSignature(s: ScanState): string {
-  return JSON.stringify(
-    s.crops.map((c) => [c.id, c.include, c.quad.map((p) => [round(p.x), round(p.y)]), c.quarterTurns, c.fineDeg, c.mirror, curvesSig(c.curves)]),
-  );
+  // The enhancement is part of what decides the pixels (the engine's render hash includes it): changing it after the
+  // person accepted a held scan asks for a new acceptance, exactly as any other edit does.
+  return JSON.stringify([
+    enhanceSig(s.enhance),
+    s.crops.map((c) => [c.id, c.include, c.quad.map((p) => [round(p.x), round(p.y)]), c.quarterTurns, c.fineDeg, c.mirror, curvesSig(c.curves), c.enhanceOverride ? enhanceSig(c.enhanceOverride) : 0]),
+  ]);
 }
 
-export function cropKey(c: ModelCrop): string {
-  const text = JSON.stringify([c.id, c.quad.map((p) => [round(p.x), round(p.y)]), c.quarterTurns, c.fineDeg, c.mirror, curvesSig(c.curves)]);
+/** The look as its engine key: a look at strength 0 keys like Original, a strength over 100 like 100. */
+export function enhanceSig(e: Enhance): string {
+  const s = e.mode === 'original' ? 0 : Math.min(100, Math.max(0, Math.round(e.strength ?? 100)));
+  return s === 0 ? 'original' : `${e.mode}:${s}`;
+}
+
+/** The look a crop is previewed and saved with: its own, else the scan's default. */
+export function effectiveEnhance(s: ScanState, c: ModelCrop): Enhance {
+  return c.enhanceOverride ?? s.enhance;
+}
+
+/** The pixels of a crop are decided by its geometry AND its effective look (the engine's `item_render_hash`). */
+export function cropKey(c: ModelCrop, look: Enhance = { mode: 'original' }): string {
+  const text = JSON.stringify([c.id, c.quad.map((p) => [round(p.x), round(p.y)]), c.quarterTurns, c.fineDeg, c.mirror, curvesSig(c.curves), enhanceSig(c.enhanceOverride ?? look)]);
   let h = 2166136261;
   for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619) >>> 0;
   return h.toString(16).padStart(8, '0') + c.id.toString(16).padStart(4, '0');
@@ -204,7 +224,7 @@ function resortIfReading(s: ScanState): void {
 }
 
 function newCrop(s: ScanState, quad: Quad, origin: CropOrigin, confidence: Confidence | null = null): ModelCrop {
-  return { id: s.nextId++, include: true, quad: sanitise(quad), quarterTurns: 0, fineDeg: 0, mirror: false, curves: null, origin, confidence };
+  return { id: s.nextId++, include: true, quad: sanitise(quad), quarterTurns: 0, fineDeg: 0, mirror: false, curves: null, enhanceOverride: null, origin, confidence };
 }
 
 // ------------------------------------------------------------------------------------------ operations
@@ -291,6 +311,7 @@ export function mergeCrops(s: ScanState, ids: number[], dims: Dims): { state: Sc
     fineDeg: 0,
     mirror: base.mirror,
     curves: null,
+    enhanceOverride: base.enhanceOverride,
     origin: 'manual',
     confidence: null,
   };
@@ -344,7 +365,8 @@ export function revertCrop(s: ScanState, id: number, baseline: ScanState): ScanS
   const next = cloneState(s);
   const at = next.crops.findIndex((c) => c.id === id);
   if (at < 0) throw new ItemOpError('ITEM_OP', 'no such item');
-  next.crops[at] = cloneCrop(src);
+  // Reverting the geometry is not a change of look: the crop keeps its own enhancement.
+  next.crops[at] = { ...cloneCrop(src), enhanceOverride: next.crops[at].enhanceOverride };
   return next;
 }
 
@@ -386,6 +408,30 @@ export function redetect(s: ScanState, detected: { quad: Quad; confidence: Confi
     next.crops.push(newCrop(next, d.quad, 'auto', d.confidence));
   }
   resortIfReading(next);
+  return next;
+}
+
+// ------------------------------------------------------------------------------------------ enhancement
+
+/** A look at strength 0 is Original; the strength is clamped to 0..100. */
+export function normaliseEnhance(e: Enhance): Enhance {
+  if (e.mode === 'original') return { mode: 'original' };
+  const s = Math.min(100, Math.max(0, Math.round(Number.isFinite(e.strength ?? 100) ? (e.strength ?? 100) : 0)));
+  return s === 0 ? { mode: 'original' } : { mode: e.mode, strength: s };
+}
+
+/** Sets (or clears, with null) one crop's own look. Geometry, provenance and the band are untouched. */
+export function setCropEnhance(s: ScanState, id: number, e: Enhance | null): ScanState {
+  const next = cloneState(s);
+  find(next, id).enhanceOverride = e ? normaliseEnhance(e) : null;
+  return next;
+}
+
+/** The default look of the scan; with `clearOverrides` ("All items in this scan") no crop keeps its own value. */
+export function setScanEnhance(s: ScanState, e: Enhance, clearOverrides: boolean): ScanState {
+  const next = cloneState(s);
+  next.enhance = normaliseEnhance(e);
+  if (clearOverrides) for (const c of next.crops) c.enhanceOverride = null;
   return next;
 }
 
@@ -468,6 +514,8 @@ export function cropViews(s: ScanState, ctx: ViewContext): CropView[] {
       autoEdit: base ? toEdit(base) : null,
       mirror: c.mirror,
       curves: c.curves ? { ...cloneCurves(c.curves), quarterTurns: c.quarterTurns, mirror: c.mirror } : null,
+      enhance: { ...effectiveEnhance(s, c) },
+      enhanceOverride: c.enhanceOverride ? { ...c.enhanceOverride } : null,
       origin: c.origin,
       confidence: c.confidence ? { ...c.confidence, reasons: c.confidence.reasons.map((r) => ({ ...r })) } : null,
       band: cropBand(c, ctx.accepted),
@@ -477,7 +525,7 @@ export function cropViews(s: ScanState, ctx: ViewContext): CropView[] {
         base.origin !== c.origin ||
         JSON.stringify([base.quad, base.quarterTurns, base.fineDeg, base.mirror, base.curves]) !== JSON.stringify([c.quad, c.quarterTurns, c.fineDeg, c.mirror, c.curves]),
       outputName: order > 0 ? outputName(ctx.stem, ctx.ext, order, total) : null,
-      renderKey: cropKey(c),
+      renderKey: cropKey(c, s.enhance),
     };
   });
 }

@@ -4,6 +4,7 @@
   import { cropImageUrl, imageUrl } from '../backend.ts';
   import { bannerState, includedCrops, isCurvedScan, isSplitScan } from '../items.ts';
   import { needsDrawCrop, reasonLine, tileLabel, type Classified, type Strictness } from '../review.ts';
+  import { tileBadge } from '../enhance.ts';
   import { href } from '../router.svelte.ts';
   import { S, noticeText } from '../strings.ts';
   import Icon from './Icon.svelte';
@@ -49,6 +50,7 @@
     if (item.saved) return S.grid.meta.saved;
     return '';
   });
+  const enhancedBadge = $derived(tileBadge(item));
   let broken = $state(false);
 </script>
 
@@ -101,6 +103,9 @@
       {/if}
       {#if item.openOnly}
         <span class="badge neutral" title={noticeText(item.openOnly)} data-open-only>{S.grid.openOnlyBadge}</span>
+      {/if}
+      {#if enhancedBadge}
+        <span class="badge accent" title={S.enhance.tileBadgeTitle} data-enhanced-badge><Icon name="sparkle" size={13} /> {enhancedBadge}</span>
       {/if}
       {#if reason && !curvedOnly}
         <div class="reason">{reason}</div>

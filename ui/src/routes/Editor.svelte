@@ -6,6 +6,8 @@
   import ChipBar from '../lib/components/ChipBar.svelte';
   import CropStage from '../lib/components/CropStage.svelte';
   import CurveBar from '../lib/components/CurveBar.svelte';
+  import EnhanceBanner from '../lib/components/EnhanceBanner.svelte';
+  import EnhancePanel from '../lib/components/EnhancePanel.svelte';
   import FlatInset from '../lib/components/FlatInset.svelte';
   import FirstCurvedSheet from '../lib/components/FirstCurvedSheet.svelte';
   import FirstSplitSheet from '../lib/components/FirstSplitSheet.svelte';
@@ -31,6 +33,32 @@
   } from '../lib/curve-edit.ts';
   import { cloneCurves, cornersOf, edgeIsStraight, edgeOf, isStraightPage, resetCurves, type CurveHandle } from '../lib/curve.ts';
   import { cutFromDrag, cutPieces, cutProblem as cutProblemOf, cutLine, halvesCut, mergedQuad } from '../lib/geometry.ts';
+  import {
+    APPLY_LABEL,
+    ORIGINAL,
+    bannerVisible,
+    ctxOf,
+    enhanceCounts,
+    initialSuggest as initialEnhSuggest,
+    isPreviewing,
+    modeOf,
+    pageKey as cropPageKey,
+    readySuggestion,
+    savesGrey,
+    strengthOf,
+    suggestArrived as enhArrived,
+    suggestBegin as enhBegin,
+    suggestContextChanged as enhContextChanged,
+    suggestFailed as enhFailed,
+    suggestPreview as enhPreview,
+    suggestReset as enhReset,
+    suggestedLook,
+    looksLikeReceipt,
+    wantsPngHint,
+    wantsSuggestion,
+    customisedCount,
+    type SuggestState as EnhSuggestState,
+  } from '../lib/enhance.ts';
   import type { StageTool } from '../lib/gesture.ts';
   import {
     GestureClock,
@@ -70,7 +98,7 @@
   } from '../lib/suggest.ts';
   import { codeOf, store, type ScanSave } from '../lib/store.svelte.ts';
   import { FALLBACK_HOLD, S, errorMessage, holdAction, holdCause, holdTitle, noticeText } from '../lib/strings.ts';
-  import type { Band, CropView, CurveSet, Cut, Edit, ItemView, Pt, SplitPolicy, SplitProfile } from '../lib/types.ts';
+  import type { Band, CropView, CurveSet, Cut, Edit, Enhance, EnhanceMode, ItemView, Pt, SplitPolicy, SplitProfile } from '../lib/types.ts';
 
   let { id }: { id: number } = $props();
 
@@ -187,6 +215,7 @@
         if (inflight === 0) {
           draft = null;
           curveDraft = null;
+          enhDraft = null;
         }
       }
     });
@@ -492,6 +521,123 @@
     if (!curveState || !curveSel || curveSel.kind === 'ghost') return null;
     return curveSel.kind === 'corner' ? cornersOf(curveState.curves)[curveSel.e] : (edgeOf(curveState.curves, curveSel.e)[curveSel.m + 1] ?? null);
   });
+
+  // ---- enhancement ---------------------------------------------------------------------------------------------------
+  // Suggested, never forced (B13): the engine is asked what it would recommend; the person previews, applies or says
+  // "Not now". Every choice is ONE undo step (a drag of the strength slider shares one gesture id).
+  type EnhScope = 'this' | 'all';
+  let enhScope = $state<EnhScope>('this');
+  /** The look just chosen while its commit is in flight, so the controls do not jump back. */
+  let enhDraft = $state.raw<{ crop: number; scope: EnhScope; mode: EnhanceMode; strength: number } | null>(null);
+  let esug = $state.raw<EnhSuggestState>(initialEnhSuggest());
+  const ENH_GESTURE = 2_000_000;
+  let enhSeq = 0;
+
+  const useScope = $derived<EnhScope>(multi ? enhScope : 'this');
+  const ePage = $derived(sel ? cropPageKey(sel) : '');
+  const eCtx = $derived(sel && item ? ctxOf(id, sel) : null);
+  const eCounts = $derived(item ? enhanceCounts(item) : { on: 0, total: 0 });
+  const shownLook = $derived.by<Enhance>(() => {
+    const d = enhDraft;
+    if (d && d.scope === useScope && (useScope === 'all' || d.crop === sel?.id)) return d.mode === 'original' ? ORIGINAL : { mode: d.mode, strength: d.strength };
+    return (useScope === 'all' ? item?.enhance : sel?.enhance) ?? ORIGINAL;
+  });
+  const enhSuggestion = $derived(readySuggestion(esug));
+  const enhPreviewing = $derived(isPreviewing(esug) && enhSuggestion ? suggestedLook(enhSuggestion) : null);
+
+  const lookName = (m: EnhanceMode): string => S.enhance.looks[m].name;
+
+  /** One look, one undo step. `source` decides the gesture: a drag is one step, a burst of key presses is one, a click is its own. */
+  function commitLook(mode: EnhanceMode, strength: number, source: 'press' | 'drag' | 'key'): void {
+    if (!sel || !item) return;
+    const cropId = sel.id;
+    const scope = useScope;
+    const pct = mode === 'original' ? 0 : Math.min(100, Math.max(0, Math.round(strength)));
+    const gesture = source === 'key' ? gestures.next(`${id}:${cropId}:enhance`, performance.now()) : source === 'drag' ? ENH_GESTURE + ++enhSeq : null;
+    const name = lookName(mode);
+    const label = scope === 'all' ? `Enhance all: ${name}` : `Enhance: ${name}`;
+    // Choosing a look by hand ends a preview of the suggestion: what is recorded is what was chosen.
+    if (isPreviewing(esug)) esug = enhPreview(esug, false);
+    enhDraft = { crop: cropId, scope, mode, strength: pct };
+    // A crop that follows an Original default and is set back to Original follows the default again (no override kept).
+    const backToDefault = scope === 'this' && mode === 'original' && modeOf(item.enhance) === 'original';
+    enqueue(
+      () =>
+        scope === 'all'
+          ? api.setScanEnhance(id, mode, pct, 'end', label, gesture)
+          : backToDefault
+            ? api.clearEnhance(id, cropId)
+            : api.setEnhance(id, cropId, mode, pct, 'end', label, gesture),
+      null,
+    );
+    say(S.enhance.announceChanged(name, pct));
+  }
+
+  function followScan(): void {
+    if (!sel) return;
+    const cropId = sel.id;
+    runOp(
+      () => api.clearEnhance(id, cropId),
+      () => say(S.enhance.announceFollow),
+    );
+  }
+
+  function setScope(next: EnhScope): void {
+    enhScope = next;
+  }
+
+  async function askEnhance(ctx: NonNullable<typeof eCtx>): Promise<void> {
+    const begun = enhBegin(esug, ctx);
+    esug = begun.state;
+    if (!begun.ask) return;
+    const seq = begun.state.seq;
+    try {
+      esug = enhArrived(esug, seq, eCtx, await api.suggestEnhance(ctx.item, ctx.crop));
+    } catch (e) {
+      console.error(e);
+      esug = enhFailed(esug, seq, eCtx);
+    }
+  }
+
+  $effect(() => {
+    // The crop on screen, its page or its look changed: a suggestion for another page is dropped, and a crop that has no
+    // look yet is asked about (a moment after the last change, so dragging a corner does not ask for every pixel).
+    const ctx = eCtx;
+    const wants = wantsSuggestion({ setting: store.settings.suggestEnhance, ready: item?.status === 'ready', crop: sel });
+    untrack(() => {
+      const next = enhContextChanged(esug, wants ? ctx : null);
+      if (next !== esug) esug = next;
+    });
+    if (!wants || !ctx) return;
+    const t = setTimeout(() => void askEnhance(ctx), 350);
+    return () => clearTimeout(t);
+  });
+
+  function previewEnhanceSuggestion(): void {
+    const on = !isPreviewing(esug);
+    esug = enhPreview(esug, on);
+    store.announce(on ? S.enhance.announcePreviewOn : S.enhance.announcePreviewOff);
+  }
+
+  function applyEnhanceSuggestion(): void {
+    const s = enhSuggestion;
+    if (!s || !sel) return;
+    const cropId = sel.id;
+    const { mode, strength } = suggestedLook(s);
+    esug = enhReset(esug);
+    if (multi) enhScope = 'this';
+    enhDraft = { crop: cropId, scope: 'this', mode, strength };
+    enqueue(() => api.setEnhance(id, cropId, mode, strength, 'end', APPLY_LABEL, null), null);
+    say(S.enhance.announceApplied(lookName(mode)));
+    void focusLater('[data-enhance-looks] [aria-pressed="true"]');
+  }
+
+  function dismissEnhanceSuggestion(): void {
+    if (!sel) return;
+    store.dismissEnhance(id, sel.id);
+    esug = enhPreview(esug, false);
+    store.announce(S.enhance.announceDismissed);
+  }
 
   function doUndo(): void {
     if (!item?.canUndo) return;
@@ -978,6 +1124,10 @@
         dismissSuggestion();
         return;
       }
+      if (isPreviewing(esug)) {
+        previewEnhanceSuggestion();
+        return;
+      }
       if (curveSel) {
         curveSel = null;
         return;
@@ -1023,6 +1173,7 @@
   const noItems = $derived(banner.kind === 'noItems');
   const failedBanner = $derived(!!item && !noItems && !split && needsDrawCrop(item, store.strictness));
   const canEdit = $derived(!!item && item.status === 'ready' && !!edit && !failedBanner && !!sel);
+  const enhBannerOn = $derived(canEdit && tool === 'none' && !compare && !!enhSuggestion && bannerVisible(esug, store.enhanceDismissed, eCtx));
   const reasons = $derived(sel?.confidence?.reasons ?? item?.confidence?.reasons ?? []);
   const headline = $derived(item ? reasonLine(item, tier) : null);
   const statusWord = $derived.by(() => {
@@ -1145,6 +1296,20 @@
           <Icon name="info" size={18} />
           <span><b>{S.save.openOnly}</b> {noticeText(item.openOnly)}</span>
         </div>
+      </div>
+    {/if}
+
+    {#if enhBannerOn && enhSuggestion}
+      <div class="bannerrow">
+        <EnhanceBanner
+          receipt={looksLikeReceipt(enhSuggestion)}
+          reasons={enhSuggestion.reasons}
+          previewing={!!enhPreviewing}
+          busy={inflight > 0}
+          onpreview={previewEnhanceSuggestion}
+          onapply={applyEnhanceSuggestion}
+          onnotnow={dismissEnhanceSuggestion}
+        />
       </div>
     {/if}
 
@@ -1356,6 +1521,30 @@
           </div>
         </section>
 
+        {#if canEdit && sel}
+          <EnhancePanel
+            {id}
+            cropId={sel.id}
+            pageKey={ePage}
+            look={shownLook}
+            committed={sel.enhance}
+            {resultUrl}
+            previewing={enhPreviewing}
+            suggestedMode={enhSuggestion?.mode ?? null}
+            fitsMode={enhSuggestion?.blackAndWhite ?? null}
+            {multi}
+            scope={useScope}
+            total={eCounts.total}
+            on={eCounts.on}
+            customised={!!sel.enhanceOverride && customisedCount(item) > 0}
+            held={held}
+            busy={inflight > 0}
+            onlook={commitLook}
+            onscope={setScope}
+            onfollow={followScan}
+          />
+        {/if}
+
         {#if canEdit}
           <section data-curved-section>
             <h2>{curved ? S.curved.toolbarLabel.toUpperCase() : S.curved.modeLabel.toUpperCase()}</h2>
@@ -1469,6 +1658,12 @@
               <div class="gate" data-gate="open-only">{S.save.openOnly} {noticeText(gate.reason)}</div>
             {:else}
               <div class="sub">{store.settings.saveAsCopy ? S.save.copyNote : S.save.replaceNote}</div>
+            {/if}
+            {#if savesGrey(item)}
+              <div class="sub" data-enhance-grey>{S.enhance.greyNote}</div>
+            {/if}
+            {#if wantsPngHint(item)}
+              <div class="sub" data-enhance-png>{S.enhance.pngHint} <a href={href('/convert')}>{S.enhance.convertLink}</a></div>
             {/if}
             {#if lastSave}
               {@const o = lastSave.outcome}

@@ -27,6 +27,10 @@
     if (ok) store.announce(next ? S.settings.autoSaveSplitsWarning : 'Auto-save splits is off.');
   }
 
+  async function setSuggestEnhance(next: boolean): Promise<void> {
+    await store.updateSettings({ suggestEnhance: next });
+  }
+
   const platformName = $derived(
     store.launch?.platform === 'windows' ? 'Windows' : store.launch?.platform === 'macos' ? 'macOS' : store.launch?.platform === 'linux' ? 'Linux' : '',
   );
@@ -102,6 +106,17 @@
           </div>
         </div>
         <div class="help foot">{S.settings.appliesToNew}</div>
+      </section>
+
+      <section class="card" aria-labelledby="s-enh" data-settings-enhance>
+        <h2 id="s-enh">{S.settings.enhancing}</h2>
+        <div class="row last">
+          <div>
+            <div class="label" id="suggest-enh-label">{S.settings.suggestEnhance}</div>
+            <div class="help">{S.settings.suggestEnhanceHelp}</div>
+          </div>
+          <Switch checked={store.settings.suggestEnhance} label={S.settings.suggestEnhance} onchange={setSuggestEnhance} />
+        </div>
       </section>
 
       <section class="card" aria-labelledby="s-look">
