@@ -472,7 +472,11 @@ fn sixteen_bit_sources_are_reduced_with_a_notice() {
 // ------------------------------------------------------------------ colour
 
 fn p3_icc() -> Vec<u8> {
-    moxcms::ColorProfile::new_display_p3().encode().unwrap()
+    // The encoder stamps the profile with the current time (to the minute), so two calls that
+    // straddle a minute boundary give different bytes: build it once per process.
+    static P3: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    P3.get_or_init(|| moxcms::ColorProfile::new_display_p3().encode().unwrap())
+        .clone()
 }
 
 #[test]
