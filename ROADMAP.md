@@ -29,7 +29,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | M4 | ML detection, orientation and calibrated confidence | v0.3.0 | Windows 10/11 x64 | XL | 1 / 91 (1%) |
 | M5 | Batch review workflow, backups panel and trust features | v0.4.0 | Windows 10/11 x64 | L | 0 / 94 (0%) |
 | M6 | HEIC/HEIF, sandboxed decoding and format read breadth | v0.5.0 | Windows 10/11 x64 | XL | 0 / 96 (0%) |
-| M7 | Enhancement and bilevel output | v0.6.0 | Windows 10/11 x64 | XL | 0 / 90 (0%) |
+| M7 | Enhancement and bilevel output | v0.6.0 | Windows 10/11 x64 | XL | 3 / 90 (3%) |
 | M8 | macOS preview | v0.7.0 | macOS 12+ arm64 (Apple silicon) | L | 0 / 91 (0%) |
 | M9 | Linux preview | v0.8.0 | Linux x86_64 (Ubuntu 22.04+, Fedora; arm64 best-effort) | XL | 0 / 92 (0%) |
 | M10 | Multi-item splitting | v0.9.0 | Windows 10/11 x64, macOS arm64, Linux x64 | XL | 12 / 89 (13%) |
@@ -39,7 +39,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | X | Continuous and cross-cutting | - | - | - | 0 / 42 (0%) |
 | X | Post-1.0 backlog (1.x) | - | - | - | 0 / 43 (0%) |
 | X | Spikes and open decisions | - | - | - | 0 / 28 (0%) |
-| **Total** | | | | | **137 / 1408 (9%)** |
+| **Total** | | | | | **140 / 1408 (9%)** |
 <!-- progress:end -->
 
 ## Why this order
@@ -986,12 +986,12 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 ### Enhancement
 - [ ] **M7.01 Extend Enhance in EditState** - Extends M1.04 `enhance`: `look`, `bw` Sauvola|Nick, Advanced overrides, `est` (`algo_ver`, `text_h`, levels, gamma, paper RGB) with migration and `render_hash`; no bit-depth field. Accept: proptest `undo(redo(x)) == x`, JSON snapshot, unknown fields.
 - [ ] **M7.02 Enhancement module and stage cache** - `imgproc::enhance` stages P proxy, A analysis/flatten, T tonal, S window stats, R threshold/ramp, E export, cached by the `EditState` fields each reads. Accept: Sharpness re-runs only T, Text darkness only R; stale gen stops within 64 rows.
-- [ ] **M7.03 Validity-mask input** - takes the geometry page mask (0 = outside paper) and excludes it from all statistics; B&W fills it white, Auto and Grayscale keep the nearest gain. Accept: a receipt on a dark table gets a paper estimate within 2 levels of the same paper cropped tight.
+- [x] **M7.03 Validity-mask input** - takes the geometry page mask (0 = outside paper) and excludes it from all statistics; B&W fills it white, Auto and Grayscale keep the nearest gain. Accept: a receipt on a dark table gets a paper estimate within 2 levels of the same paper cropped tight. Verified on synthetic pages: `the_validity_mask_keeps_the_table_out_of_the_estimate` (imgproc enhance tests); no real photo was used.
 - [ ] **M7.04 Analysis proxy** - area-average downscale (`fast_image_resize` 6.1) to ~1.5 MP by area, long edge <= 3072 px, never upsampled (a long-edge rule leaves an 8:1 receipt at ~0.3 MP). Accept: 8:1 and 1:1 fixtures land in 1.2-1.8 MP; build <= 10 ms at 12 MP on Tier-M.
 - [ ] **M7.05 Text-height and dpi_eq estimator** - median height of the dominant ink-component size = `text_h` (< ~30 components: short side / 40); photos `dpi_eq = 300 x text_h_px / 26` (26 calibrated in M7.57), scans use DPI metadata. Accept: pages at 100-400 dpi give `text_h` within +-15%.
 - [ ] **M7.06 Block percentile grid** - Extends the M4.36 flatten (M1.65 prototype, one shared kernel): 1.75 x `text_h` blocks (16-64 px), half-block stride, mean RGB above the 88th luma percentile via 256-bin histograms. Accept: within 1 level of a sort-based percentile; grid <= 15 ms at 1.5 MP.
 - [ ] **M7.07 Block rejection rules** - reject blocks with luma < 0.60 x median (black bands), ink > 35% (barcodes), chroma > 12 Cb/Cr units off paper or outside the mask; > 40% rejected raises `unreliable_estimate`. Accept: barcode, black-band and coloured-header fixtures reject the right cells.
-- [ ] **M7.08 Inpaint and smooth the illumination grid** - push-pull diffusion fills rejected cells on the coarse grid (~10k), then median and Gaussian smoothing; no full-resolution map, no content inpainting. Accept: no ghost patch behind a reverse-video header; identical at 1 and 8 threads.
+- [x] **M7.08 Inpaint and smooth the illumination grid** - push-pull diffusion fills rejected cells on the coarse grid (~10k), then median and Gaussian smoothing; no full-resolution map, no content inpainting. Accept: no ghost patch behind a reverse-video header; identical at 1 and 8 threads. Verified: `no_ghost_beside_a_barcode_a_black_band_or_a_stamp` and `the_bytes_do_not_depend_on_the_thread_count` (synthetic).
 - [ ] **M7.09 Gain map and apply kernel** - `L_eff = P + s (L - P)` (`P` 90th percentile per channel, `s` 1.0 Receipt, 0.6 Document), gain `clamp(255 / L_eff, 1, 3.0)` (1.5 Document), Q8.8 bilinear, in place; Keep paper tint = luma-only gain. Accept: soft shadows leave paper std <= 3 levels.
 - [ ] **M7.10 Tone stage** - black point at the 0.75th percentile of flattened luma, white point 242, gamma 0.8-1.0, one LUT; almost no ink (black point > `w - 60`) skips the stretch and sets `low_contrast`. Accept: blank pages get no noise amplification; Auto on a clean scan moves mean luma <= 2.
 - [ ] **M7.11 Chroma clean-up and unsharp** - blur Cb/Cr (sigma 2 px scaled) and core chroma so stamps keep colour; luma denoise only if post-gain MAD noise > 4 levels; luma unsharp (sigma 1.0, amount 0.5). Accept: stamp fixture within delta-E2000 <= 6; noisy-shadow fixture triggers denoise.
@@ -1058,7 +1058,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [ ] **M7.64 gungraun instruction-count gates** - Extends M1.58: add downscale, percentile grid, gain apply, LUT, unsharp and the Sauvola strip at each SIMD level (scalar, AVX2) to the gate (> 5% fails, 2% warns). Accept: an injected 10% slowdown in an M7 kernel fails the workflow (canary).
 - [ ] **M7.65 arm64 and NEON CI** - Extends M1.78: run the M7 kernel and NEON bit-exactness tests on best-effort `windows-11-arm` and `ubuntu-22.04-arm` jobs; open an issue to re-measure M7 budgets on Windows arm64 and Apple silicon (closed by M8.65). Accept: arm64 jobs green; issue linked.
 - [ ] **M7.66 Fuzz targets** - `cargo-fuzz` on the enhance pipeline (random sizes, masks, extreme parameters), the Sauvola strip and the TIFF G4 wrapper; 1 h per target nightly (counts toward >= 72 h before 1.0), 60 s PR smoke for the G4 target. Accept: 0 crashes, hangs or OOM; corpus committed.
-- [ ] **M7.67 Data-safety test for enhanced saves** - Extends M5 suite: enhance (B&W, Faded) then Save in place makes a verified backup; Restore original after restart is byte-identical; a fault never leaves a lossy result without a backup; the guard treats the enhanced output as processed.
+- [x] **M7.67 Data-safety test for enhanced saves** - Extends M5 suite: enhance (B&W, Faded) then Save in place makes a verified backup; Restore original after restart is byte-identical; a fault never leaves a lossy result without a backup; the guard treats the enhanced output as processed. Verified: `crates/engine/tests/enhance.rs` (17 tests: Original byte-identical, restore byte-identical, fault injection, multi-item isolation, curved + enhance); OCR evidence in `docs/perf/enhance.md` is on synthetic pages only.
 - [ ] **M7.80 Test: enhance after a crop-only save** - crop-only auto-save, then batch B&W or Faded and save again: one backup per file (pristine); Restore after restart returns pristine bytes; the guard offers "Re-process from original"; a second-write fault keeps a verified file and the backup.
 
 ### Security/Legal
