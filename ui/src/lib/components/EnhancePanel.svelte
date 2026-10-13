@@ -183,7 +183,7 @@
     return S.enhance.statusApplied(lookName(lookMode), lookPct);
   });
   const caption = $derived(
-    showOriginal ? S.enhance.capOriginal : mainFailed ? S.enhance.failed : mainLoading ? S.enhance.capLoading : previewing ? S.enhance.capPreview : S.enhance.capEnhanced,
+    showOriginal || (!enhancedOn && !mainLoading) ? S.enhance.capOriginal : mainFailed ? S.enhance.failed : mainLoading ? S.enhance.capLoading : previewing ? S.enhance.capPreview : S.enhance.capEnhanced,
   );
   const splitText = $derived(`${S.enhance.splitSlider}: ${splitAt}%`);
   /** Where the split line is, as a percentage of the BOX: the picture is centred in it at its own aspect ratio. */

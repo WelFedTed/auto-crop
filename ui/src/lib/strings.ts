@@ -1012,7 +1012,9 @@ export const S = {
     batchDone: (crops: number, images: number, none: number) =>
       `Enhanced ${crops} ${crops === 1 ? 'page' : 'pages'} in ${images} ${images === 1 ? 'image' : 'images'}.${none > 0 ? ` ${none} had nothing to suggest.` : ''}`,
     batchNone: (none: number, already: number) =>
-      already > 0 && none === 0 ? 'Everything with a suggestion is already enhanced.' : 'Nothing to enhance: no page looks like a document or receipt that needs it.',
+      already > 0
+        ? `Nothing new to enhance. ${already} ${already === 1 ? 'page already has' : 'pages already have'} a look${none > 0 ? ', and the rest have nothing to suggest' : ''}.`
+        : 'Nothing to enhance: no page looks like a document or receipt that needs it.',
     batchUndo: 'Undo',
     batchFailed: 'Could not enhance the suggested pages. Nothing was changed.',
   },

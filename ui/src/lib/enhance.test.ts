@@ -416,7 +416,8 @@ test('no line of the enhancement copy is empty, and none uses a dash for a pause
 test('the batch summary says how many pages in how many images, and what it left alone', () => {
   assert.equal(batchLine({ images: 2, crops: 3, already: 0, none: 1, failed: 0 }), 'Enhanced 3 pages in 2 images. 1 had nothing to suggest.');
   assert.equal(batchLine({ images: 1, crops: 1, already: 0, none: 0, failed: 0 }), 'Enhanced 1 page in 1 image.');
-  assert.match(batchLine({ images: 0, crops: 0, already: 2, none: 0, failed: 0 }), /already enhanced/);
+  assert.match(batchLine({ images: 0, crops: 0, already: 2, none: 0, failed: 0 }), /Nothing new to enhance. 2 pages already have a look.$/);
+  assert.match(batchLine({ images: 0, crops: 0, already: 1, none: 5, failed: 0 }), /1 page already has a look, and the rest have nothing to suggest/);
   assert.match(batchLine({ images: 0, crops: 0, already: 0, none: 4, failed: 0 }), /Nothing to enhance/);
 });
 
