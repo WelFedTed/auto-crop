@@ -48,6 +48,8 @@ pub fn base_settings(paths: &AppPaths, g: &Global) -> Settings {
         auto_save_splits: false,
         // A CLI run never shows the GUI's explanations.
         curved_intro_ack: true,
+        // A CLI run never shows suggestions (enhancement there is opt-in: `process --enhance`).
+        suggest_enhance: false,
         retention_days: stored.retention_days,
     }
 }

@@ -851,3 +851,118 @@ fn a_noop_crop_is_not_a_noop_once_it_is_enhanced() {
         "an enhanced crop is worth a rewrite"
     );
 }
+
+// ------------------------------------------------------------------------------ the samples
+
+#[test]
+fn exactly_the_shaded_samples_get_a_suggestion() {
+    let e = env();
+    let files = auto_crop_engine::samples::write_samples(&e.dir.join("samples")).unwrap();
+    let mut fired = Vec::new();
+    for f in files {
+        let id = e.engine.open_paths(&[f.clone()], false).ids[0];
+        let v = e.engine.analyse(id).unwrap();
+        for c in &v.crops {
+            if e.engine.suggest_enhance(id, c.id).unwrap().is_some() {
+                fired.push(f.file_name().unwrap().to_string_lossy().into_owned());
+            }
+        }
+    }
+    assert_eq!(
+        fired,
+        auto_crop_engine::samples::SHADED_SAMPLES,
+        "the older samples stay without a suggestion"
+    );
+}
+
+// ------------------------------------------------------------------------------ the scan scope
+
+#[test]
+fn the_scan_scope_sets_the_default_and_drops_every_override_in_one_undo_step() {
+    let e = env();
+    let (img, _) = shaded_page(23);
+    let v = open(&e, "s.png", &png(&img));
+    let v = crop(&e, &v, [0.0, 0.0, 0.5, 1.0], 0.0);
+    let v = e
+        .engine
+        .add_crop(v.id, Some(rect(0.5, 0.0, 1.0, 1.0)), None)
+        .unwrap();
+    let (a, b) = (v.crops[0].id, v.crops[1].id);
+    let v = e
+        .engine
+        .set_enhance(v.id, a, EnhanceMode::Receipt, 0.6, false, "", None)
+        .unwrap();
+    assert_eq!(
+        v.crops[0].enhance_override,
+        Some(Enhance::Receipt { strength: 60 })
+    );
+    assert_eq!(v.crops[1].enhance, Enhance::Original);
+    let pos = v.history_position;
+    let all = e
+        .engine
+        .set_scan_enhance(v.id, EnhanceMode::Clean, 1.0, false, "Enhance all", None)
+        .unwrap();
+    assert_eq!(all.history_position, pos + 1);
+    assert_eq!(all.enhance, Enhance::Clean { strength: 100 });
+    for c in &all.crops {
+        assert_eq!(c.enhance, Enhance::Clean { strength: 100 });
+        assert_eq!(c.enhance_override, None, "the scan scope owns every crop");
+    }
+    assert_eq!(all.undo_label.as_deref(), Some("Enhance all"));
+    // Undo gives the person's own value for crop one back, and the default stays Original.
+    let u = e.engine.undo(v.id).unwrap();
+    assert_eq!(u.enhance, Enhance::Original);
+    assert_eq!(
+        u.crops[0].enhance_override,
+        Some(Enhance::Receipt { strength: 60 })
+    );
+    assert_eq!(u.crops[1].id, b);
+    assert_eq!(u.crops[1].enhance, Enhance::Original);
+    // The plain default call keeps overrides (the CLI and the unchanged meaning).
+    let d = e
+        .engine
+        .set_default_enhance(v.id, EnhanceMode::Clean, 1.0, false, "", None)
+        .unwrap();
+    assert_eq!(d.crops[0].enhance, Enhance::Receipt { strength: 60 });
+    assert_eq!(d.crops[1].enhance, Enhance::Clean { strength: 100 });
+}
+
+// ------------------------------------------------------------------------------ the batch action
+
+#[test]
+fn enhance_suggested_applies_only_recommendations_as_one_session_step() {
+    let e = env();
+    // A shaded page (suggested), a photograph (not), a page already enhanced by the person (kept).
+    let (page_a, _, _) = open_page(&e, "a.png", 21);
+    let photo_img = photo(PhotoKind::Landscape, 41, 800, 600);
+    let ph = open(&e, "p.png", &png(&photo_img));
+    let ph = crop(&e, &ph, [0.0, 0.0, 1.0, 1.0], 0.0);
+    let (page_b, _, _) = open_page(&e, "b.png", 22);
+    set(&e, &page_b, EnhanceMode::Receipt, 0.7);
+    let before_b = e.engine.item_view(page_b.id).unwrap();
+
+    let batch = e.engine.enhance_suggested(&[page_a.id, ph.id, page_b.id]);
+    assert_eq!((batch.images, batch.crops), (1, 1), "{batch:?}");
+    assert_eq!((batch.already, batch.none, batch.failed), (1, 1, 0));
+    assert_eq!(batch.views.len(), 1);
+    let a = e.engine.item_view(page_a.id).unwrap();
+    assert_eq!(a.crops[0].enhance, Enhance::Clean { strength: 100 });
+    assert_eq!(a.crops[0].enhance_override, Some(a.crops[0].enhance));
+    // The photograph and the person's own choice are untouched.
+    assert_eq!(
+        e.engine.item_view(ph.id).unwrap().crops[0].enhance,
+        Enhance::Original
+    );
+    assert_eq!(e.engine.item_view(page_b.id).unwrap(), before_b);
+    // ONE session step, named with the count; undo and redo move the image.
+    let (label, views) = e.engine.session_undo().expect("one session step");
+    assert_eq!(label, "Enhance suggested (1 image)");
+    assert_eq!(views.len(), 1);
+    assert_eq!(views[0].crops[0].enhance, Enhance::Original);
+    let (_, views) = e.engine.session_redo().unwrap();
+    assert_eq!(views[0].crops[0].enhance, Enhance::Clean { strength: 100 });
+    // Asking again changes nothing (it is already enhanced) and records no step.
+    let again = e.engine.enhance_suggested(&[page_a.id]);
+    assert_eq!((again.images, again.crops, again.already), (0, 0, 1));
+    assert!(e.engine.session_redo().is_none());
+}

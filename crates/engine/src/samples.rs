@@ -311,6 +311,54 @@ fn bed_samples() -> Vec<(&'static str, auto_crop_imgproc::Raster)> {
     ]
 }
 
+// ---------------------------------------------------------------- the shaded pages
+
+/// File names of the two samples the enhancement suggestion fires on: a text page in uneven light
+/// and a faded receipt under a warm lamp, each lying on a dark desk. Synthetic (the enhancer's own
+/// test pages), so a person can try "Clean" in the editor without private data (B21).
+pub const SHADED_SAMPLES: [&str; 2] = ["document_5_shaded.jpg", "receipt_5_faded_warm.jpg"];
+
+/// `page` lying on a dark desk, centred, `W x H` like the other samples.
+fn on_desk(page: &auto_crop_imgproc::Raster, desk: [u8; 3]) -> auto_crop_imgproc::Raster {
+    let mut out = auto_crop_imgproc::Raster::new(W, H);
+    for px in out.data.chunks_exact_mut(3) {
+        px.copy_from_slice(&desk);
+    }
+    let (x0, y0) = ((W - page.width) / 2, (H - page.height) / 2);
+    for y in 0..page.height {
+        let src = (y * page.width * 3) as usize;
+        let dst = (((y0 + y) * W + x0) * 3) as usize;
+        let n = (page.width * 3) as usize;
+        out.data[dst..dst + n].copy_from_slice(&page.data[src..src + n]);
+    }
+    out
+}
+
+fn shaded_samples() -> Vec<(&'static str, auto_crop_imgproc::Raster)> {
+    use auto_crop_imgproc::enhance::testpages::{Light, PageSpec, fade, lit, page};
+    let desk = [52, 46, 42];
+    let doc = PageSpec::document(41).sized(900, 1240, 3);
+    let doc = lit(
+        &page(&doc).truth,
+        Light::Tilt { dx: 0.40, dy: 0.18 },
+        [1.0, 0.96, 0.9],
+        2.0,
+        41,
+    );
+    let spec = PageSpec::receipt(42).sized(520, 1240, 3);
+    let rec = lit(
+        &fade(&page(&spec).truth, spec.paper, 0.45),
+        Light::Tilt { dx: 0.30, dy: 0.10 },
+        [1.0, 0.93, 0.82],
+        2.0,
+        42,
+    );
+    vec![
+        (SHADED_SAMPLES[0], on_desk(&doc, desk)),
+        (SHADED_SAMPLES[1], on_desk(&rec, desk)),
+    ]
+}
+
 // ---------------------------------------------------------------- the curved page
 
 /// File name of the curved sample (a crumpled receipt, edges bent by an analytic model).
@@ -455,6 +503,16 @@ pub fn write_samples(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
         fs::write(&curved, bytes)?;
     }
     out.push(curved);
+    // The shaded pages next: the ones to try Clean on.
+    for (file, raster) in shaded_samples() {
+        let path = dir.join(file);
+        if !path.exists() {
+            let bytes = encode(&raster, Format::Jpeg, 90, None)
+                .map_err(|e| std::io::Error::other(e.to_string()))?;
+            fs::write(&path, bytes)?;
+        }
+        out.push(path);
+    }
     for (file, raster) in bed_samples() {
         let path = dir.join(file);
         if !path.exists() {
@@ -498,7 +556,10 @@ mod tests {
     fn the_sample_set_is_written_once_and_reused() {
         let d = tempfile::tempdir().unwrap();
         let first = write_samples(d.path()).unwrap();
-        assert_eq!(first.len(), specs().len() + bed_samples().len() + 1);
+        assert_eq!(
+            first.len(),
+            specs().len() + bed_samples().len() + shaded_samples().len() + 1
+        );
         assert!(
             first[0].ends_with(CURVED_SAMPLE),
             "the curved page comes first"

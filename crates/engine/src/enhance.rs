@@ -259,6 +259,24 @@ impl EnhanceSuggestion {
     }
 }
 
+/// The outcome of [`Engine::enhance_suggested`].
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnhanceBatch {
+    /// The new view of every image that changed.
+    pub views: Vec<ItemView>,
+    /// Images with at least one enhanced crop.
+    pub images: u32,
+    /// Crops that were enhanced.
+    pub crops: u32,
+    /// Crops that already had an enhancement (left as they were).
+    pub already: u32,
+    /// Crops the engine has no recommendation for (photographs, clean scans, not ready).
+    pub none: u32,
+    /// Crops where applying failed (nothing changed for them).
+    pub failed: u32,
+}
+
 /// A small cache of suggestions by (image, crop page hash): the measure costs a render and an
 /// analysis, the answer depends only on the page.
 #[derive(Default)]
@@ -437,11 +455,48 @@ impl Engine {
         label: &str,
         gesture: Option<u64>,
     ) -> Result<ItemView> {
+        self.default_enhance(id, mode, strength, live, label, gesture, false)
+    }
+
+    /// The "All items in this scan" scope of the editor: sets the default AND drops every crop's
+    /// own override, so each included and excluded crop of the image follows it. ONE undo step
+    /// (the crops' own values come back with Undo). Otherwise as [`Engine::set_default_enhance`].
+    pub fn set_scan_enhance(
+        &self,
+        id: u32,
+        mode: EnhanceMode,
+        strength: f32,
+        live: bool,
+        label: &str,
+        gesture: Option<u64>,
+    ) -> Result<ItemView> {
+        self.default_enhance(id, mode, strength, live, label, gesture, true)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn default_enhance(
+        &self,
+        id: u32,
+        mode: EnhanceMode,
+        strength: f32,
+        live: bool,
+        label: &str,
+        gesture: Option<u64>,
+        clear_overrides: bool,
+    ) -> Result<ItemView> {
         let e = Enhance::from_fraction(mode, strength);
+        let apply = move |st: &mut EditState| {
+            st.enhance = e;
+            if clear_overrides {
+                for i in &mut st.items {
+                    i.enhance_override = None;
+                }
+            }
+        };
         if live {
             return self.with_history(id, |it| {
                 let mut st = it.history.as_ref().expect("checked").current().clone();
-                st.enhance = e;
+                apply(&mut st);
                 Ok::<_, ErrKind>(it.view_of(Some(&st)))
             })?;
         }
@@ -456,10 +511,62 @@ impl Engine {
             move |_| name,
             g,
             move |st, _| {
-                st.enhance = e;
+                apply(st);
                 Ok(())
             },
         )
+    }
+
+    /// "Enhance all suggested" (the review grid's batch action, opt-in by a click): for every
+    /// included crop of the given images that has NO enhancement yet (its effective value is
+    /// `original`) and for which [`Engine::suggest_enhance`] has a recommendation, applies that
+    /// recommendation (`clean` at its strength) as the crop's own override. Crops that already
+    /// have an enhancement, crops with no recommendation and images that are not ready are left
+    /// alone and counted. The whole batch is ONE step of the session history
+    /// ([`Engine::session_undo`] reverts every image; label "Enhance suggested (N images)"), and
+    /// each image's own history has one step per enhanced crop. Never called by anything but a
+    /// person's click; a few tens of milliseconds per crop the first time, so run it on a worker.
+    pub fn enhance_suggested(&self, ids: &[u32]) -> EnhanceBatch {
+        let mut batch = EnhanceBatch::default();
+        let mut cmd = auto_crop_core::SessionCmd::new("Enhance suggested");
+        for id in ids {
+            let Some(before) = self.item_view(*id) else {
+                continue;
+            };
+            let mut view: Option<ItemView> = None;
+            for c in before.crops.iter().filter(|c| c.include) {
+                if !c.enhance.is_identity() {
+                    batch.already += 1;
+                    continue;
+                }
+                match self.suggest_enhance(*id, c.id) {
+                    Ok(Some(s)) => {
+                        let label = format!("Enhance: {}", s.mode.name());
+                        let strength = f32::from(s.strength) / 100.0;
+                        match self.set_enhance(*id, c.id, s.mode, strength, false, &label, None) {
+                            Ok(v) => {
+                                batch.crops += 1;
+                                view = Some(v);
+                            }
+                            Err(_) => batch.failed += 1,
+                        }
+                    }
+                    Ok(None) | Err(_) => batch.none += 1,
+                }
+            }
+            if let Some(v) = view {
+                cmd.mark(*id, before.history_position, v.history_position);
+                batch.images += 1;
+                batch.views.push(v);
+            }
+        }
+        cmd.label = format!(
+            "Enhance suggested ({} image{})",
+            batch.images,
+            if batch.images == 1 { "" } else { "s" }
+        );
+        lock(&self.inner.session).push(cmd);
+        batch
     }
 
     /// JPEG bytes of one crop with a CANDIDATE enhancement, at preview resolution, without

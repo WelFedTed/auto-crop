@@ -9,9 +9,9 @@ use auto_crop_engine::convert_batch::{
 };
 use auto_crop_engine::curved::CurveSuggestion;
 use auto_crop_engine::{
-    AppPaths, CurveWarp, Cut, DerivedAction, Edit, Engine, EnhanceMode, EnhanceSuggestion, ErrKind,
-    ItemView, Notify, OpenSummary, Pt, RestoreMode, RestoreOutcome, RevertTo, SaveOutcome,
-    SaveTarget, SessionStep, Settings, SplitPatch, Superseded,
+    AppPaths, CurveWarp, Cut, DerivedAction, Edit, Engine, EnhanceBatch, EnhanceMode,
+    EnhanceSuggestion, ErrKind, ItemView, Notify, OpenSummary, Pt, RestoreMode, RestoreOutcome,
+    RevertTo, SaveOutcome, SaveTarget, SessionStep, Settings, SplitPatch, Superseded,
 };
 use serde::Serialize;
 use std::path::PathBuf;
@@ -301,6 +301,23 @@ fn set_default_enhance(
         .set_default_enhance(id, mode, strength, phase == "live", &label, gesture)
 }
 
+/// The "All items in this scan" scope: the default enhancement of the image AND no crop keeps its
+/// own override, as ONE undo step (`Engine::set_scan_enhance`). Arguments as `set_default_enhance`.
+#[tauri::command]
+fn set_scan_enhance(
+    shared: State<'_, Shared>,
+    id: u32,
+    mode: EnhanceMode,
+    strength: f32,
+    phase: String,
+    label: String,
+    gesture: Option<u64>,
+) -> Cmd<ItemView> {
+    shared
+        .engine
+        .set_scan_enhance(id, mode, strength, phase == "live", &label, gesture)
+}
+
 /// The engine's RECOMMENDATION for one crop (`Engine::suggest_enhance`): the mode, why, the
 /// black-and-white look that fits and what it writes. `None` when the crop should be left alone
 /// (a photograph, a clean scan) and while the image is not ready. It records and applies nothing:
@@ -314,6 +331,26 @@ async fn suggest_enhance(
 ) -> Cmd<Option<EnhanceSuggestion>> {
     let engine = shared.engine.clone();
     blocking(move || engine.suggest_enhance(id, crop)).await?
+}
+
+/// "Enhance all suggested": applies the engine's recommendation to every crop of `ids` that has
+/// one and no enhancement yet, as ONE step of the session history (`session_undo` reverts it).
+/// Only ever called by a click on that action; the engine never applies a suggestion by itself.
+/// Every changed image is announced with `item-updated`. On the blocking pool (a few tens of
+/// milliseconds per crop the first time).
+#[tauri::command]
+async fn enhance_suggested(
+    app: AppHandle,
+    shared: State<'_, Shared>,
+    ids: Vec<u32>,
+) -> Cmd<EnhanceBatch> {
+    let engine = shared.engine.clone();
+    let batch = blocking(move || engine.enhance_suggested(&ids)).await?;
+    let notify = notifier(&app);
+    for v in &batch.views {
+        notify(v.clone());
+    }
+    Ok(batch)
 }
 
 /// A curved crop becomes the straight quad through its corners.
@@ -852,7 +889,9 @@ pub fn run() {
             set_enhance,
             clear_enhance,
             set_default_enhance,
+            set_scan_enhance,
             suggest_enhance,
+            enhance_suggested,
             suggest_curves,
             clear_curves,
             add_crop,

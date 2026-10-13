@@ -27,6 +27,10 @@ pub struct Settings {
     pub auto_save_splits: bool,
     /// The one-time explanation shown the first time Curved edges is entered has been seen.
     pub curved_intro_ack: bool,
+    /// Show the enhancement suggestion ("This looks like a document: Clean makes it easier to read") in
+    /// the editor and the review grid. On by default; it only controls whether a suggestion is SHOWN,
+    /// nothing is ever applied by it (B13).
+    pub suggest_enhance: bool,
 }
 
 impl Default for Settings {
@@ -39,6 +43,7 @@ impl Default for Settings {
             split_profile: SplitProfile::Photos,
             auto_save_splits: false,
             curved_intro_ack: false,
+            suggest_enhance: true,
         }
     }
 }
@@ -54,6 +59,7 @@ struct Stored {
     split_profile: SplitProfile,
     auto_save_splits: bool,
     curved_intro_ack: bool,
+    suggest_enhance: bool,
 }
 
 impl Default for Stored {
@@ -72,6 +78,7 @@ impl From<Settings> for Stored {
             split_profile: s.split_profile,
             auto_save_splits: s.auto_save_splits,
             curved_intro_ack: s.curved_intro_ack,
+            suggest_enhance: s.suggest_enhance,
         }
     }
 }
@@ -86,6 +93,7 @@ impl From<Stored> for Settings {
             split_profile: s.split_profile,
             auto_save_splits: s.auto_save_splits,
             curved_intro_ack: s.curved_intro_ack,
+            suggest_enhance: s.suggest_enhance,
         }
     }
 }
@@ -136,6 +144,7 @@ mod tests {
             split_profile: SplitProfile::Receipts,
             auto_save_splits: true,
             curved_intro_ack: true,
+            suggest_enhance: false,
         };
         s.save(&paths).unwrap();
         assert_eq!(Settings::load(&paths), s);
@@ -170,6 +179,8 @@ mod tests {
         );
         // ... and so does one written before the curved-edges explanation existed.
         assert!(!s.curved_intro_ack);
+        // ... and before the enhancement suggestion: shown by default (it only controls whether it is shown).
+        assert!(s.suggest_enhance);
     }
 
     #[test]
