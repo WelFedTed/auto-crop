@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+# Independent readers for what the output writers make (ROADMAP M7.32, M11.56, M11.57, M11.59;
+# docs/dev/output-formats.md). The writers' own round-trip tests run in every CI job; this one
+# reads the files with software that shares no code with ours: libtiff (`tiffinfo`), ImageMagick,
+# libwebp (`dwebp`), qpdf and Poppler (`pdfinfo`, `pdfimages`, `pdftoppm`). Pure Rust writers,
+# so no native build is needed: the example that writes the samples compiles in a minute.
+
+name: Output formats
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: output-formats-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  interop:
+    name: TIFF, WebP and PDF in independent readers
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the readers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qpdf poppler-utils libtiff-tools imagemagick webp
+          qpdf --version | head -1
+          tiffinfo 2>&1 | head -1 || true
+          pdfinfo -v 2>&1 | head -1
+          dwebp -version
+          convert -version | head -1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Write one sample per writer (TIFF in every compression, 1-bit G4, WebP, PDF in every page type)
+        run: cargo run -q -p auto-crop-codecs --features fixtures --example write_samples -- target/interop
+      - name: Read them back with libtiff, ImageMagick, dwebp, qpdf and Poppler
+        run: bash tools/interop/check-output-formats.sh target/interop --require-all

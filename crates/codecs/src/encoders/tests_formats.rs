@@ -505,3 +505,32 @@ fn webp_refuses_what_it_cannot_hold() {
         Err(ErrKind::Cancelled)
     );
 }
+
+#[test]
+fn our_group_4_file_decodes_to_the_same_picture_as_the_repos_own_g4_fixture() {
+    // The fixture is written by `fax::tiff::wrap` (WhiteIsZero, 200 dpi); ours differs in the
+    // resolution tags and strips only. Same bitmap in, same pixels out of the same decoder.
+    let (w, h) = (53u32, 31u32);
+    let bits = crate::fixtures::bilevel(w, h);
+    let grey: Vec<u8> = bits.iter().map(|b| if *b { 0 } else { 255 }).collect();
+    let src = Raster::from_samples(w, h, PixelFormat::Gray8, Samples::U8(grey)).unwrap();
+    let ours = TiffEncoder::default()
+        .encode(&src.view(), &g4_spec(), &EncodeMeta::default(), &never())
+        .unwrap();
+    let theirs = crate::fixtures::tiff_g4(w, h);
+    assert_ne!(ours, theirs);
+    let (a, b) = (
+        crate::decode(&ours).unwrap(),
+        crate::decode(&theirs).unwrap(),
+    );
+    assert_eq!(a.raster.data, b.raster.data);
+    assert_eq!((a.raster.width, a.raster.height), (w, h));
+    // And the strip bytes themselves are the fixture's (the one-strip Group 4 stream is canonical).
+    let strip = |bytes: &[u8]| {
+        let mut d = Decoder::new(Cursor::new(bytes)).unwrap();
+        let off = d.get_tag_u32_vec(Tag::StripOffsets).unwrap()[0] as usize;
+        let len = d.get_tag_u32_vec(Tag::StripByteCounts).unwrap()[0] as usize;
+        bytes[off..off + len].to_vec()
+    };
+    assert_eq!(strip(&ours), strip(&theirs));
+}

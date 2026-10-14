@@ -10,6 +10,16 @@
   `auto-crop analyze` reports it per crop (`trim_to_content`); no `process` option trims. A new sample,
   `print_on_white_mat.jpg`, is in "Try sample images". Measured on synthetic pages only: see
   [docs/perf/detector-baseline.md](docs/perf/detector-baseline.md).
+- **More output formats.** Auto Crop can now write **TIFF** (uncompressed, LZW, Deflate or PackBits, 8-bit grey
+  or colour, with the colour profile and the pixel density; black-and-white pages as 1-bit CCITT Group 4),
+  **WebP** (lossless only; there is no lossy WebP yet) and **PDF** (one picture per page, sized from the
+  density, 300 dpi when the file does not say; a colour picture is a JPG page, a grey enhanced page a lossless
+  one or a 1-bit Group 4 page). Convert has the three new targets (`auto-crop convert --to tiff|webp|pdf`), the
+  editor has a "Save as" format for copies, and `process --format tiff|webp|pdf`, `--tiff-compression` and
+  `--one-bit` are new. A single-page 8-bit **TIFF** and a lossless **WebP** can now be replaced in place after
+  the verified backup like a JPG or PNG; a lossy WebP, a 1-bit TIFF and a TIFF with Exif or GPS details stay
+  copy-only and say why. See [docs/dev/output-formats.md](docs/dev/output-formats.md). AVIF and JPEG XL output
+  are still missing.
 
 ## 0.0.4 (2026-10-14), pre-release, Windows only
 
