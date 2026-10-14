@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **Trim to content.** A print on a wide white mat (or any page that holds a picture inside a border of the
+  page's own colour) is still cropped at the paper edge and held for a look ("Two possible outlines"), but the
+  editor now offers **Trim to content**: a button, an action in that hold message and the `T` key, shown only
+  when the app sees a picture inside the border. It previews the picture (a dashed outline and the trimmed
+  page), Apply is one undo step, Esc cancels. Letters, receipts and full-bleed photographs get no offer.
+  `auto-crop analyze` reports it per crop (`trim_to_content`); no `process` option trims. A new sample,
+  `print_on_white_mat.jpg`, is in "Try sample images". Measured on synthetic pages only: see
+  [docs/perf/detector-baseline.md](docs/perf/detector-baseline.md).
+
 ## 0.0.4 (2026-10-14), pre-release, Windows only
 
 A fourth early test build. It is still **not** the CLI-only v0.1.0 of [ROADMAP.md](ROADMAP.md) milestone M2,

@@ -195,7 +195,7 @@ The item's geometry becomes `Geometry::Grid(Arc<GridWarp>)` (02 §2.3: the outli
 
 | Code | Fires when (PROVISIONAL) | Effect | English chip (06 §6.7 owns the text) |
 |---|---|---|---|
-| `DETECTORS_DISAGREE` | both detectors accepted, IoU below 0.95 (4.3.3); the classical detector also uses it for a patch of a page that fills the picture, a print inside a border of paper, and a clean quad beside a long thin page (docs/perf/detector-baseline.md, 2026-10-12) | Check | "Two possible outlines" (offers "Try outline 2 of 3") |
+| `DETECTORS_DISAGREE` | both detectors accepted, IoU below 0.95 (4.3.3); the classical detector also uses it for a patch of a page that fills the picture, a print inside a border of paper, and a clean quad beside a long thin page (docs/perf/detector-baseline.md, 2026-10-12) | Check | "Two possible outlines" (offers "Try outline 2 of 3"; for a picture inside a border it also offers "Trim to content", docs/perf/detector-baseline.md 2026-10-14) |
 | `WEAK_EDGE` | an edge is weakly supported at full resolution (4.4) | Check | "Edge unclear on the right side" (the side is a parameter) |
 | `PARTIAL_FRAME` | a fitted corner falls outside the frame (4.4) | Check | "Content may be cut off" |
 | `ORIENT_UNSURE` | top-1 below 0.8 or not rotation-consistent (4.5.1) | Check | "Check orientation" (with 90 degree buttons) |

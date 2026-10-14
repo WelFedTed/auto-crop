@@ -3,7 +3,6 @@
 
 //! The Tauri side: commands, the `acimg` scheme, pickers and drag-and-drop.
 
-use auto_crop_engine::TrimProposal;
 use auto_crop_engine::convert::ConvertOptions;
 use auto_crop_engine::convert_batch::{
     ConvertAdded, ConvertFileView, ConvertPreview, ConvertProgress, ConvertSummary,

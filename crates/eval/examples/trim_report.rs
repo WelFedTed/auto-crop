@@ -13,13 +13,16 @@
 //! Each picture is run twice: on the detector's quad (what the app does) and on the ground-truth
 //! quad. Only aggregates go to stdout. `--by TAG` groups by that manifest tag (default `aspect`),
 //! `--show N` lists the first N pictures that got a proposal where none is expected. Pictures are
-//! reduced to the engine's 2048 px display proxy first, like the app.
+//! reduced to the engine's 2048 px display proxy first, like the app. `--out DIR` writes an overlay
+//! (ground truth white, the detector's quad amber, the proposal cyan) of every proposal where none is
+//! expected (so, not with `--pictures`).
 
-use auto_crop_codecs::decode;
+use auto_crop_codecs::{Format, decode, encode};
 use auto_crop_core::{Forced, Pt};
 use auto_crop_eval::manifest;
 use auto_crop_eval::synth::SuiteSpec;
 use auto_crop_eval::synth_real::scene_with_picture;
+use auto_crop_imgproc::Raster;
 use auto_crop_imgproc::detect::detect;
 use auto_crop_imgproc::scale::resize_to_fit;
 use auto_crop_imgproc::trim::trim_to_content;
@@ -44,6 +47,31 @@ fn corner_error(found: &[Pt; 4], truth: &[[f64; 2]; 4], w: f64, h: f64) -> f64 {
         / w.hypot(h)
 }
 
+fn put(r: &mut Raster, x: i64, y: i64, c: [u8; 3]) {
+    if x >= 0 && y >= 0 && (x as u32) < r.width && (y as u32) < r.height {
+        let i = ((y as u32 * r.width + x as u32) * 3) as usize;
+        r.data[i..i + 3].copy_from_slice(&c);
+    }
+}
+
+fn outline(r: &mut Raster, q: &[(f64, f64); 4], c: [u8; 3]) {
+    for i in 0..4 {
+        let (a, b) = (q[i], q[(i + 1) % 4]);
+        let n = ((b.0 - a.0).abs().max((b.1 - a.1).abs()).ceil() as usize).max(1) * 2;
+        for k in 0..=n {
+            let t = k as f64 / n as f64;
+            let (x, y) = (
+                (a.0 + (b.0 - a.0) * t) as i64,
+                (a.1 + (b.1 - a.1) * t) as i64,
+            );
+            for d in 0..2 {
+                put(r, x + d, y, c);
+                put(r, x, y + d, c);
+            }
+        }
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let Some(path) = args.first() else {
@@ -51,11 +79,13 @@ fn main() {
         std::process::exit(2);
     };
     let (mut by, mut pictures, mut show) = ("aspect".to_owned(), false, 0usize);
+    let mut out: Option<std::path::PathBuf> = None;
     let mut it = args[1..].iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--by" => by = it.next().cloned().unwrap_or(by),
             "--pictures" => pictures = true,
+            "--out" => out = it.next().map(std::path::PathBuf::from),
             "--show" => show = it.next().and_then(|v| v.parse().ok()).unwrap_or(0),
             _ => {}
         }
@@ -107,6 +137,24 @@ fn main() {
                             f64::from(img.width),
                             f64::from(img.height),
                         ));
+                    }
+                } else if let Some(dir) = out.as_ref().filter(|_| shown < show.max(40)) {
+                    shown += 1;
+                    std::fs::create_dir_all(dir).expect("out dir");
+                    let mut pic = resize_to_fit(&img, 800);
+                    let (w, h) = (f64::from(pic.width), f64::from(pic.height));
+                    let px = |q: &[Pt; 4]| -> [(f64, f64); 4] {
+                        std::array::from_fn(|i| (q[i].x * w, q[i].y * h))
+                    };
+                    outline(
+                        &mut pic,
+                        &std::array::from_fn(|i| (item.quad[i][0] * w, item.quad[i][1] * h)),
+                        [255, 255, 255],
+                    );
+                    outline(&mut pic, &px(&q), [255, 190, 0]);
+                    outline(&mut pic, &px(&r.quad), [0, 220, 255]);
+                    if let Ok(png) = encode(&pic, Format::Png, 90, None) {
+                        let _ = std::fs::write(dir.join(format!("{}.png", item.id)), png);
                     }
                 } else if shown < show {
                     shown += 1;
