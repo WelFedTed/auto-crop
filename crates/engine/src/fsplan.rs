@@ -60,11 +60,22 @@ pub fn replace_refusal(format: Format, frames: u32, notices: &[&str]) -> Option<
 }
 
 /// Decode notices that mean writing the decoded raster back would drop content (the raster is 8-bit
-/// RGB until 16-bit and alpha rasters exist): a 16-bit source, translucent pixels, CMYK.
-pub const LOSSY_DECODE_NOTICES: [&str; 3] = [
+/// RGB until 16-bit and alpha rasters exist, and the TIFF and WebP writers are 8-bit and lossless):
+///
+/// * a 16-bit source, translucent pixels, CMYK;
+/// * `webp.lossy`: a lossy WebP would become a larger lossless one (there is no lossy WebP writer);
+/// * `tiff.low_depth`: a 1-bit (or other sub-byte) TIFF would become a 24-bit one;
+/// * `tiff.exif_not_carried`: the TIFF has an Exif, GPS or sub-image directory (or is BigTIFF),
+///   which the TIFF writer does not carry.
+///
+/// A copy is still possible for all of them.
+pub const LOSSY_DECODE_NOTICES: [&str; 6] = [
     "depth.reduced_to_8",
     "alpha.dropped",
     "cmyk.naive_conversion",
+    "webp.lossy",
+    "tiff.low_depth",
+    "tiff.exif_not_carried",
 ];
 
 /// Longest `{name}` substituted, in characters (a source name is never trusted to be short).
@@ -651,14 +662,39 @@ mod tests {
             );
         }
         assert_eq!(replace_refusal(Format::Png, 1, &["icc.invalid"]), None);
+        // Single-page TIFF and still WebP have writers now (lossless, exact): replaceable ...
+        assert_eq!(replace_refusal(Format::Tiff, 1, &[]), None);
+        assert_eq!(replace_refusal(Format::Webp, 1, &[]), None);
+        // ... unless the writer could not give the content back: a lossy WebP, a 1-bit TIFF, a TIFF
+        // with Exif or GPS directories.
+        assert_eq!(
+            replace_refusal(Format::Webp, 1, &["webp.lossy"]),
+            Some("webp.lossy")
+        );
+        assert_eq!(
+            replace_refusal(Format::Tiff, 1, &["tiff.low_depth"]),
+            Some("tiff.low_depth")
+        );
+        assert_eq!(
+            replace_refusal(Format::Tiff, 1, &["tiff.exif_not_carried"]),
+            Some("tiff.exif_not_carried")
+        );
+        // Sixteen-bit and alpha TIFFs stay open-only (the engine's raster is 8-bit RGB).
+        assert_eq!(
+            replace_refusal(Format::Tiff, 1, &["depth.reduced_to_8"]),
+            Some("depth.reduced_to_8")
+        );
+        assert_eq!(
+            replace_refusal(Format::Webp, 1, &["alpha.dropped"]),
+            Some("alpha.dropped")
+        );
         // No writer in this build.
         for f in [
-            Format::Tiff,
-            Format::Webp,
             Format::Heic,
             Format::Avif,
             Format::Bmp,
             Format::Gif,
+            Format::Jxl,
         ] {
             assert_eq!(
                 replace_refusal(f, 1, &[]),

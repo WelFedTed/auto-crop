@@ -27,6 +27,7 @@
 
 use super::bilevel::{BilevelImage, DEFAULT_CUT, G4_MAX_WIDTH};
 use super::check;
+use crate::RawTag;
 use auto_crop_core::output::{Bilevel, Bits, OutFormat};
 use auto_crop_core::ports::{EncodeMeta, Encoder, RasterView};
 use auto_crop_core::{CancelToken, ErrKind, OutputSpec};
@@ -65,7 +66,7 @@ impl TiffCompression {
 }
 
 /// TIFF through the writer of this module.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct TiffEncoder {
     pub compression: TiffCompression,
     /// The horizontal predictor for LZW and Deflate.
@@ -74,6 +75,9 @@ pub struct TiffEncoder {
     pub rows_per_strip: Option<u32>,
     /// The cut of the 1-bit threshold: luma below it is black.
     pub bilevel_cut: u8,
+    /// Descriptive tags of the source carried over (text, XMP, IPTC), little-endian values; see
+    /// the policy functions of the engine for which ones a save keeps.
+    pub extra: Vec<RawTag>,
 }
 
 impl Default for TiffEncoder {
@@ -83,6 +87,7 @@ impl Default for TiffEncoder {
             predictor: true,
             rows_per_strip: None,
             bilevel_cut: DEFAULT_CUT,
+            extra: Vec::new(),
         }
     }
 }
@@ -289,6 +294,16 @@ impl TiffEncoder {
         }
         if compression == TiffCompression::G4 {
             e.push(long(293, 0)); // T6Options: no uncompressed mode
+        }
+        for x in &self.extra {
+            if !e.iter().any(|en| en.tag == x.tag) && !x.data.is_empty() {
+                e.push(Entry {
+                    tag: x.tag,
+                    typ: x.ty,
+                    count: x.count,
+                    data: x.data.clone(),
+                });
+            }
         }
         if let Some(icc) = meta.icc.as_deref().filter(|p| !p.is_empty()) {
             e.push(Entry {

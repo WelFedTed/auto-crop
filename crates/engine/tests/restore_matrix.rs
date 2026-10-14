@@ -47,6 +47,8 @@ fn mtime(p: &Path) -> SystemTime {
 enum Fmt {
     Jpeg,
     Png,
+    Tiff,
+    Webp,
 }
 
 fn source(fmt: Fmt) -> (&'static str, Vec<u8>) {
@@ -60,6 +62,22 @@ fn source(fmt: Fmt) -> (&'static str, Vec<u8>) {
         Fmt::Png => (
             "a.png",
             auto_crop_codecs::fixtures::png_with_icc(120, 90, &fake_icc(800)),
+        ),
+        Fmt::Tiff => (
+            "a.tif",
+            auto_crop_codecs::fixtures::tiff_rgb8(
+                120,
+                90,
+                &auto_crop_codecs::fixtures::TiffOpts {
+                    icc: Some(fake_icc(800)),
+                    comp: Some(auto_crop_codecs::fixtures::TiffComp::Lzw),
+                    ..Default::default()
+                },
+            ),
+        ),
+        Fmt::Webp => (
+            "a.webp",
+            auto_crop_codecs::fixtures::webp_extended(120, 90, None, Some(&fake_icc(800))),
         ),
     }
 }
@@ -212,7 +230,7 @@ fn overwrite_then_restore_is_byte_identical_across_the_matrix() {
     let mut rows = 0;
     let mut cross_rows = 0;
     let mut methods = std::collections::BTreeMap::new();
-    for fmt in [Fmt::Jpeg, Fmt::Png] {
+    for fmt in [Fmt::Jpeg, Fmt::Png, Fmt::Tiff, Fmt::Webp] {
         for method in [MethodPref::Copy, MethodPref::Hardlink, MethodPref::Auto] {
             for restart in [false, true] {
                 for index_lost in [false, true] {
@@ -246,11 +264,11 @@ fn overwrite_then_restore_is_byte_identical_across_the_matrix() {
             "cross-volume (no second volume on this machine)"
         }
     );
-    assert!(rows >= 24);
+    assert!(rows >= 48);
 }
 
-/// Formats with no writer are never overwritten: the "overwrite" row of the matrix is that the
-/// bytes and the mtime stay exactly as they were, and no backup is made.
+/// Sources this build cannot write back as themselves are never overwritten: the "overwrite" row
+/// of the matrix is that the bytes and the mtime stay exactly as they were, and no backup is made.
 #[test]
 fn formats_without_a_writer_stay_byte_identical_under_overwrite() {
     let root = tempfile::tempdir().unwrap();
@@ -259,11 +277,9 @@ fn formats_without_a_writer_stay_byte_identical_under_overwrite() {
     let dir = root.path().join("photos");
     fs::create_dir_all(&dir).unwrap();
     let files: Vec<(&str, Vec<u8>)> = vec![
-        ("a.webp", auto_crop_codecs::fixtures::webp_lossless(64, 48)),
-        (
-            "a.tif",
-            auto_crop_codecs::fixtures::tiff_rgb8(64, 48, &Default::default()),
-        ),
+        // A bitmap has no writer; a 1-bit TIFF would become 24-bit.
+        ("a.bmp", bmp_rgb24(64, 48, &pattern(64, 48), false)),
+        ("a.tif", auto_crop_codecs::fixtures::tiff_g4(64, 48)),
     ];
     for (name, bytes) in files {
         let p = dir.join(name);

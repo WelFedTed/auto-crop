@@ -428,6 +428,8 @@ pub fn run(args: ConvertArgs, env: &Env) -> u8 {
                 max_pixels: args.knobs.max_pixels,
                 recursive: args.input.recursive,
                 jobs,
+                tiff_compression: args.knobs.tiff_compression_name(),
+                one_bit: args.knobs.one_bit,
             }),
         },
         summary: summary.clone(),

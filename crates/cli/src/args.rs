@@ -10,6 +10,7 @@
 //! unknown flag is a usage error with a suggestion. Parsing never touches the file system.
 
 use auto_crop_core::{SplitPolicy, SplitProfile};
+use auto_crop_engine::output::TiffCompressionSetting;
 use auto_crop_engine::{EngineOptions, QualityPreset, QualitySetting};
 use std::path::PathBuf;
 
@@ -223,14 +224,25 @@ pub fn process_flags() -> Vec<Flag> {
         val(
             "format",
             None,
-            "jpg|png|keep",
-            "Output format (default keep; a change needs --output, --suffix or --copy)",
+            "jpg|png|tiff|webp|pdf|keep",
+            "Output format (default keep; a change needs --output, --suffix or --copy). WebP is lossless; a PDF page holds one picture",
         ),
         val(
             "quality",
             None,
             "small|balanced|best|1-100",
             "JPEG quality of written files: a preset taken from the source's own quality (default balanced) or a fixed number",
+        ),
+        val(
+            "tiff-compression",
+            None,
+            "none|lzw|deflate|packbits",
+            "Compression of TIFF files this run writes (default lzw); 1-bit output is always CCITT Group 4",
+        ),
+        sw(
+            "one-bit",
+            None,
+            "Write enhanced black-and-white pages (document, receipt) as 1-bit CCITT Group 4 in a TIFF or PDF; any other output is refused",
         ),
         sw(
             "strip-location",
@@ -304,8 +316,8 @@ pub fn convert_flags() -> Vec<Flag> {
         val(
             "to",
             None,
-            "jpg|png",
-            "The format to convert to (required)",
+            "jpg|png|tiff|webp|pdf",
+            "The format to convert to (required). WebP is lossless; a PDF page holds one picture",
         ),
         val(
             "quality",
@@ -339,6 +351,17 @@ pub fn convert_flags() -> Vec<Flag> {
             "reencode",
             None,
             "Convert files that already are in the target format too (a JPEG to a new JPEG, to change its quality)",
+        ),
+        val(
+            "tiff-compression",
+            None,
+            "none|lzw|deflate|packbits",
+            "Compression of TIFF files this run writes (default lzw); 1-bit output is always CCITT Group 4",
+        ),
+        sw(
+            "one-bit",
+            None,
+            "Write enhanced black-and-white pages (document, receipt) as 1-bit CCITT Group 4 in a TIFF or PDF; any other output is refused",
         ),
         sw(
             "strip-location",
@@ -416,14 +439,25 @@ pub fn render_flags() -> Vec<Flag> {
         val(
             "format",
             None,
-            "jpg|png|keep",
-            "Output format (default keep)",
+            "jpg|png|tiff|webp|pdf|keep",
+            "Output format (default keep; or the extension of --output). WebP is lossless; a PDF page holds one picture",
         ),
         val(
             "quality",
             None,
             "small|balanced|best|1-100",
             "JPEG quality: a preset taken from the source's own quality (default balanced) or a fixed number",
+        ),
+        val(
+            "tiff-compression",
+            None,
+            "none|lzw|deflate|packbits",
+            "Compression of TIFF files this run writes (default lzw); 1-bit output is always CCITT Group 4",
+        ),
+        sw(
+            "one-bit",
+            None,
+            "Write enhanced black-and-white pages (document, receipt) as 1-bit CCITT Group 4 in a TIFF or PDF; any other output is refused",
         ),
         sw(
             "strip-location",
@@ -843,6 +877,9 @@ pub enum FormatArg {
     Keep,
     Jpg,
     Png,
+    Tiff,
+    Webp,
+    Pdf,
 }
 
 impl FormatArg {
@@ -851,6 +888,9 @@ impl FormatArg {
             FormatArg::Keep => "keep",
             FormatArg::Jpg => "jpg",
             FormatArg::Png => "png",
+            FormatArg::Tiff => "tiff",
+            FormatArg::Webp => "webp",
+            FormatArg::Pdf => "pdf",
         }
     }
 }
@@ -861,6 +901,10 @@ pub struct Knobs {
     pub quality: Option<QualitySetting>,
     pub strip_location: bool,
     pub max_pixels: Option<u64>,
+    /// `--tiff-compression`.
+    pub tiff_compression: Option<TiffCompressionSetting>,
+    /// `--one-bit`: enhanced grey pages as 1-bit CCITT Group 4 (TIFF, PDF).
+    pub one_bit: bool,
 }
 
 impl Knobs {
@@ -874,7 +918,21 @@ impl Knobs {
         if let Some(m) = self.max_pixels {
             o.max_pixels = m;
         }
+        if let Some(c) = self.tiff_compression {
+            o.tiff_compression = c;
+        }
+        o.one_bit = self.one_bit;
         o
+    }
+
+    /// The compression as written in the manifest, when one was given.
+    pub fn tiff_compression_name(&self) -> Option<&'static str> {
+        self.tiff_compression.map(|c| match c {
+            TiffCompressionSetting::None => "none",
+            TiffCompressionSetting::Lzw => "lzw",
+            TiffCompressionSetting::Deflate => "deflate",
+            TiffCompressionSetting::PackBits => "packbits",
+        })
     }
 
     /// The quality as written in the manifest: `small`, `balanced`, `best` or the number.
@@ -911,10 +969,24 @@ fn knobs(p: &Parsed) -> Res<Knobs> {
             })?
             .map(|value| QualitySetting::Fixed { value }),
     };
+    let tiff_compression = match p.value("tiff-compression") {
+        None => None,
+        Some("none") => Some(TiffCompressionSetting::None),
+        Some("lzw") => Some(TiffCompressionSetting::Lzw),
+        Some("deflate") => Some(TiffCompressionSetting::Deflate),
+        Some("packbits") => Some(TiffCompressionSetting::PackBits),
+        Some(o) => {
+            return usage(format!(
+                "unknown --tiff-compression `{o}` (none, lzw, deflate or packbits)"
+            ));
+        }
+    };
     Ok(Knobs {
         quality,
         strip_location: p.has("strip-location"),
         max_pixels: number(p, "max-pixels", 1_000_000u64, 500_000_000)?,
+        tiff_compression,
+        one_bit: p.has("one-bit"),
     })
 }
 
@@ -923,7 +995,12 @@ fn format_arg(p: &Parsed) -> Res<FormatArg> {
         None | Some("keep") => Ok(FormatArg::Keep),
         Some("jpg" | "jpeg") => Ok(FormatArg::Jpg),
         Some("png") => Ok(FormatArg::Png),
-        Some(o) => usage(format!("unknown --format `{o}` (jpg, png or keep)")),
+        Some("tif" | "tiff") => Ok(FormatArg::Tiff),
+        Some("webp") => Ok(FormatArg::Webp),
+        Some("pdf") => Ok(FormatArg::Pdf),
+        Some(o) => usage(format!(
+            "unknown --format `{o}` (jpg, png, tiff, webp, pdf or keep)"
+        )),
     }
 }
 
@@ -1145,8 +1222,13 @@ fn convert(p: &Parsed) -> Res<ConvertArgs> {
     let to = match p.value("to") {
         Some("jpg" | "jpeg") => ConvertTarget::Jpg,
         Some("png") => ConvertTarget::Png,
-        Some(o) => return usage(format!("unknown --to `{o}` (jpg or png)")),
-        None => return usage("convert: `--to jpg|png` is required"),
+        Some("tif" | "tiff") => ConvertTarget::Tiff,
+        Some("webp") => ConvertTarget::Webp,
+        Some("pdf") => ConvertTarget::Pdf,
+        Some(o) => {
+            return usage(format!("unknown --to `{o}` (jpg, png, tiff, webp or pdf)"));
+        }
+        None => return usage("convert: `--to jpg|png|tiff|webp|pdf` is required"),
     };
     let colour = match p.value("colour").or_else(|| p.value("color")) {
         None | Some("srgb") => ColourMode::Srgb,
@@ -1587,7 +1669,9 @@ pub fn help(topic: Option<&str>) -> String {
                 .map_or("", |(_, a)| *a);
             let line = match cmd {
                 "process" => "auto-crop process [options] <file|folder|pattern>...",
-                "convert" => "auto-crop convert --to jpg|png [options] <file|folder|pattern>...",
+                "convert" => {
+                    "auto-crop convert --to jpg|png|tiff|webp|pdf [options] <file|folder|pattern>..."
+                }
                 "analyze" => "auto-crop analyze [options] <file|folder|pattern>...",
                 "render" => "auto-crop render [options] --output <file> <image>",
                 "restore" => "auto-crop restore [options] <file|backup-id>...   |   --run <id>",
@@ -1683,6 +1767,40 @@ mod tests {
         assert_eq!(c.dest, ConvertDest::Dir(PathBuf::from("out")));
         assert!(c.reencode && c.dry_run && c.knobs.strip_location && c.input.recursive);
         assert_eq!((c.jobs, c.knobs.max_pixels), (Some(3), Some(5_000_000)));
+        for (name, want) in [
+            ("tiff", ConvertTarget::Tiff),
+            ("tif", ConvertTarget::Tiff),
+            ("webp", ConvertTarget::Webp),
+            ("pdf", ConvertTarget::Pdf),
+        ] {
+            let c = convert_of(&[
+                "convert",
+                "--to",
+                name,
+                "--tiff-compression",
+                "deflate",
+                "--one-bit",
+                "a.png",
+            ])
+            .unwrap();
+            assert_eq!(c.to, want);
+            assert_eq!(
+                c.knobs.tiff_compression,
+                Some(TiffCompressionSetting::Deflate)
+            );
+            assert!(c.knobs.one_bit);
+        }
+        assert!(
+            convert_of(&[
+                "convert",
+                "--to",
+                "tiff",
+                "--tiff-compression",
+                "jpeg",
+                "a.png"
+            ])
+            .is_err()
+        );
         assert_eq!(
             convert_of(&["convert", "--to", "jpeg", "--copy", "x"])
                 .unwrap()
@@ -1691,7 +1809,7 @@ mod tests {
         );
         for bad in [
             &["convert", "a.png"][..],
-            &["convert", "--to", "tiff", "a.png"],
+            &["convert", "--to", "avif", "a.png"],
             &["convert", "--to", "jpg"],
             &["convert", "--to", "jpg", "--copy", "--in-place", "a.png"],
             &["convert", "--to", "jpg", "--colour", "x", "a.png"],

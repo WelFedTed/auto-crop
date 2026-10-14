@@ -303,7 +303,10 @@ fn save_copies(
     rec: &mut ItemRecord,
 ) {
     let args = w.args;
-    let format = out_format(r.format, args.format);
+    // `open_only` names the notice that makes the source not writable back as itself (a lossy WebP,
+    // a 1-bit TIFF), which is also what picks PNG for its copies.
+    let notices: Vec<&str> = r.view.open_only.iter().map(String::as_str).collect();
+    let format = out_format(r.format, &notices, args.format);
     let plan = match writer::plan_copies(
         &args.mode,
         args.name_template.as_deref(),
@@ -697,6 +700,8 @@ pub fn run(args: ProcessArgs, env: &Env) -> u8 {
                 jobs,
                 enhance: (args.enhance != EnhanceArg::Original)
                     .then(|| format!("{}:{}", args.enhance.name(), args.enhance_strength)),
+                tiff_compression: args.knobs.tiff_compression_name(),
+                one_bit: args.knobs.one_bit,
             }),
         },
         summary: summary.clone(),

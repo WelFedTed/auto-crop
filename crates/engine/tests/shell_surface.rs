@@ -53,10 +53,29 @@ fn open_only_names_why_a_source_is_never_replaced() {
     ] {
         assert_eq!(open(&e, name, &bytes).open_only, None, "{name}");
     }
-    // A single-page TIFF opens but has no writer in this build.
+    // A single-page 8-bit TIFF and a lossless WebP have writers (M11): replaceable.
     let one = fx::tiff_rgb8(64, 48, &fx::TiffOpts::default());
+    assert_eq!(open(&e, "page.tif", &one).open_only, None);
     assert_eq!(
-        open(&e, "page.tif", &one).open_only.as_deref(),
+        open(&e, "plain.webp", &fx::webp_lossless(64, 48)).open_only,
+        None
+    );
+    // What a lossless writer could not give back stays open-only, with the reason.
+    assert_eq!(
+        open(&e, "lossy.webp", &fx::webp_lossy_1x1())
+            .open_only
+            .as_deref(),
+        Some("webp.lossy")
+    );
+    assert_eq!(
+        open(&e, "scan.tif", &fx::tiff_g4(64, 48))
+            .open_only
+            .as_deref(),
+        Some("tiff.low_depth")
+    );
+    let bmp = fx::bmp_rgb24(16, 16, &fx::pattern(16, 16), false);
+    assert_eq!(
+        open(&e, "pic.bmp", &bmp).open_only.as_deref(),
         Some("format.write_unavailable")
     );
     // A multi-page one is never replaced either, and says so.

@@ -64,6 +64,51 @@ fn webp(b: &[u8], cap: u64) -> Option<Vec<u8>> {
     None
 }
 
+fn png_dpi(b: &[u8]) -> Option<(u32, u32)> {
+    let mut i = 8;
+    while i + 8 <= b.len() {
+        let len = be32(b, i)? as usize;
+        let kind = b.get(i + 4..i + 8)?;
+        let data = i + 8;
+        if kind == b"pHYs" && len == 9 && b.get(data + 8) == Some(&1) {
+            let per_inch = |v: u32| {
+                let d = (f64::from(v) * 0.0254).round();
+                (1.0..=100_000.0).contains(&d).then_some(d as u32)
+            };
+            return per_inch(be32(b, data)?).zip(per_inch(be32(b, data + 4)?));
+        }
+        if kind == b"IDAT" || kind == b"IEND" {
+            return None;
+        }
+        i = data.checked_add(len)?.checked_add(4)?;
+    }
+    None
+}
+
+/// The pixel density of a PNG (`pHYs`, in metres, as dots per inch) or of a TIFF (its resolution
+/// tags), so a re-save keeps the physical size.
+pub fn extract_dpi(bytes: &[u8], format: Format) -> Option<(u32, u32)> {
+    crate::guard::guard_item(|| {
+        Ok(match format {
+            Format::Png => png_dpi(bytes),
+            Format::Tiff => crate::parse::tiff::read_meta(bytes).and_then(|m| m.dpi),
+            _ => None,
+        })
+    })
+    .ok()
+    .flatten()
+}
+
+pub use crate::parse::tiff::{RawTag, TAG_IPTC, TAG_XMP, TiffMeta};
+
+/// The descriptive tags of a TIFF (resolution, XMP, IPTC, text) and whether it has directories a
+/// TIFF this build writes cannot carry.
+pub fn extract_tiff_meta(bytes: &[u8]) -> Option<TiffMeta> {
+    crate::guard::guard_item(|| Ok(crate::parse::tiff::read_meta(bytes)))
+        .ok()
+        .flatten()
+}
+
 /// The EXIF TIFF blob of `bytes` (a file of `format`), if it has a well-formed one. For a JPEG use
 /// [`crate::jpeg_meta::read_meta`].
 pub fn extract_exif(bytes: &[u8], format: Format, limits: &DecodeLimits) -> Option<Vec<u8>> {

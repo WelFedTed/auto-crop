@@ -432,21 +432,42 @@ fn unsupported_and_never_replaced_files_are_counted_and_left_alone() {
     fs::write(work.join("pic.gif"), b"GIF89a\x01\x00\x01\x00").unwrap();
     fs::write(work.join("doc.pdf"), b"%PDF-1.7").unwrap();
     fs::write(work.join("notes.txt"), b"hello").unwrap();
+    // A bitmap has no writer; a 1-bit TIFF would become 24-bit; a lossy WebP would become a larger
+    // lossless one; a multi-page TIFF would lose its pages: none is replaced.
     fs::write(
-        work.join("scan.webp"),
-        auto_crop_codecs::fixtures::webp_lossless(64, 48),
-    )
-    .unwrap();
-    fs::write(
-        work.join("scan.tif"),
-        auto_crop_codecs::fixtures::tiff_rgb8(
+        work.join("scan.bmp"),
+        auto_crop_codecs::fixtures::bmp_rgb24(
             64,
             48,
-            &auto_crop_codecs::fixtures::TiffOpts::default(),
+            &auto_crop_codecs::fixtures::pattern(64, 48),
+            false,
         ),
     )
     .unwrap();
-    let (hw, ht) = (hash(&work.join("scan.webp")), hash(&work.join("scan.tif")));
+    fs::write(
+        work.join("bilevel.tif"),
+        auto_crop_codecs::fixtures::tiff_g4(64, 48),
+    )
+    .unwrap();
+    fs::write(
+        work.join("lossy.webp"),
+        auto_crop_codecs::fixtures::webp_lossy_1x1(),
+    )
+    .unwrap();
+    fs::write(
+        work.join("pages.tif"),
+        auto_crop_codecs::fixtures::tiff_rgb8(
+            64,
+            48,
+            &auto_crop_codecs::fixtures::TiffOpts {
+                extra_pages: 1,
+                ..auto_crop_codecs::fixtures::TiffOpts::default()
+            },
+        ),
+    )
+    .unwrap();
+    let names = ["scan.bmp", "bilevel.tif", "lossy.webp", "pages.tif"];
+    let before: Vec<String> = names.iter().map(|n| hash(&work.join(n))).collect();
 
     let r = sb.run(&["process", "--json", s(&work)]);
     assert_eq!(r.code(), 0, "{}", r.stderr());
@@ -463,16 +484,19 @@ fn unsupported_and_never_replaced_files_are_counted_and_left_alone() {
             .unwrap()
             .clone()
     };
-    for f in ["scan.webp", "scan.tif"] {
+    for (f, why) in [
+        ("scan.bmp", "format.write_unavailable"),
+        ("bilevel.tif", "tiff.low_depth"),
+        ("lossy.webp", "webp.lossy"),
+        ("pages.tif", "tiff.multi_page"),
+    ] {
         let it = by(f);
         assert_eq!(it["status"], "skipped", "{f}");
         assert_eq!(it["code"], "NOT_REPLACEABLE");
-        assert_eq!(it["reasons"][0], "format.write_unavailable");
+        assert_eq!(it["reasons"][0], why, "{f}");
     }
-    assert_eq!(
-        (hash(&work.join("scan.webp")), hash(&work.join("scan.tif"))),
-        (hw, ht)
-    );
+    let after: Vec<String> = names.iter().map(|n| hash(&work.join(n))).collect();
+    assert_eq!(after, before);
 
     // Named directly, an unsupported file is a skipped input, and with nothing else there is no input.
     let r = sb.run(&["process", "--json", s(&work.join("pic.gif"))]);

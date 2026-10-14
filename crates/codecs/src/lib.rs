@@ -60,7 +60,9 @@ pub use limits::{
     DEFAULT_MAX_METADATA_BYTES, DEFAULT_MAX_PIXELS, DEFAULT_MAX_SCANS, DecodeLimits,
     HARD_MAX_PIXELS, Limit, est_bytes, est_bytes_for_pixels,
 };
-pub use meta_extract::extract_exif;
+pub use meta_extract::{
+    RawTag, TAG_IPTC, TAG_XMP, TiffMeta, extract_dpi, extract_exif, extract_tiff_meta,
+};
 pub use scaled::{DENOMS, ScaledDecoded, decode_scaled, pick_denom};
 
 use auto_crop_imgproc::Raster;
@@ -116,6 +118,24 @@ pub struct Probe {
     pub orientation: u8,
     /// Embedded ICC profile size as stored (compressed for PNG), if any.
     pub icc_len: Option<u32>,
+    /// WebP only: the picture is lossy (VP8).
+    pub lossy: bool,
+}
+
+impl Probe {
+    /// The decode notices this header already implies (the ones the engine's replaceability rule
+    /// reads: a lossy WebP, a TIFF stored below 8 bits), so a caller that only probed can still
+    /// choose an output format.
+    pub fn header_notices(&self) -> Vec<&'static str> {
+        let mut n = Vec::new();
+        if self.lossy {
+            n.push("webp.lossy");
+        }
+        if self.format == Format::Tiff && self.bit_depth < 8 {
+            n.push("tiff.low_depth");
+        }
+        n
+    }
 }
 
 /// Encodes RGB8. `quality` (1..=100) applies to JPEG only; PNG is lossless. A panic inside an

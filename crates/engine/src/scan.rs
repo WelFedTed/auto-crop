@@ -889,18 +889,25 @@ impl Engine {
                 if let Some(notice) = crate::fsplan::replace_refusal(fmt, frames, &decode_notices) {
                     return Err((ErrKind::NotReplaceable, vec![notice.to_owned()]));
                 }
+                // Another format is a conversion: a copy, or the Convert flow.
+                if self
+                    .settings()
+                    .save_format
+                    .format()
+                    .is_some_and(|f| f != fmt)
+                {
+                    return Err((
+                        ErrKind::UnsupportedOutput,
+                        vec!["format.change_needs_copy".to_owned()],
+                    ));
+                }
                 fmt
             }
-            // A copy is written in a format this build can write: JPEG for HEIC (the conversion
-            // target of PLAN 3.5), PNG for everything else.
+            // A copy is written in the chosen format, else in the source's own when this build can
+            // write it back as itself, else JPEG for HEIC (the conversion target of PLAN 3.5) or
+            // PNG (`output::copy_format`).
             SaveTarget::Copy => {
-                if fmt.is_encodable() {
-                    fmt
-                } else if fmt == Format::Heic {
-                    Format::Jpeg
-                } else {
-                    Format::Png
-                }
+                crate::output::copy_format(fmt, &decode_notices, self.settings().save_format)
             }
         };
 

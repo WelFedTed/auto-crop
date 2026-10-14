@@ -734,7 +734,7 @@ fn two_page_tiff(w: u32, h: u32, shade: [u8; 2]) -> Vec<u8> {
 }
 
 #[test]
-fn a_multi_page_tiff_is_never_replaced_and_copies_are_png() {
+fn a_multi_page_tiff_is_never_replaced_and_copies_are_tiff() {
     let e = env();
     let bytes = two_page_tiff(64, 48, [90, 200]);
     let path = e.dir.join("pages.tif");
@@ -754,12 +754,10 @@ fn a_multi_page_tiff_is_never_replaced_and_copies_are_png() {
     assert_eq!(fs::read(&path).unwrap(), bytes, "byte-identical");
     assert!(e.engine.list_backups().runs.is_empty());
     assert_eq!(e.files(), ["pages.tif"]);
-    // Copies on opt-in: PNG, the source untouched.
+    // Copies on opt-in: TIFF again (the first page, 8-bit), the source untouched.
     let out = e.save(v.id, SaveTarget::Copy);
     assert!(out.ok, "{out:?}");
-    // Copies of a TIFF are PNG; the folder is AutoCrop/ (the pages.png name is taken by the
-    // source's own folder, not this one).
-    assert_eq!(out.saved.unwrap().outputs, ["pages_01.png", "pages_02.png"]);
+    assert_eq!(out.saved.unwrap().outputs, ["pages_01.tif", "pages_02.tif"]);
     assert_eq!(fs::read(&path).unwrap(), bytes);
 }
 

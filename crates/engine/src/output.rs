@@ -79,6 +79,65 @@ impl QualitySetting {
     }
 }
 
+/// How a TIFF is compressed (PLAN 3.3; 1-bit pages are Group 4 whatever this says).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TiffCompressionSetting {
+    None,
+    #[default]
+    Lzw,
+    Deflate,
+    #[serde(rename = "packbits")]
+    PackBits,
+}
+
+/// The format a save writes when the user picks one (the editor's Save format, the CLI's
+/// `--format`); `Auto` keeps the source's own format when this build can write it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SaveFormat {
+    #[default]
+    Auto,
+    Jpeg,
+    Png,
+    Tiff,
+    Webp,
+    Pdf,
+}
+
+impl SaveFormat {
+    /// The format this choice names; `None` for `Auto`.
+    pub fn format(self) -> Option<Format> {
+        match self {
+            SaveFormat::Auto => None,
+            SaveFormat::Jpeg => Some(Format::Jpeg),
+            SaveFormat::Png => Some(Format::Png),
+            SaveFormat::Tiff => Some(Format::Tiff),
+            SaveFormat::Webp => Some(Format::Webp),
+            SaveFormat::Pdf => Some(Format::Pdf),
+        }
+    }
+}
+
+/// The format of a save that does not replace the source (a copy): the choice if there is one, else
+/// the source's own format when this build can write it (PLAN 3.2.3), JPEG for HEIC, PNG for the
+/// rest. A lossy WebP and a 1-bit TIFF are not written back as themselves (this build's WebP is
+/// lossless only, and a 24-bit TIFF is not what a bilevel scan wants), so they give PNG.
+pub fn copy_format(source: Format, notices: &[&str], choice: SaveFormat) -> Format {
+    if let Some(f) = choice.format() {
+        return f;
+    }
+    let lossy_webp = source == Format::Webp && notices.contains(&"webp.lossy");
+    let bilevel_tiff = source == Format::Tiff && notices.contains(&"tiff.low_depth");
+    if source.is_encodable() && source != Format::Pdf && !lossy_webp && !bilevel_tiff {
+        source
+    } else if source == Format::Heic {
+        Format::Jpeg
+    } else {
+        Format::Png
+    }
+}
+
 /// What the caller may choose about the written file. `Default` is the shipped behaviour: Balanced
 /// quality, GPS kept, lossless JPEG when it is exact, full verification, no cloud downloads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,6 +159,11 @@ pub struct EngineOptions {
     pub max_pixels: u64,
     /// Which backup methods may be tried (reflink, hardlink, copy).
     pub backup_method: crate::store::MethodPref,
+    /// The compression of a TIFF this save writes (1-bit pages are always Group 4).
+    pub tiff_compression: TiffCompressionSetting,
+    /// Write an enhanced grey page as 1 bit: CCITT Group 4 in a TIFF or a PDF, thresholded at
+    /// 128 with no dithering. Any other output is `UnsupportedOutput`, never a silent 8-bit file.
+    pub one_bit: bool,
 }
 
 impl Default for EngineOptions {
@@ -113,6 +177,8 @@ impl Default for EngineOptions {
             hydrate_cloud_files: false,
             max_pixels: auto_crop_codecs::DEFAULT_MAX_PIXELS,
             backup_method: crate::store::MethodPref::Auto,
+            tiff_compression: TiffCompressionSetting::default(),
+            one_bit: false,
         }
     }
 }
@@ -131,6 +197,10 @@ pub struct SourceMeta {
     pub icc: Option<Arc<Vec<u8>>>,
     /// JPEG only: EXIF, XMP, IPTC, comments, density, quality.
     pub jpeg: Option<JpegMeta>,
+    /// The density of a PNG or TIFF source (a JPEG's is in `jpeg`).
+    pub dpi: Option<(u32, u32)>,
+    /// TIFF only: the descriptive tags and whether directories we cannot carry exist.
+    pub tiff: Option<auto_crop_codecs::TiffMeta>,
 }
 
 impl SourceMeta {
@@ -138,7 +208,24 @@ impl SourceMeta {
         let jpeg = (format == Format::Jpeg)
             .then(|| jpeg_meta::read_meta(bytes).ok())
             .flatten();
-        Self { icc, jpeg }
+        let tiff = (format == Format::Tiff)
+            .then(|| auto_crop_codecs::extract_tiff_meta(bytes))
+            .flatten();
+        let dpi = match format {
+            Format::Png => auto_crop_codecs::extract_dpi(bytes, format),
+            _ => tiff.as_ref().and_then(|t| t.dpi),
+        };
+        Self {
+            icc,
+            jpeg,
+            dpi,
+            tiff,
+        }
+    }
+
+    /// The pixel density to write: a JPEG's JFIF density, else the PNG or TIFF source's.
+    pub fn dpi(&self) -> Option<(u32, u32)> {
+        self.jpeg.as_ref().and_then(|m| m.dpi).or(self.dpi)
     }
 
     /// [`SourceMeta::read`], plus the EXIF of a PNG, WebP, HEIC or AVIF source (a JPEG's comes from
@@ -191,7 +278,7 @@ pub struct Encoded {
     pub expect: Expect,
 }
 
-fn view(r: &Raster) -> Result<RasterView<'_>> {
+pub(crate) fn view(r: &Raster) -> Result<RasterView<'_>> {
     RasterView::new(
         r.width,
         r.height,
@@ -217,12 +304,16 @@ pub fn encode_raster(
     meta: &SourceMeta,
     o: &EngineOptions,
 ) -> Result<Encoded> {
+    // 1-bit output exists for TIFF and PDF only, and only for a grey page (`formats_out`).
+    if o.one_bit && !matches!(format, Format::Tiff | Format::Pdf) {
+        return Err(ErrKind::UnsupportedOutput);
+    }
     let icc: Option<Arc<[u8]>> = meta
         .icc
         .as_ref()
         .map(|v| Arc::<[u8]>::from(v.as_slice()))
         .filter(|p| !p.is_empty());
-    let dpi = meta.jpeg.as_ref().and_then(|m| m.dpi);
+    let dpi = meta.dpi();
     let encode_meta = EncodeMeta {
         icc: icc.clone(),
         dpi,
@@ -254,7 +345,11 @@ pub fn encode_raster(
                 .map_err(|_| ErrKind::EncodeFailed)?;
             png_with_exif(raw, meta, o, dims)
         }
-        // The writers that do not exist yet (M2.26, M11): never reached for a replace (the
+        // TIFF, lossless WebP and PDF (M11): their own module decides the metadata and the check.
+        Format::Tiff | Format::Webp | Format::Pdf => {
+            return crate::formats_out::encode_rgb(raster, format, meta, o);
+        }
+        // The writers that do not exist yet (AVIF, JPEG XL): never reached for a replace (the
         // replaceability gate stops these formats) and refused for a copy.
         _ => return Err(ErrKind::UnsupportedOutput),
     };
@@ -267,8 +362,20 @@ pub fn encode_raster(
 /// The EXIF of the source (orientation reset, size rewritten) goes into a PNG as an `eXIf` chunk;
 /// XMP and IPTC have no place in a PNG this writer makes.
 fn png_with_exif(raw: Vec<u8>, meta: &SourceMeta, o: &EngineOptions, dims: (u32, u32)) -> Vec<u8> {
-    let exif = meta
-        .jpeg
+    match patched_exif(meta, o, dims) {
+        Some(e) => png_insert_exif(&raw, &e),
+        None => raw,
+    }
+}
+
+/// The source's EXIF with the Orientation reset, the size rewritten and the location dropped when
+/// the policy says so; `None` when there is none or the policy strips everything.
+pub(crate) fn patched_exif(
+    meta: &SourceMeta,
+    o: &EngineOptions,
+    dims: (u32, u32),
+) -> Option<Vec<u8>> {
+    meta.jpeg
         .as_ref()
         .filter(|_| !o.strip_metadata)
         .and_then(|jm| jm.exif.as_deref())
@@ -280,11 +387,7 @@ fn png_with_exif(raw: Vec<u8>, meta: &SourceMeta, o: &EngineOptions, dims: (u32,
                     strip_location: o.strip_location,
                 },
             )
-        });
-    match exif {
-        Some(e) => png_insert_exif(&raw, &e),
-        None => raw,
-    }
+        })
 }
 
 /// CRC-32 (IEEE) as PNG chunks use it. Bitwise: only ever run over an EXIF blob.
@@ -356,6 +459,9 @@ pub fn encode_enhanced(
     o: &EngineOptions,
 ) -> Result<EncodedPage> {
     use auto_crop_imgproc::enhance::Enhanced;
+    if o.one_bit && !matches!(format, Format::Tiff | Format::Pdf) {
+        return Err(ErrKind::UnsupportedOutput);
+    }
     match page {
         Enhanced::Rgb(r) => Ok(EncodedPage {
             encoded: encode_raster(r, format, meta, o)?,
@@ -366,7 +472,7 @@ pub fn encode_enhanced(
             if meta.icc.as_ref().is_some_and(|p| !p.is_empty()) {
                 notices.push(NOTICE_ICC_DROPPED);
             }
-            let dpi = meta.jpeg.as_ref().and_then(|m| m.dpi);
+            let dpi = meta.dpi();
             let encode_meta = EncodeMeta { icc: None, dpi };
             let cancel = CancelToken::never();
             let view = RasterView::new(
@@ -404,6 +510,12 @@ pub fn encode_enhanced(
                         .encode(&view, &OutputSpec::default(), &encode_meta, &cancel)
                         .map_err(|_| ErrKind::EncodeFailed)?;
                     png_with_exif(raw, meta, o, dims)
+                }
+                Format::Tiff | Format::Webp | Format::Pdf => {
+                    return Ok(EncodedPage {
+                        encoded: crate::formats_out::encode_gray(g, format, meta, o)?,
+                        notices,
+                    });
                 }
                 _ => return Err(ErrKind::UnsupportedOutput),
             };
@@ -518,7 +630,7 @@ mod tests {
         let icc = Arc::new(auto_crop_codecs::fixtures::fake_icc(3000));
         let meta = SourceMeta {
             icc: Some(icc.clone()),
-            jpeg: None,
+            ..SourceMeta::default()
         };
         for format in [Format::Jpeg, Format::Png] {
             let e = encode_raster(&r, format, &meta, &EngineOptions::default()).unwrap();
@@ -560,7 +672,7 @@ mod tests {
     #[test]
     fn formats_with_no_writer_are_refused() {
         let r = gradient(16, 16);
-        for f in [Format::Webp, Format::Tiff] {
+        for f in [Format::Avif, Format::Heic, Format::Jxl] {
             assert_eq!(
                 encode_raster(&r, f, &SourceMeta::default(), &EngineOptions::default()).err(),
                 Some(ErrKind::UnsupportedOutput)

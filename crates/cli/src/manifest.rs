@@ -237,6 +237,12 @@ pub struct Options {
     /// `--enhance` (and the strength) when given: `original` is never written, the field is absent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enhance: Option<String>,
+    /// `--tiff-compression` when given.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tiff_compression: Option<&'static str>,
+    /// `--one-bit`; absent when off.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub one_bit: bool,
 }
 
 /// The options of a `convert` run.
@@ -244,7 +250,7 @@ pub struct Options {
 pub struct ConvertOpts {
     /// `in_place`, `copy` (beside the original) or `output`.
     pub mode: &'static str,
-    /// `jpg` or `png`.
+    /// `jpg`, `png`, `tiff`, `webp` or `pdf`.
     pub to: &'static str,
     /// `srgb` or `preserve`.
     pub colour: &'static str,
@@ -254,6 +260,12 @@ pub struct ConvertOpts {
     pub max_pixels: Option<u64>,
     pub recursive: bool,
     pub jobs: usize,
+    /// `--tiff-compression` when given.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tiff_compression: Option<&'static str>,
+    /// `--one-bit`; absent when off.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub one_bit: bool,
 }
 
 /// The options of the run, by command (`run.command` says which).

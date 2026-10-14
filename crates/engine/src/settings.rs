@@ -3,6 +3,7 @@
 
 //! `settings.toml`: a corrupt or missing file falls back to the defaults (PLAN 2.10).
 
+use crate::output::SaveFormat;
 use crate::paths::AppPaths;
 use auto_crop_core::{SplitPolicy, SplitProfile};
 use serde::{Deserialize, Serialize};
@@ -31,6 +32,10 @@ pub struct Settings {
     /// the editor and the review grid. On by default; it only controls whether a suggestion is SHOWN,
     /// nothing is ever applied by it (B13).
     pub suggest_enhance: bool,
+    /// The format a copy is saved in; `Auto` keeps the source's own when this build can write it.
+    /// A format other than the source's is only ever written as a copy: replacing a file with one
+    /// of another format is the Convert flow.
+    pub save_format: SaveFormat,
 }
 
 impl Default for Settings {
@@ -44,6 +49,7 @@ impl Default for Settings {
             auto_save_splits: false,
             curved_intro_ack: false,
             suggest_enhance: true,
+            save_format: SaveFormat::Auto,
         }
     }
 }
@@ -60,6 +66,7 @@ struct Stored {
     auto_save_splits: bool,
     curved_intro_ack: bool,
     suggest_enhance: bool,
+    save_format: SaveFormat,
 }
 
 impl Default for Stored {
@@ -79,6 +86,7 @@ impl From<Settings> for Stored {
             auto_save_splits: s.auto_save_splits,
             curved_intro_ack: s.curved_intro_ack,
             suggest_enhance: s.suggest_enhance,
+            save_format: s.save_format,
         }
     }
 }
@@ -94,6 +102,7 @@ impl From<Stored> for Settings {
             auto_save_splits: s.auto_save_splits,
             curved_intro_ack: s.curved_intro_ack,
             suggest_enhance: s.suggest_enhance,
+            save_format: s.save_format,
         }
     }
 }
@@ -145,6 +154,7 @@ mod tests {
             auto_save_splits: true,
             curved_intro_ack: true,
             suggest_enhance: false,
+            save_format: SaveFormat::Tiff,
         };
         s.save(&paths).unwrap();
         assert_eq!(Settings::load(&paths), s);
@@ -181,6 +191,8 @@ mod tests {
         assert!(!s.curved_intro_ack);
         // ... and before the enhancement suggestion: shown by default (it only controls whether it is shown).
         assert!(s.suggest_enhance);
+        // ... and before the save format: the source's own.
+        assert_eq!(s.save_format, SaveFormat::Auto);
     }
 
     #[test]

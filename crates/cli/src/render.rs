@@ -55,9 +55,9 @@ fn same_file(a: &Path, b: &Path) -> bool {
 
 /// The format of the output file: `--format`, else the output's own extension when it is a
 /// format this build writes, else the source's.
-fn format_for(args: &RenderArgs, source: Format) -> Format {
+fn format_for(args: &RenderArgs, source: Format, notices: &[&str]) -> Format {
     if args.format != FormatArg::Keep {
-        return out_format(source, args.format);
+        return out_format(source, notices, args.format);
     }
     match args
         .output
@@ -67,7 +67,10 @@ fn format_for(args: &RenderArgs, source: Format) -> Format {
     {
         Some("jpg" | "jpeg") => Format::Jpeg,
         Some("png") => Format::Png,
-        _ => out_format(source, FormatArg::Keep),
+        Some("tif" | "tiff") => Format::Tiff,
+        Some("webp") => Format::Webp,
+        Some("pdf") => Format::Pdf,
+        _ => out_format(source, notices, FormatArg::Keep),
     }
 }
 
@@ -237,7 +240,12 @@ pub fn run(args: RenderArgs, env: &Env) -> u8 {
         );
     }
 
-    let format = format_for(&args, source_format);
+    let source_notices = fs::read(&abs)
+        .ok()
+        .and_then(|b| auto_crop_codecs::probe(&b).ok())
+        .map(|p| p.header_notices())
+        .unwrap_or_default();
+    let format = format_for(&args, source_format, &source_notices);
     let paths = match output_paths(&args.output, quads.len(), format.extension()) {
         Ok(p) => p,
         Err(k) => {

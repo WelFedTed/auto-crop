@@ -86,13 +86,18 @@ pub fn conversion_target(format: Format, frames: u32) -> Option<Format> {
     }
 }
 
-/// What a source is converted to.
+/// What a source is converted to. TIFF is written as 8-bit grey or RGB (LZW unless the options
+/// say otherwise), WebP is lossless (VP8L), PDF holds one page per file: a JPEG page for a colour
+/// picture, a lossless page for a grey one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ConvertTarget {
     #[default]
     Jpg,
     Png,
+    Tiff,
+    Webp,
+    Pdf,
 }
 
 impl ConvertTarget {
@@ -100,6 +105,9 @@ impl ConvertTarget {
         match self {
             ConvertTarget::Jpg => Format::Jpeg,
             ConvertTarget::Png => Format::Png,
+            ConvertTarget::Tiff => Format::Tiff,
+            ConvertTarget::Webp => Format::Webp,
+            ConvertTarget::Pdf => Format::Pdf,
         }
     }
 
@@ -107,8 +115,20 @@ impl ConvertTarget {
         match self {
             ConvertTarget::Jpg => "jpg",
             ConvertTarget::Png => "png",
+            ConvertTarget::Tiff => "tiff",
+            ConvertTarget::Webp => "webp",
+            ConvertTarget::Pdf => "pdf",
         }
     }
+
+    /// Every target, in the order a front end lists them.
+    pub const ALL: [ConvertTarget; 5] = [
+        ConvertTarget::Jpg,
+        ConvertTarget::Png,
+        ConvertTarget::Tiff,
+        ConvertTarget::Webp,
+        ConvertTarget::Pdf,
+    ];
 }
 
 /// Where the converted file goes.

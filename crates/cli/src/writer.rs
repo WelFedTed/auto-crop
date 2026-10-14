@@ -32,13 +32,18 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-/// The format of an output: the source's when this build can write it, else PNG (JPEG for HEIC,
-/// the conversion target of PLAN 3.5), unless the user chose one.
-pub fn out_format(source: Format, want: FormatArg) -> Format {
+/// The format of an output: the source's when this build can write it back as itself (JPEG, PNG,
+/// TIFF, lossless WebP), else PNG (JPEG for HEIC, the conversion target of PLAN 3.5), unless the
+/// user chose one. `notices` are what the source's decode or header reported (`webp.lossy`,
+/// `tiff.low_depth`): a lossy WebP and a 1-bit TIFF give PNG.
+pub fn out_format(source: Format, notices: &[&str], want: FormatArg) -> Format {
     match want {
         FormatArg::Jpg => Format::Jpeg,
         FormatArg::Png => Format::Png,
-        FormatArg::Keep => default_output_format(source),
+        FormatArg::Tiff => Format::Tiff,
+        FormatArg::Webp => Format::Webp,
+        FormatArg::Pdf => Format::Pdf,
+        FormatArg::Keep => default_output_format(source, notices),
     }
 }
 
@@ -50,6 +55,7 @@ pub fn format_name(f: Format) -> &'static str {
         Format::Webp => "webp",
         Format::Heic => "heic",
         Format::Avif => "avif",
+        Format::Pdf => "pdf",
         _ => "other",
     }
 }
@@ -206,6 +212,19 @@ fn verify(t: &Temp, r: &Rendered) -> Result<(), ErrKind> {
     if back.len() != r.bytes.len() || blake3_hex(&back) != blake3_hex(&r.bytes) {
         return Err(ErrKind::VerifyFailed);
     }
+    // A PDF is not decoded by the codecs: its page is read back from the structure this build
+    // wrote (header, every cross-reference offset, the page tree, the stream lengths).
+    if r.format == Format::Pdf {
+        let pages =
+            auto_crop_codecs::encoders::pdf::read_pages(&back).ok_or(ErrKind::VerifyFailed)?;
+        let ok = matches!(pages.as_slice(), [p] if (p.width_px, p.height_px) == (r.width, r.height)
+            && p.to_rgb().is_some());
+        return if ok {
+            Ok(())
+        } else {
+            Err(ErrKind::VerifyFailed)
+        };
+    }
     let d = decode(&back).map_err(|_| ErrKind::VerifyFailed)?;
     if d.format != r.format || (d.raster.width, d.raster.height) != (r.width, r.height) {
         return Err(ErrKind::VerifyFailed);
@@ -320,11 +339,23 @@ mod tests {
 
     #[test]
     fn formats_follow_the_source_unless_chosen() {
-        assert_eq!(out_format(Format::Jpeg, FormatArg::Keep), Format::Jpeg);
-        assert_eq!(out_format(Format::Tiff, FormatArg::Keep), Format::Png);
-        assert_eq!(out_format(Format::Heic, FormatArg::Keep), Format::Jpeg);
-        assert_eq!(out_format(Format::Heic, FormatArg::Png), Format::Png);
-        assert_eq!(out_format(Format::Png, FormatArg::Jpg), Format::Jpeg);
+        assert_eq!(out_format(Format::Jpeg, &[], FormatArg::Keep), Format::Jpeg);
+        assert_eq!(out_format(Format::Tiff, &[], FormatArg::Keep), Format::Tiff);
+        assert_eq!(out_format(Format::Webp, &[], FormatArg::Keep), Format::Webp);
+        assert_eq!(
+            out_format(Format::Webp, &["webp.lossy"], FormatArg::Keep),
+            Format::Png
+        );
+        assert_eq!(
+            out_format(Format::Tiff, &["tiff.low_depth"], FormatArg::Keep),
+            Format::Png
+        );
+        assert_eq!(out_format(Format::Bmp, &[], FormatArg::Keep), Format::Png);
+        assert_eq!(out_format(Format::Heic, &[], FormatArg::Keep), Format::Jpeg);
+        assert_eq!(out_format(Format::Heic, &[], FormatArg::Png), Format::Png);
+        assert_eq!(out_format(Format::Png, &[], FormatArg::Jpg), Format::Jpeg);
+        assert_eq!(out_format(Format::Png, &[], FormatArg::Tiff), Format::Tiff);
+        assert_eq!(out_format(Format::Png, &[], FormatArg::Pdf), Format::Pdf);
     }
 
     #[test]

@@ -15,6 +15,7 @@ pub mod enumerate;
 pub mod error;
 // The only `unsafe` of the crate (Win32 `ReplaceFileW`, `GetDiskFreeSpaceExW`); see the module docs.
 mod ffi;
+mod formats_out;
 pub mod fsplan;
 pub mod fsstate;
 pub mod group;

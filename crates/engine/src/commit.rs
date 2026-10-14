@@ -149,13 +149,19 @@ impl Expect {
             dims: (raster.width, raster.height),
             format,
             icc: icc.map(<[u8]>::to_vec),
-            content: if format == Format::Png {
+            content: if is_lossless(format) {
                 Content::Pixels(pixel_hash(raster))
             } else {
                 Content::Luma(luma_fingerprint(raster))
             },
         }
     }
+}
+
+/// Formats whose writer here is lossless, so the decoded temp must equal the encoder's input
+/// exactly: PNG, TIFF and (lossless) WebP. JPEG and a PDF's JPEG page are checked by luma.
+pub fn is_lossless(format: Format) -> bool {
+    matches!(format, Format::Png | Format::Tiff | Format::Webp)
 }
 
 impl Expect {
@@ -168,7 +174,7 @@ impl Expect {
             dims: (g.width, g.height),
             format,
             icc: None,
-            content: if format == Format::Png {
+            content: if is_lossless(format) {
                 Content::Pixels(gray_pixel_hash(g))
             } else {
                 Content::Luma(luma_fingerprint_gray(g))
@@ -305,6 +311,9 @@ pub fn verify_temp_expect(t: &TempWrite, e: &Expect, mode: VerifyMode) -> Result
 
 /// The decode half of the verification, on bytes whose hash was already matched.
 pub fn verify_bytes(bytes: &[u8], e: &Expect, mode: VerifyMode) -> Result<()> {
+    if e.format == Format::Pdf {
+        return verify_pdf(bytes, e);
+    }
     let limits = limits_for(e.dims);
     let fast = mode == VerifyMode::Fast && e.format == Format::Jpeg;
     let (format, dims, orientation, icc, raster) = if fast {
@@ -335,17 +344,46 @@ pub fn verify_bytes(bytes: &[u8], e: &Expect, mode: VerifyMode) -> Result<()> {
     {
         return Err(ErrKind::VerifyFailed);
     }
+    check_content(&raster, e)
+}
+
+/// The structure check of a one-page PDF this build wrote, and its page decoded again: the same
+/// size and profile as the encoder reported and the same pixels (lossless pages) or luma
+/// (JPEG pages). `codecs::encoders::pdf::read_pages` checks the header, every cross-reference
+/// offset, the page tree and each stream's length.
+fn verify_pdf(bytes: &[u8], e: &Expect) -> Result<()> {
+    let pages = auto_crop_codecs::encoders::pdf::read_pages(bytes).ok_or(ErrKind::VerifyFailed)?;
+    let [page] = pages.as_slice() else {
+        return Err(ErrKind::VerifyFailed);
+    };
+    if (page.width_px, page.height_px) != e.dims {
+        return Err(ErrKind::VerifyFailed);
+    }
+    if let Some(want) = &e.icc
+        && page.icc.as_ref() != Some(want)
+    {
+        return Err(ErrKind::VerifyFailed);
+    }
+    let (w, h, rgb) = page.to_rgb().ok_or(ErrKind::VerifyFailed)?;
+    let raster = Raster::from_raw(w, h, rgb).ok_or(ErrKind::VerifyFailed)?;
+    if (raster.width, raster.height) != e.dims {
+        return Err(ErrKind::VerifyFailed);
+    }
+    check_content(&raster, e)
+}
+
+fn check_content(raster: &Raster, e: &Expect) -> Result<()> {
     match &e.content {
         Content::None => {}
         Content::Pixels(h) => {
-            if pixel_hash(&raster) != *h {
+            if pixel_hash(raster) != *h {
                 return Err(ErrKind::VerifyFailed);
             }
         }
         Content::Luma(want) => {
             // On the grid of the full-size picture, whatever size was decoded.
             let (gx, gy) = grid_of(e.dims);
-            if !luma_close(&luma_fingerprint_grid(&raster, gx, gy), want) {
+            if !luma_close(&luma_fingerprint_grid(raster, gx, gy), want) {
                 return Err(ErrKind::VerifyFailed);
             }
         }

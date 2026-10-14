@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // SPDX-FileCopyrightText: 2026 Auto Crop contributors
 
-//! Formats the engine can open but not write (PLAN 3.2.3): WebP, TIFF and, with the `heif` feature,
-//! AVIF and HEIC. Their sources are never replaced in place (no writer exists), the source stays
-//! byte-identical, and "save as copy" writes a PNG (JPEG for HEIC) beside it.
+//! Formats the engine can open but not write back as themselves (PLAN 3.2.3): 1-bit TIFF, lossy
+//! WebP (this build's WebP writer is lossless) and, with the `heif` feature, AVIF and HEIC. Their
+//! sources are never replaced in place, the source stays byte-identical, and "save as copy" writes
+//! a PNG (JPEG for HEIC) beside it. Single-page 8-bit TIFF and lossless WebP sources have writers
+//! (M11) and are replaced in place after a verified backup, which restore undoes byte for byte.
 
 use auto_crop_codecs::fixtures as fx;
 use auto_crop_core::Pt;
@@ -64,7 +66,13 @@ fn open(e: &Env, name: &str, bytes: &[u8]) -> (OpenSummary, Option<ItemView>) {
 }
 
 /// A source with no writer: replacing is refused, the bytes stay, and a copy is a PNG or JPEG.
-fn check_not_replaceable(e: &Env, name: &str, bytes: &[u8], copy_ext: &str) -> PathBuf {
+fn check_not_replaceable(
+    e: &Env,
+    name: &str,
+    bytes: &[u8],
+    copy_ext: &str,
+    notice: &str,
+) -> PathBuf {
     let (summary, v) = open(e, name, bytes);
     assert_eq!(summary.added, 1, "{name}");
     let v = v.unwrap();
@@ -80,7 +88,7 @@ fn check_not_replaceable(e: &Env, name: &str, bytes: &[u8], copy_ext: &str) -> P
     // One code for "this source is never replaced" on the single-item and the split path, with
     // the reason in the notice.
     assert_eq!(out[0].error, Some(ErrKind::NotReplaceable), "{name}");
-    assert_eq!(out[0].notices, ["format.write_unavailable"], "{name}");
+    assert_eq!(out[0].notices, [notice], "{name}");
     assert_eq!(
         fs::read(&path).unwrap(),
         bytes,
@@ -144,15 +152,77 @@ fn check_not_replaceable(e: &Env, name: &str, bytes: &[u8], copy_ext: &str) -> P
 }
 
 #[test]
-fn webp_and_tiff_sources_open_but_are_never_replaced_and_copy_as_png() {
+fn a_bilevel_tiff_and_a_bmp_open_but_are_never_replaced_and_copy_as_png() {
     let e = env();
-    check_not_replaceable(&e, "scan.webp", &fx::webp_lossless(64, 48), "png");
+    // A 1-bit scan would become a 24-bit file: left alone, a copy is a PNG.
     check_not_replaceable(
         &e,
-        "page.tif",
-        &fx::tiff_rgb8(64, 48, &fx::TiffOpts::default()),
+        "bilevel.tif",
+        &fx::tiff_g4(64, 48),
         "png",
+        "tiff.low_depth",
     );
+    let rgb = fx::pattern(64, 48);
+    check_not_replaceable(
+        &e,
+        "pic.bmp",
+        &fx::bmp_rgb24(64, 48, &rgb, false),
+        "png",
+        "format.write_unavailable",
+    );
+}
+
+#[test]
+fn single_page_tiff_and_lossless_webp_sources_are_replaced_in_place_and_restore_returns_them() {
+    let e = env();
+    let icc = fx::fake_icc(900);
+    for (name, bytes, format) in [
+        (
+            "page.tif",
+            fx::tiff_rgb8(
+                64,
+                48,
+                &fx::TiffOpts {
+                    icc: Some(icc.clone()),
+                    ..fx::TiffOpts::default()
+                },
+            ),
+            auto_crop_codecs::Format::Tiff,
+        ),
+        (
+            "scan.webp",
+            fx::webp_extended(64, 48, None, Some(&icc)),
+            auto_crop_codecs::Format::Webp,
+        ),
+    ] {
+        let (_, v) = open(&e, name, &bytes);
+        let v = v.unwrap();
+        assert_eq!(v.open_only, None, "{name}");
+        let out = e
+            .engine
+            .save_items(&[v.id], SaveTarget::Replace, "replace run", &nop);
+        assert!(out[0].ok, "{name}: {:?}", out[0]);
+        let path = e.dir.join(name);
+        let written = fs::read(&path).unwrap();
+        assert_ne!(written, bytes, "{name}");
+        // Still the same format under the same name, cropped, with the profile byte-exact.
+        let d = auto_crop_codecs::decode(&written).unwrap();
+        assert_eq!(d.format, format, "{name}");
+        assert!(d.raster.width < 64 && d.raster.height < 48, "{name}");
+        assert_eq!(d.icc.as_deref(), Some(&icc[..]), "{name}");
+        assert_eq!(d.exif_orientation, 1, "{name}");
+        assert!(out[0].saved.as_ref().unwrap().backup_id.is_some(), "{name}");
+        // Restore puts the original back byte for byte.
+        let file = e.engine.list_backups().runs[0].files[0].id.clone();
+        let r = e
+            .engine
+            .restore_file(&file, auto_crop_engine::RestoreMode::Auto, &nop);
+        assert!(r.ok, "{name}: {r:?}");
+        assert_eq!(fs::read(&path).unwrap(), bytes, "{name}: restored");
+        // Next file in a clean engine state.
+        e.engine.remove_items(&[v.id]);
+        fs::remove_dir_all(e._root.path().join("backups")).ok();
+    }
 }
 
 #[test]
@@ -178,7 +248,7 @@ fn jpeg_and_png_sources_are_still_replaced_in_place_with_a_backup() {
 fn avif_sources_open_are_never_replaced_and_copy_as_png() {
     let avif = include_bytes!("../../codecs/tests/fixtures/heif/gradient-444-48x32.avif");
     let e = env();
-    let copy = check_not_replaceable(&e, "photo.avif", avif, "png");
+    let copy = check_not_replaceable(&e, "photo.avif", avif, "png", "format.write_unavailable");
     // The picture really is the AVIF's (not a placeholder): smaller than 48x32 and not empty.
     let d = auto_crop_codecs::decode(&fs::read(copy).unwrap()).unwrap();
     assert!(
@@ -195,7 +265,14 @@ fn an_avif_with_an_icc_profile_keeps_it_in_the_png_copy() {
     let avif = include_bytes!("../../codecs/tests/fixtures/heif/icc-srgb-32x24.avif");
     let icc = include_bytes!("../../codecs/tests/fixtures/heif/icc-srgb.icc");
     let e = env();
-    let copy = fs::read(check_not_replaceable(&e, "tagged.avif", avif, "png")).unwrap();
+    let copy = fs::read(check_not_replaceable(
+        &e,
+        "tagged.avif",
+        avif,
+        "png",
+        "format.write_unavailable",
+    ))
+    .unwrap();
     assert_eq!(
         auto_crop_codecs::decode(&copy).unwrap().icc.as_deref(),
         Some(&icc[..]),

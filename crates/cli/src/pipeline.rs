@@ -138,19 +138,17 @@ pub fn prepare(sh: &Shared, idx: usize, cand: &Candidate) -> Prepared {
         rec.backup_id = Some(backup.clone());
         return Prepared::Done(Box::new(rec));
     }
-    if sh.replacing && !(pr.format.is_encodable() && pr.frames <= 1) {
-        // Never replaced (PLAN 2.7): the source stays byte-identical. Say why with the notice
-        // vocabulary the engine uses.
+    // Never replaced (PLAN 2.7): the source stays byte-identical. The one gate the engine uses
+    // says why, with its notice vocabulary; the header already tells a lossy WebP and a 1-bit
+    // TIFF (the rest, 16-bit and transparent sources, is known only after the decode and refused
+    // by the save itself).
+    if sh.replacing
+        && let Some(notice) =
+            auto_crop_engine::fsplan::replace_refusal(pr.format, pr.frames, &pr.header_notices())
+    {
         let mut rec =
             ItemRecord::new(idx, &cand.display, Status::Skipped).with_code(code::NOT_REPLACEABLE);
-        rec.reasons.push(
-            if pr.frames > 1 {
-                "tiff.multi_page"
-            } else {
-                "format.write_unavailable"
-            }
-            .to_owned(),
-        );
+        rec.reasons.push(notice.to_owned());
         return Prepared::Done(Box::new(rec));
     }
     let pixels = u64::from(pr.width) * u64::from(pr.height);

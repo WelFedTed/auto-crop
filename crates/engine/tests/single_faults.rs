@@ -23,14 +23,43 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
+/// A small picture in `fmt`: PNG through the codecs crate, TIFF (LZW) and lossless WebP through
+/// the M11 encoders.
+fn img(fmt: Format, w: u32, h: u32, shade: u8) -> Vec<u8> {
+    match fmt {
+        Format::Png => encode(
+            &Raster::filled(w, h, [shade, 90, 200 - shade]),
+            Format::Png,
+            90,
+            None,
+        )
+        .unwrap(),
+        _ => {
+            use auto_crop_codecs::encoders::{TiffEncoder, WebpEncoder};
+            use auto_crop_core::ports::{EncodeMeta, Encoder, PixelFormat, Samples};
+            let data: Vec<u8> = (0..w * h)
+                .flat_map(|i| [shade.wrapping_add((i % 7) as u8), 90, 200 - shade])
+                .collect();
+            let r = auto_crop_core::ports::Raster::from_samples(
+                w,
+                h,
+                PixelFormat::Rgb8,
+                Samples::U8(data),
+            )
+            .unwrap();
+            let spec = auto_crop_core::OutputSpec::default();
+            let (meta, never) = (EncodeMeta::default(), auto_crop_core::CancelToken::never());
+            match fmt {
+                Format::Tiff => TiffEncoder::default().encode(&r.view(), &spec, &meta, &never),
+                _ => WebpEncoder::default().encode(&r.view(), &spec, &meta, &never),
+            }
+            .unwrap()
+        }
+    }
+}
+
 fn png(w: u32, h: u32, shade: u8) -> Vec<u8> {
-    encode(
-        &Raster::filled(w, h, [shade, 90, 200 - shade]),
-        Format::Png,
-        90,
-        None,
-    )
-    .unwrap()
+    img(Format::Png, w, h, shade)
 }
 
 fn mtime() -> SystemTime {
@@ -44,6 +73,7 @@ enum Which {
 }
 
 struct Fx {
+    fmt: Format,
     _root: tempfile::TempDir,
     dir: PathBuf,
     store: Store,
@@ -59,11 +89,15 @@ struct Fx {
 
 impl Fx {
     fn first() -> Self {
+        Self::first_in(Format::Png)
+    }
+
+    fn first_in(fmt: Format) -> Self {
         let root = tempfile::tempdir().unwrap();
         let dir = root.path().join("photos");
         fs::create_dir_all(&dir).unwrap();
-        let target = dir.join("scan.png");
-        let original = png(40, 30, 7);
+        let target = dir.join(format!("scan.{}", fmt.extension()));
+        let original = img(fmt, 40, 30, 7);
         fs::write(&target, &original).unwrap();
         fs::File::options()
             .write(true)
@@ -72,24 +106,29 @@ impl Fx {
             .set_modified(mtime())
             .unwrap();
         Fx {
+            fmt,
             store: Store::new(root.path().join("backups")),
             _root: root,
             dir,
             target,
             old: original.clone(),
             original,
-            new: png(24, 18, 90),
+            new: img(fmt, 24, 18, 90),
             backup_id: None,
         }
     }
 
     /// A completed first save, then a second edit that replaces its output.
     fn re_save() -> Self {
-        let mut fx = Fx::first();
+        Self::re_save_in(Format::Png)
+    }
+
+    fn re_save_in(fmt: Format) -> Self {
+        let mut fx = Fx::first_in(fmt);
         let saved = fx.commit(&NoFaults).unwrap();
         fx.backup_id = Some(saved.backup_id);
         fx.old = fx.new.clone();
-        fx.new = png(20, 12, 150);
+        fx.new = img(fmt, 20, 12, 150);
         fx
     }
 
@@ -112,7 +151,7 @@ impl Fx {
                 source_blake3: &original_hash,
                 source_size: self.original.len() as u64,
                 source_mtime_ms: unix_ms(mtime()),
-                format_ext: "png",
+                format_ext: self.fmt.extension(),
                 run_id: "run",
                 run_name: "Run",
                 retention_days: Some(30),
@@ -128,15 +167,16 @@ impl Fx {
             verify: VerifyMode::Full,
         };
         let new = self.new.clone();
+        let fmt = self.fmt;
         let mut produce = || -> Result<Output, ErrKind> {
             let d = auto_crop_codecs::probe(&new).unwrap();
             Ok(Output {
                 produced: Produced {
                     bytes: new.clone(),
                     dims: (d.width, d.height),
-                    format: Format::Png,
+                    format: fmt,
                 },
-                expect: Some(Expect::basic((d.width, d.height), Format::Png)),
+                expect: Some(Expect::basic((d.width, d.height), fmt)),
             })
         };
         commit_single(&req, &mut produce, hook)
@@ -236,10 +276,30 @@ impl Fx {
 type Scenario = (&'static str, Box<dyn Fn() -> Fx>);
 
 fn scenarios() -> Vec<Scenario> {
-    vec![
+    let mut v: Vec<Scenario> = vec![
         ("first save", Box::new(Fx::first)),
         ("re-save", Box::new(Fx::re_save)),
-    ]
+    ];
+    // The writers of M11 run the same protocol: every step failed and crashed in turn.
+    for (name, fmt) in [("TIFF", Format::Tiff), ("WebP", Format::Webp)] {
+        v.push((
+            if fmt == Format::Tiff {
+                "TIFF first save"
+            } else {
+                "WebP first save"
+            },
+            Box::new(move || Fx::first_in(fmt)),
+        ));
+        v.push((
+            if name == "TIFF" {
+                "TIFF re-save"
+            } else {
+                "WebP re-save"
+            },
+            Box::new(move || Fx::re_save_in(fmt)),
+        ));
+    }
+    v
 }
 
 #[test]
@@ -700,6 +760,7 @@ fn child_fixture(root: &Path, kind: &str) -> Fx {
         (png(24, 18, 90), png(20, 12, 150), Some(id))
     };
     Fx {
+        fmt: Format::Png,
         // The parent owns the directory; the child's handle must not delete it.
         _root: tempfile::tempdir().unwrap(),
         dir,
@@ -715,7 +776,12 @@ fn child_fixture(root: &Path, kind: &str) -> Fx {
 #[test]
 fn killing_the_process_at_every_step_never_loses_the_original_or_leaves_a_partial_file() {
     let exe = std::env::current_exe().unwrap();
-    for (label, make) in scenarios() {
+    // The child rebuilds a PNG fixture: the process kill covers the protocol, which does not
+    // depend on the format (the in-process rows above run every format).
+    for (label, make) in scenarios()
+        .into_iter()
+        .filter(|(l, _)| matches!(*l, "first save" | "re-save"))
+    {
         let kind = if label == "first save" { "first" } else { "re" };
         let steps: Vec<String> = make()
             .recorded_steps()

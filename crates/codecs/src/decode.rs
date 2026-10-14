@@ -85,6 +85,7 @@ fn probe_of(format: Format, h: &Header) -> Probe {
         scans: h.scans,
         orientation: h.orientation,
         icc_len: h.icc_len,
+        lossy: h.lossy,
     }
 }
 
@@ -284,6 +285,11 @@ pub(crate) fn decode_raw_alpha(
     }
     if format == Format::Tiff && h.bit_depth < 8 {
         notices.push("tiff.low_depth");
+    }
+    if format == Format::Tiff
+        && crate::parse::tiff::read_meta(bytes).is_some_and(|m| m.exif_not_carried)
+    {
+        notices.push("tiff.exif_not_carried");
     }
     let mut flattened = None;
     if colour.has_alpha() && has_translucent_pixels(&img) {

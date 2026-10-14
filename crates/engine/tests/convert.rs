@@ -627,6 +627,7 @@ fn exif_is_carried_with_the_orientation_reset_the_colour_space_set_and_the_locat
                 Format::Png,
                 &auto_crop_codecs::DecodeLimits::default(),
             ),
+            other => unreachable!("{other:?} is not part of this test"),
         }
         .unwrap_or_else(|| panic!("{label}: EXIF carried"));
         assert_eq!(

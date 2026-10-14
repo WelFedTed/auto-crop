@@ -50,6 +50,8 @@ pub fn base_settings(paths: &AppPaths, g: &Global) -> Settings {
         curved_intro_ack: true,
         // A CLI run never shows suggestions (enhancement there is opt-in: `process --enhance`).
         suggest_enhance: false,
+        // A CLI run names its format with --format, never through the GUI's setting.
+        save_format: auto_crop_engine::output::SaveFormat::Auto,
         retention_days: stored.retention_days,
     }
 }

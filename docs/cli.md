@@ -112,9 +112,13 @@ it stops (exit 3) rather than overwrite your edit: `--if-modified copy` restores
 backup entry. A restore is itself reversible for the same reason.
 
 **What is never replaced.** A file is replaced in place only when this build can write its format
-back without losing content: today JPEG and PNG, single frame. A WebP, TIFF (even single page), HEIC,
-HEIF or AVIF source is **skipped** (`NOT_REPLACEABLE`) and stays byte-identical; use `--output`,
-`--suffix` or `--copy` to get a copy (PNG, or JPEG for HEIC). Replacing an original with a file in
+back without losing content: JPEG, PNG, a single-page 8-bit TIFF and a lossless still WebP, single
+frame. A lossy WebP (this build's WebP writer is lossless only), a 1-bit TIFF, a 16-bit or transparent
+source, a TIFF with Exif or GPS directories (the TIFF writer does not carry them), an animated or
+multi-page file, a BMP, HEIC, HEIF or AVIF source is **skipped** (`NOT_REPLACEABLE`, with the reason in
+the notices: `webp.lossy`, `tiff.low_depth`, `tiff.exif_not_carried`, `depth.reduced_to_8`, ...) and
+stays byte-identical; use `--output`, `--suffix` or `--copy` to get a copy (the source's own format when
+it can be written back, PNG otherwise, JPEG for HEIC). Replacing an original with a file in
 another format is a different command, [`convert`](#convert), because there you chose the new format;
 `process --format` still needs a copy mode.
 
@@ -183,8 +187,13 @@ At most one of:
 
 For the three copy modes: `--name-template T` sets the file name (`{name}`, `{n}`, `{ext}`; the extension is
 added if the template has no `{ext}`), `--if-exists keep-both|skip` says what to do when a name is taken
-(default `keep-both`: the stem gets `(2)`), `--format jpg|png|keep` sets the format (default: the source's
-when this build can write it, else PNG, JPEG for HEIC). `--quality small|balanced|best|1-100` sets the JPEG quality in every
+(default `keep-both`: the stem gets `(2)`), `--format jpg|png|tiff|webp|pdf|keep` sets the format (default: the source's
+when this build can write it back as itself, else PNG, JPEG for HEIC). WebP is lossless; a PDF holds one
+page (a JPEG for a colour picture, a lossless page for an enhanced grey one, a CCITT Group 4 page with
+`--one-bit`), sized from the pixel density (300 dpi when the source has none). `--tiff-compression
+none|lzw|deflate|packbits` picks the compression of TIFF output (default `lzw`); `--one-bit` writes an
+enhanced black-and-white page (`--enhance document|receipt`) as 1-bit CCITT Group 4 in a TIFF or PDF and
+refuses every other output (`UNSUPPORTED_OUTPUT`), never writing an 8-bit file silently. `--quality small|balanced|best|1-100` sets the JPEG quality in every
 mode: a preset is taken from the source's own quality (balanced: its estimate plus 5, kept within 80 to 95; small: minus
 10, 60 to 85; best: plus 10, 90 to 97; 90, 80 and 95 when the source has no standard tables), a number is used as given
 (default balanced). `--strip-location` drops GPS, XMP and IPTC metadata from every file written (the colour profile is
@@ -288,16 +297,18 @@ preset never turns it on, and `analyze` only reports what it would suggest. The 
 ### `convert`
 
 ```text
-auto-crop convert --to jpg|png [options] <file|folder|pattern>...
+auto-crop convert --to jpg|png|tiff|webp|pdf [options] <file|folder|pattern>...
 ```
 
-Converts images to JPEG or PNG: HEIC, HEIF and AVIF (a build with the `heif` feature, the HEIC package),
+Converts images to JPEG, PNG, TIFF, WebP (lossless) or PDF (one page per file): HEIC, HEIF and AVIF (a build with the `heif` feature, the HEIC package),
 TIFF, WebP, BMP, PNG and JPEG. No crop, no detection, no enhancement. Options: the [input](#inputs) options
 above, and
 
 | Option | Meaning |
 |---|---|
-| `--to jpg\|png` | The format to convert to. Required. |
+| `--to jpg\|png\|tiff\|webp\|pdf` | The format to convert to. Required. TIFF is 8-bit grey or RGB with the source's profile and density; WebP is lossless (VP8L); PDF holds the picture as a JPEG page. |
+| `--tiff-compression none\|lzw\|deflate\|packbits` | Compression of a TIFF output (default `lzw`). |
+| `--one-bit` | Write enhanced black-and-white pages as 1-bit CCITT Group 4 (TIFF, PDF); see `process`. |
 | `--quality small\|balanced\|best\|1-100` | JPEG quality: a preset taken from the source's own quality when it is a JPEG (default balanced), or a fixed number. PNG is lossless. |
 | `--colour srgb\|preserve` | `srgb` (default) turns the colours of a source with a wide-gamut profile (Display P3 from an iPhone HEIC, Adobe RGB) into sRGB, relative colorimetric, and the file carries an sRGB profile; a profile that already is sRGB is kept byte for byte, and a source with no profile is taken to be sRGB. `preserve` leaves the pixels and the source's profile exactly as they are. A profile that cannot be read is kept with the notice `colour.profile_unusable`. |
 | `--in-place` | Replace each original with the converted file after a verified backup. The default. |
@@ -376,7 +387,7 @@ possibly corner-edited by hand). For the same format and quality the bytes equal
 writes what it is asked to even when `process` would hold the result (it says so on stderr, and `--json` has
 `would_hold`); it refuses only what cannot be done: no crop (exit 3), an output that exists (`--force`
 replaces it), an output that is the source (exit 2). A scan with several items writes `name_01`,
-`name_02`... beside the given name. The format is `--format`, else the output's extension (`.jpg`, `.png`),
+`name_02`... beside the given name. The format is `--format`, else the output's extension (`.jpg`, `.png`, `.tif`, `.webp`, `.pdf`),
 else the source's. Prints the output paths on stdout (or `--json`).
 
 ### `restore`
@@ -478,7 +489,7 @@ breaking change would be version 2 with a different `schema` value or `v`.
   "srgb|preserve", "quality", "strip_location", "reencode", "max_pixels", "recursive", "jobs" }`, every item has
   `crops: 1` for a converted file, `confidence: null` and `split: false`, `reasons` hold the notices
   (`alpha.flattened`, `colour.converted_to_srgb`, `depth.reduced_to_8`, `heic.multi_image`,
-  `livephoto.video_untouched`...), `outputs[0]` is the converted file (`format` `jpeg` or `png`, its pixel
+  `livephoto.video_untouched`...), `outputs[0]` is the converted file (`format` `jpeg`, `png`, `tiff`, `webp` or `pdf`, its pixel
   size) and a `convert` object says `{ "from", "to", "bytes_in", "bytes_out", "icc": "none|srgb|other" }`
   (`icc` is what the output embeds). `backup_id` is set for a replaced original. Added to version 1 with `convert`,
   additively: a `process` manifest only gains `run.command`.

@@ -245,3 +245,131 @@ pub(crate) fn parse(b: &[u8], limits: &DecodeLimits) -> Result<Header, CodecErro
     h.animated = frames > 1;
     Ok(h)
 }
+
+// ---------------------------------------------------------------------------------------------
+// What a TIFF says besides the picture (carried into a TIFF this build writes)
+// ---------------------------------------------------------------------------------------------
+
+/// One IFD0 entry carried verbatim: the same type and count, the value bytes as stored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawTag {
+    pub tag: u16,
+    pub ty: u16,
+    pub count: u32,
+    /// The value bytes in the file's byte order (see [`TiffMeta::big_endian`]).
+    pub data: Vec<u8>,
+}
+
+/// The first directory's resolution and descriptive tags (PLAN 3.6, ROADMAP M11.14, M11.29).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TiffMeta {
+    /// Pixels per inch, from XResolution, YResolution and ResolutionUnit (centimetres converted).
+    pub dpi: Option<(u32, u32)>,
+    /// The carried tags: ImageDescription, Make, Model, DocumentName, DateTime, Artist,
+    /// HostComputer, Copyright (ASCII), XMP (700) and IPTC (33723).
+    pub carried: Vec<RawTag>,
+    pub big_endian: bool,
+    /// The first directory points at an Exif, GPS or sub-image directory, or the file is BigTIFF:
+    /// nothing this build writes carries those, so a replacement would drop them.
+    pub exif_not_carried: bool,
+}
+
+impl TiffMeta {
+    /// The carried tags with their values in little-endian byte order (what the writer emits).
+    pub fn le_tags(&self) -> Vec<RawTag> {
+        self.carried
+            .iter()
+            .map(|t| {
+                let mut t = t.clone();
+                if self.big_endian && t.ty == 4 {
+                    for w in t.data.as_chunks_mut::<4>().0 {
+                        w.reverse();
+                    }
+                }
+                t
+            })
+            .collect()
+    }
+}
+
+/// ASCII tags that describe the file, not the picture.
+pub const TEXT_TAGS: [u16; 8] = [269, 270, 271, 272, 306, 315, 316, 33432];
+pub const TAG_XMP: u16 = 700;
+pub const TAG_IPTC: u16 = 33723;
+/// A carried tag larger than this is left out (not an error).
+const MAX_CARRIED: u64 = 1 << 20;
+
+/// The resolution and descriptive tags of the first directory of the TIFF `b`; `None` when the
+/// header is not a TIFF one or the directory is out of range.
+pub(crate) fn read_meta(b: &[u8]) -> Option<TiffMeta> {
+    let le = match b.get(..2)? {
+        b"II" => true,
+        b"MM" => false,
+        _ => return None,
+    };
+    let t = Tiff { b, le, big: false };
+    let mut m = TiffMeta {
+        big_endian: !le,
+        ..TiffMeta::default()
+    };
+    let first = match t.u16(2)? {
+        42 => u64::from(t.u32(4)?),
+        43 => {
+            m.exif_not_carried = true;
+            return Some(m);
+        }
+        _ => return None,
+    };
+    let at = usize::try_from(first).ok()?;
+    let (count, first_entry) = t.ifd_head(at)?;
+    if count > 4096 {
+        return None;
+    }
+    let (mut xres, mut yres, mut unit) = (None, None, 2u64);
+    let rational = |t: &Tiff<'_>, e: &Entry| -> Option<f64> {
+        if e.ty != 5 || e.count != 1 {
+            return None;
+        }
+        let r = t.data_range(e)?;
+        let (n, d) = (t.u32(r.start)?, t.u32(r.start + 4)?);
+        (d != 0).then(|| f64::from(n) / f64::from(d))
+    };
+    for i in 0..count as usize {
+        let e = t.entry(first_entry, i)?;
+        match e.tag {
+            282 => xres = rational(&t, &e),
+            283 => yres = rational(&t, &e),
+            296 => unit = t.first_uint(&e).unwrap_or(2),
+            34665 | 34853 | 330 => m.exif_not_carried = true,
+            tag if TEXT_TAGS.contains(&tag) || tag == TAG_XMP || tag == TAG_IPTC => {
+                let type_ok = match tag {
+                    TAG_XMP => matches!(e.ty, 1 | 7),
+                    TAG_IPTC => matches!(e.ty, 1 | 4 | 7),
+                    _ => e.ty == 2,
+                };
+                let total = type_size(e.ty).map(|s| s.saturating_mul(e.count));
+                if type_ok
+                    && total.is_some_and(|n| n > 0 && n <= MAX_CARRIED)
+                    && let Some(r) = t.data_range(&e)
+                {
+                    m.carried.push(RawTag {
+                        tag,
+                        ty: e.ty,
+                        count: u32::try_from(e.count).ok()?,
+                        data: b[r].to_vec(),
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    let per_inch = |v: f64| -> Option<u32> {
+        let v = if unit == 3 { v * 2.54 } else { v };
+        (unit == 2 || unit == 3)
+            .then_some(v.round())
+            .filter(|v| (1.0..=100_000.0).contains(v))
+            .map(|v| v as u32)
+    };
+    m.dpi = xres.and_then(per_inch).zip(yres.and_then(per_inch));
+    Some(m)
+}

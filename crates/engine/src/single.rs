@@ -120,22 +120,22 @@ impl Engine {
             let it = lock(&item);
             (it.frames, it.notices.clone())
         };
+        let choice = lock(&self.inner.settings).save_format;
         let (fmt, copy_ext) = if !copy {
             // The one gate (`fsplan::replace_refusal`): the same code and notice as a split
             // scan's refusal; the dispatcher adds the notice.
             if crate::fsplan::replace_refusal(src_format, frames, &decode_notices).is_some() {
                 return Err(ErrKind::NotReplaceable);
             }
-            (src_format, None)
-        } else if src_format.is_encodable() {
+            // Another format is a conversion (a different file name): written as a copy, or with
+            // the Convert flow, never swapped in under the source's name.
+            if choice.format().is_some_and(|f| f != src_format) {
+                return Err(ErrKind::UnsupportedOutput);
+            }
             (src_format, None)
         } else {
-            let out = if src_format == Format::Heic {
-                Format::Jpeg
-            } else {
-                Format::Png
-            };
-            (out, Some(out.extension()))
+            let out = crate::output::copy_format(src_format, &decode_notices, choice);
+            (out, (out != src_format).then(|| out.extension()))
         };
 
         // File state, before anything is read for the save or written.

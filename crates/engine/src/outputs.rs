@@ -31,21 +31,17 @@ pub struct RenderedOutput {
     pub notices: Vec<String>,
 }
 
-/// The format of the outputs of a source in `source`: the source's own when this build can write
-/// it, JPEG for HEIC (the conversion target of PLAN 3.5), PNG for everything else.
-pub fn default_output_format(source: Format) -> Format {
-    if source.is_encodable() {
-        source
-    } else if source == Format::Heic {
-        Format::Jpeg
-    } else {
-        Format::Png
-    }
+/// The format of the outputs of a source in `source` whose decode reported `notices`: the source's
+/// own when this build can write it back as itself (JPEG, PNG, TIFF, lossless WebP), JPEG for HEIC
+/// (the conversion target of PLAN 3.5), PNG for everything else (a lossy WebP, a 1-bit TIFF, AVIF,
+/// BMP, GIF).
+pub fn default_output_format(source: Format, notices: &[&str]) -> Format {
+    crate::output::copy_format(source, notices, crate::output::SaveFormat::Auto)
 }
 
 /// Renders one output per quad of `source` (the bytes of the file). `want` picks the format
-/// (`None`: [`default_output_format`]); only JPEG and PNG can be written. A panic in a codec is an
-/// error, not an unwind.
+/// (`None`: [`default_output_format`]); JPEG, PNG, TIFF, lossless WebP and PDF can be written. A
+/// panic in a codec is an error, not an unwind.
 pub fn render_outputs(
     source: &[u8],
     quads: &[QuadWarp],
@@ -104,7 +100,7 @@ fn render_inner(
         }
     }
     let decoded = decode_with(source, &opts.limits()).map_err(codec_err)?;
-    let fmt = want.unwrap_or_else(|| default_output_format(decoded.format));
+    let fmt = want.unwrap_or_else(|| default_output_format(decoded.format, &decoded.notices));
     if !fmt.is_encodable() {
         return Err(ErrKind::UnsupportedOutput);
     }
@@ -177,7 +173,7 @@ mod tests {
             ErrKind::NoCrop
         );
         assert_eq!(
-            render_outputs(&src, &[quad()], Some(Format::Webp), &o).unwrap_err(),
+            render_outputs(&src, &[quad()], Some(Format::Avif), &o).unwrap_err(),
             ErrKind::UnsupportedOutput
         );
         assert!(render_outputs(b"not an image", &[quad()], None, &o).is_err());
@@ -185,8 +181,18 @@ mod tests {
 
     #[test]
     fn the_default_format_follows_the_source() {
-        assert_eq!(default_output_format(Format::Jpeg), Format::Jpeg);
-        assert_eq!(default_output_format(Format::Heic), Format::Jpeg);
-        assert_eq!(default_output_format(Format::Tiff), Format::Png);
+        assert_eq!(default_output_format(Format::Jpeg, &[]), Format::Jpeg);
+        assert_eq!(default_output_format(Format::Heic, &[]), Format::Jpeg);
+        assert_eq!(default_output_format(Format::Tiff, &[]), Format::Tiff);
+        assert_eq!(default_output_format(Format::Webp, &[]), Format::Webp);
+        assert_eq!(
+            default_output_format(Format::Webp, &["webp.lossy"]),
+            Format::Png
+        );
+        assert_eq!(
+            default_output_format(Format::Tiff, &["tiff.low_depth"]),
+            Format::Png
+        );
+        assert_eq!(default_output_format(Format::Bmp, &[]), Format::Png);
     }
 }
