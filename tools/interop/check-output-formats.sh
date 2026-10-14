@@ -92,7 +92,6 @@ if need tiffinfo; then
   echo "$out" | grep -q "Photometric Interpretation: min-is-white" && ok "libtiff says min-is-white" || bad "libtiff photometric"
   echo "$out" | grep -q "Resolution: 600, 600 pixels/inch" && ok "libtiff says 600 dpi" || bad "libtiff resolution"
 fi
-if have tiffcmp && have tiff2png; then :; fi
 
 if need dwebp; then
   for f in webp_rgb webp_gray; do

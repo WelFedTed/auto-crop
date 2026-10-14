@@ -269,6 +269,9 @@ pub struct TiffMeta {
     /// HostComputer, Copyright (ASCII), XMP (700) and IPTC (33723).
     pub carried: Vec<RawTag>,
     pub big_endian: bool,
+    /// The Compression tag of the first directory (1 none, 5 LZW, 8 or 32946 Deflate, 32773 PackBits,
+    /// 4 Group 4, ...); 0 when absent.
+    pub compression: u16,
     /// The first directory points at an Exif, GPS or sub-image directory, or the file is BigTIFF:
     /// nothing this build writes carries those, so a replacement would drop them.
     pub exif_not_carried: bool,
@@ -337,6 +340,7 @@ pub(crate) fn read_meta(b: &[u8]) -> Option<TiffMeta> {
     for i in 0..count as usize {
         let e = t.entry(first_entry, i)?;
         match e.tag {
+            259 => m.compression = t.first_uint(&e).unwrap_or(0).min(65535) as u16,
             282 => xres = rational(&t, &e),
             283 => yres = rational(&t, &e),
             296 => unit = t.first_uint(&e).unwrap_or(2),

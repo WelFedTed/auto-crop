@@ -191,7 +191,7 @@ added if the template has no `{ext}`), `--if-exists keep-both|skip` says what to
 when this build can write it back as itself, else PNG, JPEG for HEIC). WebP is lossless; a PDF holds one
 page (a JPEG for a colour picture, a lossless page for an enhanced grey one, a CCITT Group 4 page with
 `--one-bit`), sized from the pixel density (300 dpi when the source has none). `--tiff-compression
-none|lzw|deflate|packbits` picks the compression of TIFF output (default `lzw`); `--one-bit` writes an
+none|lzw|deflate|packbits` picks the compression of TIFF output (default: the source TIFF's own, else `lzw`); `--one-bit` writes an
 enhanced black-and-white page (`--enhance document|receipt`) as 1-bit CCITT Group 4 in a TIFF or PDF and
 refuses every other output (`UNSUPPORTED_OUTPUT`), never writing an 8-bit file silently. `--quality small|balanced|best|1-100` sets the JPEG quality in every
 mode: a preset is taken from the source's own quality (balanced: its estimate plus 5, kept within 80 to 95; small: minus
@@ -307,7 +307,7 @@ above, and
 | Option | Meaning |
 |---|---|
 | `--to jpg\|png\|tiff\|webp\|pdf` | The format to convert to. Required. TIFF is 8-bit grey or RGB with the source's profile and density; WebP is lossless (VP8L); PDF holds the picture as a JPEG page. |
-| `--tiff-compression none\|lzw\|deflate\|packbits` | Compression of a TIFF output (default `lzw`). |
+| `--tiff-compression none\|lzw\|deflate\|packbits` | Compression of a TIFF output (default: the source TIFF's own, else `lzw`). |
 | `--one-bit` | Write enhanced black-and-white pages as 1-bit CCITT Group 4 (TIFF, PDF); see `process`. |
 | `--quality small\|balanced\|best\|1-100` | JPEG quality: a preset taken from the source's own quality when it is a JPEG (default balanced), or a fixed number. PNG is lossless. |
 | `--colour srgb\|preserve` | `srgb` (default) turns the colours of a source with a wide-gamut profile (Display P3 from an iPhone HEIC, Adobe RGB) into sRGB, relative colorimetric, and the file carries an sRGB profile; a profile that already is sRGB is kept byte for byte, and a source with no profile is taken to be sRGB. `preserve` leaves the pixels and the source's profile exactly as they are. A profile that cannot be read is kept with the notice `colour.profile_unusable`. |

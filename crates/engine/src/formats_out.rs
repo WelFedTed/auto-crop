@@ -78,9 +78,23 @@ fn carried_tags(meta: &SourceMeta, o: &EngineOptions) -> Vec<RawTag> {
         .collect()
 }
 
+/// The compression of the TIFF this save writes: the chosen one, else the source TIFF's own class
+/// (PLAN 3.2.3: "same compression class"), else LZW.
+fn tiff_compression(meta: &SourceMeta, o: &EngineOptions) -> TiffCompression {
+    if let Some(c) = o.tiff_compression {
+        return c.into();
+    }
+    match meta.tiff.as_ref().map(|t| t.compression) {
+        Some(1) => TiffCompression::None,
+        Some(8 | 32946) => TiffCompression::Deflate,
+        Some(32773) => TiffCompression::PackBits,
+        _ => TiffCompression::Lzw,
+    }
+}
+
 fn tiff_encoder(meta: &SourceMeta, o: &EngineOptions) -> TiffEncoder {
     TiffEncoder {
-        compression: o.tiff_compression.into(),
+        compression: tiff_compression(meta, o),
         extra: carried_tags(meta, o),
         ..TiffEncoder::default()
     }

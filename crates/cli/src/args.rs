@@ -237,7 +237,7 @@ pub fn process_flags() -> Vec<Flag> {
             "tiff-compression",
             None,
             "none|lzw|deflate|packbits",
-            "Compression of TIFF files this run writes (default lzw); 1-bit output is always CCITT Group 4",
+            "Compression of TIFF files this run writes (default: the source TIFF's own, else lzw); 1-bit output is always CCITT Group 4",
         ),
         sw(
             "one-bit",
@@ -356,7 +356,7 @@ pub fn convert_flags() -> Vec<Flag> {
             "tiff-compression",
             None,
             "none|lzw|deflate|packbits",
-            "Compression of TIFF files this run writes (default lzw); 1-bit output is always CCITT Group 4",
+            "Compression of TIFF files this run writes (default: the source TIFF's own, else lzw); 1-bit output is always CCITT Group 4",
         ),
         sw(
             "one-bit",
@@ -452,7 +452,7 @@ pub fn render_flags() -> Vec<Flag> {
             "tiff-compression",
             None,
             "none|lzw|deflate|packbits",
-            "Compression of TIFF files this run writes (default lzw); 1-bit output is always CCITT Group 4",
+            "Compression of TIFF files this run writes (default: the source TIFF's own, else lzw); 1-bit output is always CCITT Group 4",
         ),
         sw(
             "one-bit",
@@ -919,7 +919,7 @@ impl Knobs {
             o.max_pixels = m;
         }
         if let Some(c) = self.tiff_compression {
-            o.tiff_compression = c;
+            o.tiff_compression = Some(c);
         }
         o.one_bit = self.one_bit;
         o

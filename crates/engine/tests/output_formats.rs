@@ -343,12 +343,68 @@ fn every_compression_setting_verifies() {
     let r = decode(&png_rgb(48, 32)).unwrap().raster;
     for c in [C::None, C::Lzw, C::Deflate, C::PackBits] {
         let o = EngineOptions {
-            tiff_compression: c,
+            tiff_compression: Some(c),
             ..EngineOptions::default()
         };
         let enc = encode_raster(&r, Format::Tiff, &SourceMeta::default(), &o).unwrap();
         verify_bytes(&enc.bytes, &enc.expect, VerifyMode::Full).unwrap();
     }
+}
+
+#[test]
+fn a_tiff_keeps_its_own_compression_unless_one_is_chosen() {
+    use auto_crop_codecs::TiffMeta;
+    use auto_crop_codecs::encoders::TiffCompression as C;
+    let r = decode(&png_rgb(48, 32)).unwrap().raster;
+    let tag = |b: &[u8]| -> u16 {
+        extract_tiff_meta(b)
+            .map(|m: TiffMeta| m.compression)
+            .unwrap()
+    };
+    let enc_meta = EncodeMeta::default();
+    let spec = OutputSpec::default();
+    let core = core_raster(48, 32);
+    for (c, want) in [
+        (C::None, 1u16),
+        (C::Lzw, 5),
+        (C::Deflate, 8),
+        (C::PackBits, 32773),
+    ] {
+        let src = TiffEncoder {
+            compression: c,
+            ..TiffEncoder::default()
+        }
+        .encode(&core.view(), &spec, &enc_meta, &CancelToken::never())
+        .unwrap();
+        assert_eq!(tag(&src), want);
+        let meta = SourceMeta::read(Format::Tiff, &src, None);
+        let out = encode_raster(&r, Format::Tiff, &meta, &EngineOptions::default()).unwrap();
+        assert_eq!(tag(&out.bytes), want, "{c:?}: the source's class is kept");
+    }
+    // Chosen explicitly: wins over the source's. A source that is not a TIFF gets LZW.
+    let src = TiffEncoder {
+        compression: C::None,
+        ..TiffEncoder::default()
+    }
+    .encode(&core.view(), &spec, &enc_meta, &CancelToken::never())
+    .unwrap();
+    let meta = SourceMeta::read(Format::Tiff, &src, None);
+    let o = EngineOptions {
+        tiff_compression: Some(auto_crop_engine::output::TiffCompressionSetting::Deflate),
+        ..EngineOptions::default()
+    };
+    assert_eq!(
+        tag(&encode_raster(&r, Format::Tiff, &meta, &o).unwrap().bytes),
+        8
+    );
+    let plain = encode_raster(
+        &r,
+        Format::Tiff,
+        &SourceMeta::default(),
+        &EngineOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(tag(&plain.bytes), 5);
 }
 
 // ------------------------------------------------------------------ PDF verification

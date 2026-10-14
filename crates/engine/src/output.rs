@@ -159,8 +159,9 @@ pub struct EngineOptions {
     pub max_pixels: u64,
     /// Which backup methods may be tried (reflink, hardlink, copy).
     pub backup_method: crate::store::MethodPref,
-    /// The compression of a TIFF this save writes (1-bit pages are always Group 4).
-    pub tiff_compression: TiffCompressionSetting,
+    /// The compression of a TIFF this save writes; `None` keeps the source TIFF's own (none, LZW,
+    /// Deflate, PackBits) and is LZW for any other source. 1-bit pages are always Group 4.
+    pub tiff_compression: Option<TiffCompressionSetting>,
     /// Write an enhanced grey page as 1 bit: CCITT Group 4 in a TIFF or a PDF, thresholded at
     /// 128 with no dithering. Any other output is `UnsupportedOutput`, never a silent 8-bit file.
     pub one_bit: bool,
@@ -177,7 +178,7 @@ impl Default for EngineOptions {
             hydrate_cloud_files: false,
             max_pixels: auto_crop_codecs::DEFAULT_MAX_PIXELS,
             backup_method: crate::store::MethodPref::Auto,
-            tiff_compression: TiffCompressionSetting::default(),
+            tiff_compression: None,
             one_bit: false,
         }
     }
