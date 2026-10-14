@@ -12,8 +12,11 @@
 # a bundled WebKitGTK is tied to the graphics stack it was built against, which is the main way
 # AppImages of WebKit apps fail on other distributions. Not done here.
 #
-# Tool: appimagetool (MIT, https://github.com/AppImage/appimagetool), pinned release and SHA-256.
-# It is a build tool only; the output contains its type 2 runtime (MIT).
+# Tools, both MIT, both pinned by release and SHA-256 (appimagetool would otherwise fetch the moving
+# "continuous" runtime by itself):
+#   appimagetool  https://github.com/AppImage/appimagetool   the builder; a build tool only
+#   type2-runtime https://github.com/AppImage/type2-runtime  the small program at the head of the
+#                                                            AppImage that mounts it; it IS in the output
 #
 # Usage: make-appimage.sh <package-tree> <out.AppImage> <tools-dir>
 set -euo pipefail
@@ -24,14 +27,20 @@ app_id=io.github.welfedted.AutoCrop
 
 APPIMAGETOOL_VERSION=1.9.1
 APPIMAGETOOL_SHA256=ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
-url="https://github.com/AppImage/appimagetool/releases/download/$APPIMAGETOOL_VERSION/appimagetool-x86_64.AppImage"
+RUNTIME_VERSION=20251108
+RUNTIME_SHA256=2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
 
 mkdir -p "$tools"
+fetch() { # url file sha256
+  if [ ! -f "$2" ]; then
+    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 -o "$2" "$1"
+  fi
+  echo "$3  $2" | sha256sum -c -
+}
 tool="$tools/appimagetool-x86_64.AppImage"
-if [ ! -f "$tool" ]; then
-  curl --proto '=https' --tlsv1.2 -fsSL --retry 3 -o "$tool" "$url"
-fi
-echo "$APPIMAGETOOL_SHA256  $tool" | sha256sum -c -
+runtime="$tools/runtime-x86_64"
+fetch "https://github.com/AppImage/appimagetool/releases/download/$APPIMAGETOOL_VERSION/appimagetool-x86_64.AppImage" "$tool" "$APPIMAGETOOL_SHA256"
+fetch "https://github.com/AppImage/type2-runtime/releases/download/$RUNTIME_VERSION/runtime-x86_64" "$runtime" "$RUNTIME_SHA256"
 chmod +x "$tool"
 
 appdir="$tools/AppDir"
@@ -61,6 +70,6 @@ chmod +x "$appdir/AppRun"
 
 # The tool is itself an AppImage: run it without FUSE. --no-appstream: there is no AppStream file yet.
 rm -f "$out"
-ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 "$tool" --no-appstream "$appdir" "$out"
+ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 "$tool" --no-appstream --runtime-file "$runtime" "$appdir" "$out"
 chmod +x "$out"
 ls -l "$out"

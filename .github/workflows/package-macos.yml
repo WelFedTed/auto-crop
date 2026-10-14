@@ -19,6 +19,12 @@ name: Package macOS
 
 on:
   workflow_dispatch:
+    inputs:
+      arch:
+        description: "Which build: all, arm64 (Apple silicon) or x86_64 (Intel, best-effort)"
+        type: choice
+        options: [all, arm64, x86_64]
+        default: all
 
 permissions:
   contents: read
@@ -29,8 +35,31 @@ env:
   MACOSX_DEPLOYMENT_TARGET: "12.0"
 
 jobs:
+  plan:
+    name: choose the builds
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - id: m
+        env:
+          ARCH: ${{ inputs.arch }}
+        run: |
+          set -euo pipefail
+          # Intel needs NASM (dav1d and libjpeg-turbo assembly); the arm64 build does not.
+          all='[
+            {"os":"macos-latest","arch":"arm64","best-effort":false,"brew":"meson ninja","arch_note":"Apple silicon Macs (M1 and later)"},
+            {"os":"macos-26-intel","arch":"x86_64","best-effort":true,"brew":"meson ninja nasm","arch_note":"Intel Macs; this build is best-effort and even less tested than the Apple silicon one"}
+          ]'
+          matrix=$(jq -c --arg a "${ARCH:-all}" '{include: [.[] | select($a == "all" or .arch == $a)]}' <<<"$all")
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "$matrix"
+
   package:
     name: ${{ matrix.os }} ${{ matrix.arch }} with heif${{ matrix.best-effort && ' (best-effort)' || '' }}
+    needs: plan
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.best-effort }}
     timeout-minutes: 150
@@ -38,11 +67,7 @@ jobs:
       contents: read
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - { os: macos-latest, arch: arm64, best-effort: false, brew: "meson ninja", arch_note: "Apple silicon Macs (M1 and later)" }
-          # Intel needs NASM (dav1d and libjpeg-turbo assembly); the arm64 build does not.
-          - { os: macos-26-intel, arch: x86_64, best-effort: true, brew: "meson ninja nasm", arch_note: "Intel Macs; this build is best-effort and even less tested than the Apple silicon one" }
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -57,9 +82,13 @@ jobs:
         with:
           node-version: "22"
       - name: Install cargo-about
+        if: matrix.arch == 'arm64'
         uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: cargo-about
+      - name: Install cargo-about from source (no prebuilt binary for Intel macOS)
+        if: matrix.arch == 'x86_64'
+        run: cargo install cargo-about --version 0.9.2 --locked --features cli
       - name: Toolchain report
         run: |
           uname -m; sw_vers
