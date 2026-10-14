@@ -919,6 +919,40 @@ export const S = {
     legendSuggested: 'Suggested outline',
     legendCurrent: 'Current outline',
   },
+  // Trim to content: a picture inside a border of the page's own colour (a print on a wide white mat) has two outlines.
+  // The detector keeps the paper edge (B14) and holds it; the engine proposes the picture, the person previews and applies
+  // it as one undo step (docs/perf/detector-baseline.md, "The matted-print question").
+  trim: {
+    button: 'Trim to content',
+    buttonHint: 'Crops to the picture inside the border. You see it first; nothing changes until you press Apply.',
+    /** The undo step an applied trim makes (the engine's `TRIM_LABEL`, pinned by a test). */
+    label: 'Trim to content',
+    none: 'No picture inside to trim to',
+    /** In the hold message of DETECTORS_DISAGREE, when a picture sits inside the border. */
+    holdQuestion: 'A picture sits inside a border. Keep the whole page, or Trim to content?',
+    keepPage: 'Keep the whole page',
+    keepPageHint: 'Accepts the outline of the whole page as it is.',
+    kept: 'Keeping the whole page.',
+    panelLabel: 'Trim to content',
+    ready: 'The dashed outline is the picture inside the border. Apply it to crop to the picture, or cancel.',
+    why: {
+      mat: 'A wide border surrounds the picture.',
+      thinBorder: 'A thin border (the white edge of a print) surrounds the picture.',
+    },
+    apply: 'Apply',
+    applyHint: 'Crops to the dashed outline as one step. Undo takes it back.',
+    cancel: 'Cancel',
+    cancelHint: 'Keeps the outline as it is. (Esc)',
+    legendProposed: 'Picture inside the border',
+    legendCurrent: 'Current outline',
+    applied: 'Trimmed to the picture. Undo takes it back.',
+    cancelled: 'Trim cancelled. The outline was not changed.',
+    stale: 'The trim was dropped because the page changed.',
+    failed: 'Could not trim this page. Nothing was changed.',
+    curved: 'Trim to content works on straight pages. Go back to straight edges first.',
+    available: 'A picture sits inside the border: Trim to content is available.',
+    previewAlt: 'The page trimmed to the picture',
+  },
   // Enhancement (PLAN 5, B13): suggested, never forced. The words say what each look does and where it falls short.
   enhance: {
     heading: 'Enhance',

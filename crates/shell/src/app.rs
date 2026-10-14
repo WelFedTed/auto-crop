@@ -3,6 +3,7 @@
 
 //! The Tauri side: commands, the `acimg` scheme, pickers and drag-and-drop.
 
+use auto_crop_engine::TrimProposal;
 use auto_crop_engine::convert::ConvertOptions;
 use auto_crop_engine::convert_batch::{
     ConvertAdded, ConvertFileView, ConvertPreview, ConvertProgress, ConvertSummary,
@@ -11,7 +12,7 @@ use auto_crop_engine::curved::CurveSuggestion;
 use auto_crop_engine::{
     AppPaths, CurveWarp, Cut, DerivedAction, Edit, Engine, EnhanceBatch, EnhanceMode,
     EnhanceSuggestion, ErrKind, ItemView, Notify, OpenSummary, Pt, RestoreMode, RestoreOutcome,
-    RevertTo, SaveOutcome, SaveTarget, SessionStep, Settings, SplitPatch, Superseded,
+    RevertTo, SaveOutcome, SaveTarget, SessionStep, Settings, SplitPatch, Superseded, TrimProposal,
 };
 use serde::Serialize;
 use std::path::PathBuf;
@@ -253,6 +254,32 @@ async fn suggest_curves(
 ) -> Cmd<Option<CurveSuggestion>> {
     let engine = shared.engine.clone();
     blocking(move || engine.suggest_curves(id, crop)).await?
+}
+
+// ---------------------------------------------------------------- trim to content (ids only)
+
+/// The engine's PROPOSAL of the picture inside the page of one crop (`Engine::trim_to_content`): a print
+/// on a wide white mat has two outlines, and the detector keeps the paper edge. It records and applies
+/// nothing; `None` when there is no picture inside to trim to (and while the image is not ready). A curved
+/// crop answers `ITEM_OP`. It takes a few milliseconds to a few tens of one thread, so it runs on the
+/// blocking pool, never on the main thread.
+#[tauri::command]
+async fn trim_to_content(
+    shared: State<'_, Shared>,
+    id: u32,
+    crop: u32,
+) -> Cmd<Option<TrimProposal>> {
+    let engine = shared.engine.clone();
+    blocking(move || engine.trim_to_content(id, crop)).await?
+}
+
+/// Applies the trim of one crop as ONE undo step ("Trim to content"). The engine recomputes the
+/// proposal on the crop as it is now (no number from the webview is trusted) and refuses with
+/// `ITEM_OP` when there is nothing to trim to, the crop is curved or it changed meanwhile.
+#[tauri::command]
+async fn apply_trim(shared: State<'_, Shared>, id: u32, crop: u32) -> Cmd<ItemView> {
+    let engine = shared.engine.clone();
+    blocking(move || engine.apply_trim(id, crop)).await?
 }
 
 // ---------------------------------------------------------------- enhancement (ids and numbers only)
@@ -893,6 +920,8 @@ pub fn run() {
             suggest_enhance,
             enhance_suggested,
             suggest_curves,
+            trim_to_content,
+            apply_trim,
             clear_curves,
             add_crop,
             remove_crop,

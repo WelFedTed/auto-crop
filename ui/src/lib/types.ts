@@ -56,6 +56,22 @@ export interface CurveSuggestion {
   fellBack: boolean;
 }
 
+/** Why the engine proposes a trim: a wide border (`mat`) or a print's thin white edge (`thinBorder`). Mirrors `TrimWhy`. */
+export type TrimWhy = 'mat' | 'thinBorder';
+
+/**
+ * The engine's PROPOSAL of the picture inside a border of the page's own colour (`Engine::trim_to_content`; a print on a
+ * wide white mat has two outlines and the detector keeps the paper edge). Asking records and applies nothing: the UI draws
+ * `quad` as a dashed outline and, on the person's click, calls `applyTrim` (the engine recomputes it; no number comes back).
+ */
+export interface TrimProposal {
+  /** TL, TR, BR, BL of the picture, normalised, in the same space as the crop's quad. */
+  quad: [Pt, Pt, Pt, Pt];
+  /** 0.5 to 0.95, uncalibrated (edge agreement, fill and contrast). The UI shows no number. */
+  confidence: number;
+  reason: TrimWhy;
+}
+
 /** The looks enhancement offers (docs/dev/enhance-engine.md). `original` touches nothing. */
 export type EnhanceMode = 'original' | 'clean' | 'document' | 'receipt';
 
@@ -635,6 +651,20 @@ export interface Api {
    * image is not ready. Applying is `setCurves` with the suggestion's `curves`.
    */
   suggestCurves(id: number, crop: number): Promise<CurveSuggestion | null>;
+
+  // ---- trim to content: the picture inside a border (docs/perf/detector-baseline.md, "The matted-print question"). ----
+  /**
+   * The engine's proposal of the picture inside the page of a crop (a few ms to a few tens on a worker). Records and
+   * applies nothing; `null` when there is nothing to trim to or the image is not ready. A curved crop rejects with
+   * `ITEM_OP`.
+   */
+  trimToContent(id: number, crop: number): Promise<TrimProposal | null>;
+  /**
+   * Applies the trim of the crop as ONE undo step labelled "Trim to content" (the crop becomes an edited one). The engine
+   * recomputes the proposal on the crop as it is now; `ITEM_OP` when there is nothing to trim to, the crop is curved or
+   * it changed meanwhile.
+   */
+  applyTrim(id: number, crop: number): Promise<ItemView>;
 
   // ---- enhancement (docs/dev/enhance-engine.md). Suggested, never forced (B13). Each edit is ONE undo step. ----
   /**

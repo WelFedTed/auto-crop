@@ -8,6 +8,7 @@
 import { arcAt, arcOf, coonsBlend, cornersOf, flatSize, type Scale } from './curve.ts';
 import { CURVED_H, CURVED_W, PAGE_H, PAGE_W, PAGE_X, PAGE_Y, BULGE, SAG, curvedPageCoords, receiptInk } from './curved-model.ts';
 import { applyH, solveHomography, type H, type Pt as PxPt } from './homography.ts';
+import { MATTED_H, MATTED_PAPER, MATTED_PICTURE_SHARE, MATTED_W, landscape } from './matted-model.ts';
 import { insetQuad, type Quad } from './quad.ts';
 import { mulberry32 } from './rng.ts';
 import type { CurveSet, Edit, Side } from './types.ts';
@@ -448,6 +449,53 @@ export function drawCurvedScene(): HTMLCanvasElement {
       d[i] = Math.min(255, Math.max(0, col[0] + n));
       d[i + 1] = Math.min(255, Math.max(0, col[1] + n));
       d[i + 2] = Math.min(255, Math.max(0, col[2] + n));
+      d[i + 3] = 255;
+    }
+  }
+  g.putImageData(img, 0, 0);
+  return c;
+}
+
+/** The matted sample picture (see matted-model.ts): a print on a wide white mat on a desk, 2x2 supersampled. */
+export function drawMattedScene(): HTMLCanvasElement {
+  const c = makeCanvas(MATTED_W, MATTED_H);
+  const g = c.getContext('2d', { willReadFrequently: true })!;
+  const img = g.createImageData(MATTED_W, MATTED_H);
+  const d = img.data;
+  const rnd = mulberry32(31);
+  const toPage = solveHomography(
+    MATTED_PAPER.map((p) => ({ x: p.x * MATTED_W, y: p.y * MATTED_H })),
+    [
+      { x: 0, y: 0 },
+      { x: 1, y: 0 },
+      { x: 1, y: 1 },
+      { x: 0, y: 1 },
+    ],
+  );
+  const { l, t, r, b } = MATTED_PICTURE_SHARE;
+  const desk = [118, 98, 80];
+  const mat = [248, 246, 240];
+  for (let y = 0; y < MATTED_H; y++) {
+    for (let x = 0; x < MATTED_W; x++) {
+      const n = (rnd() - 0.5) * 6;
+      const acc = [0, 0, 0];
+      for (const [dx, dy] of [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]]) {
+        const p = applyH(toPage, { x: x + dx, y: y + dy });
+        let col: number[];
+        if (p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) col = desk;
+        else if (p.x >= l && p.x < r && p.y >= t && p.y < b) col = landscape((p.x - l) / (r - l), (p.y - t) / (b - t));
+        else {
+          const shade = 1 - 0.05 * p.x;
+          col = mat.map((v) => v * shade);
+        }
+        acc[0] += col[0] * 0.25;
+        acc[1] += col[1] * 0.25;
+        acc[2] += col[2] * 0.25;
+      }
+      const i = (y * MATTED_W + x) * 4;
+      d[i] = Math.min(255, Math.max(0, acc[0] + n));
+      d[i + 1] = Math.min(255, Math.max(0, acc[1] + n));
+      d[i + 2] = Math.min(255, Math.max(0, acc[2] + n));
       d[i + 3] = 255;
     }
   }

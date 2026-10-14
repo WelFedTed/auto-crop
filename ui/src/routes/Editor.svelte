@@ -19,6 +19,7 @@
   import Ruler from '../lib/components/Ruler.svelte';
   import ScanBanner from '../lib/components/ScanBanner.svelte';
   import SuggestPanel from '../lib/components/SuggestPanel.svelte';
+  import TrimPanel from '../lib/components/TrimPanel.svelte';
   import TierBadge from '../lib/components/TierBadge.svelte';
   import {
     addPointOnSelectedEdge,
@@ -96,6 +97,22 @@
     type SuggestCtx,
     type SuggestState,
   } from '../lib/suggest.ts';
+  import {
+    initialTrim,
+    offerOf,
+    previewOfTrim,
+    trimApply,
+    trimApplyFailed,
+    trimArrived,
+    trimCancel,
+    trimCheck,
+    trimContextChanged,
+    trimFailed,
+    trimShow,
+    trimStale,
+    type TrimCtx,
+    type TrimState,
+  } from '../lib/trim.ts';
   import { codeOf, store, type ScanSave } from '../lib/store.svelte.ts';
   import { FALLBACK_HOLD, S, errorMessage, holdAction, holdCause, holdTitle, noticeText } from '../lib/strings.ts';
   import type { Band, CropView, CurveSet, Cut, Edit, Enhance, EnhanceMode, ItemView, Pt, SplitPolicy, SplitProfile } from '../lib/types.ts';
@@ -168,6 +185,15 @@
   let sayTimer: ReturnType<typeof setTimeout> | undefined;
   const gestures = new GestureClock(500);
 
+  // Trim to content (see "trim to content" below): what the engine offered for the crop on screen, and the preview of it.
+  let trm = $state.raw<TrimState>(initialTrim());
+  let trimTimer: ReturnType<typeof setTimeout> | undefined;
+  const trimCtx = $derived<TrimCtx | null>(item?.status === 'ready' && sel && !sel.curves ? { item: id, crop: sel.id, renderKey: sel.renderKey } : null);
+  const trimOffer = $derived(offerOf(trm));
+  const trimPreview = $derived(previewOfTrim(trm));
+  const trimOutline = $derived<Quad | null>(trimPreview ? (trimPreview.quad as Quad) : null);
+  const trimming = $derived(trm.phase.kind === 'preview');
+
   // A curved page: its curves and the optimistic copy of a commit in flight, the selected handle, the live drag.
   let curveDraft = $state.raw<{ crop: number; curves: CurveSet } | null>(null);
   let curveSel = $state.raw<CurveHandle | null>(null);
@@ -187,9 +213,15 @@
 
   const edit = $derived<Edit | null>(draft && draft.crop === selectedId ? draft.edit : (sel?.edit ?? null));
   const shownEdit = $derived<Edit | null>(
-    edit ? { quad: previewQuad ?? edit.quad, quarterTurns: edit.quarterTurns, fineDeg: liveAngle ?? edit.fineDeg } : null,
+    edit ? (trimPreviewEdit(edit) ?? { quad: previewQuad ?? edit.quad, quarterTurns: edit.quarterTurns, fineDeg: liveAngle ?? edit.fineDeg }) : null,
   );
-  const busy = $derived(previewQuad !== null || liveAngle !== null || inflight > 0);
+  const busy = $derived(previewQuad !== null || liveAngle !== null || inflight > 0 || trimming);
+
+  /** The edit the inset shows while a trim is previewed: the picture's quad (its corners carry the fine angle already). */
+  function trimPreviewEdit(e: Edit): Edit | null {
+    const p = trm.phase.kind === 'preview' ? trm.phase.proposal : null;
+    return p ? { quad: p.quad as Quad, quarterTurns: e.quarterTurns, fineDeg: 0 } : null;
+  }
 
   function say(text: string): void {
     clearTimeout(sayTimer);
@@ -444,6 +476,96 @@
       }
     });
   });
+
+  // ---- trim to content ---------------------------------------------------------------------------------------------
+  // A picture inside a border of the page's own colour (a print on a wide white mat) has two outlines: the detector keeps
+  // the paper edge and holds it. The engine proposes the picture whenever the crop on screen has one (cheap, asked by
+  // itself, so the button is only there when it works); the person previews it (a dashed outline and the inset) and only
+  // Apply changes the crop: one `applyTrim`, one undo step. Asking changes nothing.
+
+  async function askTrim(ctx: TrimCtx, seq: number): Promise<void> {
+    try {
+      const answer = await api.trimToContent(ctx.item, ctx.crop);
+      trm = trimArrived(trm, seq, trimCtx, answer);
+    } catch (e) {
+      // A curved crop, a crop that is gone: there is nothing to offer, and a check says nothing about it.
+      trm = trimFailed(trm, seq, trimCtx);
+      if (codeOf(e) !== 'ITEM_OP' && codeOf(e) !== 'NO_CROP') console.error(e);
+    }
+  }
+
+  $effect(() => {
+    // The crop on screen or its picture changed (another crop, an edit, an undo): what was asked or previewed for the old
+    // one is dropped, and the new one is asked about after a short pause (a burst of edits asks once).
+    const now = trimCtx;
+    untrack(() => {
+      trm = trimContextChanged(trm, now);
+      if (trm.staleDropped) store.announce(S.trim.stale);
+      clearTimeout(trimTimer);
+      if (!now) return;
+      const r = trimCheck(trm, now);
+      if (!r.ask) return;
+      trm = r.state;
+      const seq = r.state.seq;
+      trimTimer = setTimeout(() => void askTrim(now, seq), 120);
+    });
+    return () => clearTimeout(trimTimer);
+  });
+
+  /** The Trim to content button, the hold message's action and the T key. */
+  function showTrim(): void {
+    if (trm.phase.kind === 'preview') return;
+    if (trm.phase.kind !== 'available') {
+      store.announce(sel?.curves ? S.trim.curved : S.trim.none);
+      return;
+    }
+    trm = trimShow(trm, trimCtx);
+    if (trm.phase.kind === 'preview') {
+      store.announce(S.trim.ready);
+      void focusLater('[data-trim-apply]');
+    } else if (trm.staleDropped) store.announce(S.trim.stale);
+  }
+
+  function cancelTrim(): void {
+    if (trm.phase.kind !== 'preview') return;
+    trm = trimCancel(trm);
+    store.announce(S.trim.cancelled);
+    void focusLater('[data-trim-btn]');
+  }
+
+  function applyTrimNow(): void {
+    const r = trimApply(trm, trimCtx);
+    trm = r.state;
+    const fx = r.effect;
+    if (!fx) {
+      if (trm.staleDropped) store.announce(S.trim.stale);
+      return;
+    }
+    enqueue(async () => {
+      try {
+        const v = await api.applyTrim(fx.item, fx.crop);
+        store.announce(S.trim.applied);
+        return v;
+      } catch (e) {
+        trm = trimApplyFailed(trm, codeOf(e) ?? 'UNKNOWN');
+        throw e;
+      }
+    }, null);
+  }
+
+  /** "Keep the whole page" in the hold message: the paper edge is the answer, so this is the same as Accept. */
+  function keepWholePage(): void {
+    if (accept()) store.announce(S.trim.kept);
+  }
+
+  /** The stage is dragging a handle: a preview of the trim no longer fits the page. */
+  function onStagePreview(q: Quad | null): void {
+    previewQuad = q;
+    if (q && trm.phase.kind === 'preview') {
+      trm = trimStale(trm);
+      store.announce(S.trim.stale);
+    }
+  }
 
   function leaveCurved(): void {
     if (!sel?.curves) return;
@@ -1120,6 +1242,10 @@
         cancelTool();
         return;
       }
+      if (trm.phase.kind === 'preview') {
+        cancelTrim();
+        return;
+      }
       if (sug.phase.kind === 'loading' || sug.phase.kind === 'preview') {
         dismissSuggestion();
         return;
@@ -1146,6 +1272,7 @@
     else if (e.key === 'r') turn(1);
     else if (e.key === 'R') turn(-1);
     else if (e.key === 'i' || e.key === 'I') startAdd('inset');
+    else if (e.key === 't' || e.key === 'T') showTrim();
     else if (e.key === 'm' || e.key === 'M') {
       if (included.length >= 2) startMerge();
     } else if (e.key === 'k' || e.key === 'K') startCut();
@@ -1339,13 +1466,14 @@
             onaddat={addAt}
             onaddbox={addBox}
             oncutdrag={cutDrag}
-            onpreview={(q) => (previewQuad = q)}
+            onpreview={onStagePreview}
             oncommit={commitQuad}
             {curveSel}
             oncurveselect={(h) => (curveSel = h)}
             oncurvepreview={onCurvePreview}
             oncurvecommit={commitCurves}
             suggested={suggestedOutline}
+            {trimOutline}
             onsay={(t) => store.announce(t)}
           >
             {#if prevId !== null}
@@ -1407,6 +1535,7 @@
           {/if}
           {#if canEdit && tool === 'none'}
             <SuggestPanel state={sug} busy={inflight > 0} onapply={applySuggestion} ondismiss={dismissSuggestion} onretry={suggestCurves} />
+            <TrimPanel state={trm} busy={inflight > 0} onapply={applyTrimNow} oncancel={cancelTrim} />
           {/if}
 
           {#if showLayer || noItems}
@@ -1518,6 +1647,17 @@
             {#if failedBanner}
               <button type="button" class="btn btn-primary" onclick={doDrawCrop}><Icon name="crop" size={16} stroke={1.9} /> {S.editor.drawCrop}</button>
             {/if}
+            {#if trimOffer && canEdit && !curved}
+              <button
+                type="button"
+                class="btn"
+                data-trim-btn
+                aria-pressed={trimming}
+                disabled={inflight > 0 || trimming}
+                title={S.trim.buttonHint}
+                onclick={showTrim}><Icon name="crop" size={16} stroke={1.9} /> {S.trim.button}</button
+              >
+            {/if}
           </div>
         </section>
 
@@ -1593,6 +1733,17 @@
                   <div class="why-title">{holdTitle(r)}</div>
                   <div class="why-cause">{holdCause(r)}</div>
                   <div class="why-action">{holdAction(r)}</div>
+                  {#if r.code === 'DETECTORS_DISAGREE' && trimOffer && canEdit && !sel?.edited}
+                    <div class="why-trim" data-trim-hold>
+                      <div class="why-question">{S.trim.holdQuestion}</div>
+                      <div class="btn-row">
+                        <button type="button" class="btn btn-sm" data-trim-keep title={S.trim.keepPageHint} onclick={keepWholePage}>{S.trim.keepPage}</button>
+                        <button type="button" class="btn btn-sm btn-primary" data-trim-hold-btn disabled={inflight > 0 || trimming} title={S.trim.buttonHint} onclick={showTrim}
+                          ><Icon name="crop" size={15} stroke={1.9} /> {S.trim.button}</button
+                        >
+                      </div>
+                    </div>
+                  {/if}
                 </li>
               {/each}
             </ul>
@@ -2111,6 +2262,24 @@
     margin-top: 2px;
     font-size: 12px;
     color: var(--text-3);
+  }
+
+  /* The question and its two answers in the hold message of a picture inside a border (Trim to content). */
+  .why-trim {
+    margin-top: 8px;
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    border: 1px solid var(--line);
+    border-left: 3px solid #ff9f1c;
+    border-radius: 8px;
+  }
+
+  .why-question {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.4;
   }
 
   .plain {

@@ -57,6 +57,7 @@
     oncurvepreview,
     oncurvecommit,
     suggested = null,
+    trimOutline = null,
     onsay,
     children,
   }: {
@@ -95,6 +96,8 @@
     oncurvecommit?: (c: CurveSet, label: string, announce: string, source: 'drag' | 'key' | 'press', sel: CurveHandle | null) => void;
     /** The outline of the engine's suggested curves for the selected crop, drawn as a preview (nothing is applied). */
     suggested?: CurveSet | null;
+    /** The picture the engine proposes to trim the selected crop to, drawn as a dashed outline (nothing is applied). */
+    trimOutline?: Quad | null;
     /** A line for the live region (a refused change). */
     onsay?: (text: string) => void;
     /** Extra overlays (the inset, banners) rendered inside the stage. */
@@ -862,6 +865,12 @@
         <g data-suggested-outline>
           <path d={curvePathOf(suggested)} fill="#ff9f1c" fill-opacity="0.12" stroke="#15181e" stroke-width="6" stroke-linejoin="round" />
           <path d={curvePathOf(suggested)} fill="none" stroke="#ff9f1c" stroke-width="3" stroke-linejoin="round" />
+        </g>
+      {/if}
+      {#if trimOutline && selected}
+        <g data-trim-outline>
+          <polygon points={polyPts(trimOutline)} fill="#ff9f1c" fill-opacity="0.14" stroke="#15181e" stroke-width="6" stroke-linejoin="round" />
+          <polygon points={polyPts(trimOutline)} fill="none" stroke="#ff9f1c" stroke-width="3" stroke-dasharray="9 6" stroke-linejoin="round" />
         </g>
       {/if}
       {#if mergePreview}

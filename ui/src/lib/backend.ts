@@ -27,6 +27,7 @@ import type {
   EnhanceSuggestion,
   CurveSet,
   CurveSuggestion,
+  TrimProposal,
   Cut,
   DerivedAction,
   Edit,
@@ -105,6 +106,8 @@ const tauriApi: Api = {
     invoke<ItemView>('set_curves', { id, crop, curves, phase, label, gesture }),
   clearCurves: (id: number, crop: number) => invoke<ItemView>('clear_curves', { id, crop }),
   suggestCurves: (id: number, crop: number) => invoke<CurveSuggestion | null>('suggest_curves', { id, crop }),
+  trimToContent: (id: number, crop: number) => invoke<TrimProposal | null>('trim_to_content', { id, crop }),
+  applyTrim: (id: number, crop: number) => invoke<ItemView>('apply_trim', { id, crop }),
 
   // The shell takes the strength as a fraction (0 to 1); the contract of this UI is whole percent.
   setEnhance: (id: number, crop: number, mode: EnhanceMode, strength: number, phase: 'live' | 'end', label: string, gesture: number | null) =>
@@ -240,6 +243,8 @@ export const api: Api = {
   setCurves: (id, crop, curves, phase, label, gesture) => impl.api.setCurves(id, crop, curves, phase, label, gesture),
   clearCurves: (id, crop) => impl.api.clearCurves(id, crop),
   suggestCurves: (id, crop) => impl.api.suggestCurves(id, crop),
+  trimToContent: (id, crop) => impl.api.trimToContent(id, crop),
+  applyTrim: (id, crop) => impl.api.applyTrim(id, crop),
 
   setEnhance: (id, crop, mode, strength, phase, label, gesture) => impl.api.setEnhance(id, crop, mode, strength, phase, label, gesture),
   clearEnhance: (id, crop) => impl.api.clearEnhance(id, crop),

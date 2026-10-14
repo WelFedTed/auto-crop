@@ -28,6 +28,7 @@ import {
   detectQuad,
   drawBed,
   drawCurvedScene,
+  drawMattedScene,
   drawScene,
   failedPlaceholderEdit,
   insetQuad,
@@ -44,6 +45,8 @@ import { gestureKey, pushEntry } from './history.ts';
 import { createConvertMock } from './mock-convert.ts';
 import { enhanceCanvas, mockEnhanceSuggestion } from './mock-enhance.ts';
 import { mockSuggestion } from './mock-suggest.ts';
+import { MATTED_PAPER, mockTrim } from './matted-model.ts';
+import { TRIM_LABEL } from './trim.ts';
 import type { BedSpec, SceneSpec } from './mock-scene.ts';
 import { cloneEdit, type Quad } from './quad.ts';
 import {
@@ -153,6 +156,8 @@ interface MockItem {
   openOnly: string | null;
   /** The curved sample: the one page the mock's `suggestCurves` can see a curve on. */
   curvedSample: boolean;
+  /** The matted sample: the one page the mock's `trimToContent` finds a picture inside a border on. */
+  matted: boolean;
   /** The pages the mock's `suggestEnhance` recommends something for (shaded documents and receipts). */
   suggestable: { kind: 'document' | 'receipt'; faded: boolean } | null;
 }
@@ -344,6 +349,7 @@ function newAnalysingItem(name: string): MockItem {
     groupSaved: false,
     openOnly: null,
     curvedSample: false,
+    matted: false,
     suggestable: null,
   };
   items.set(id, m);
@@ -419,6 +425,8 @@ interface SampleDef {
   openOnly?: string;
   /** The curved sample: a receipt whose four edges are bent (curved-model.ts). */
   curved?: boolean;
+  /** The matted sample: a print on a wide white mat (matted-model.ts). */
+  matted?: boolean;
   /** Lit from one side (and, if `faded`, with faded print): the pages the enhancement suggestion fires on. */
   shade?: boolean;
   faded?: boolean;
@@ -476,13 +484,22 @@ function sampleDefs(): SampleDef[] {
     reasons: [{ code: 'WEAK_EDGE', side: 'top' }, { code: 'WEAK_EDGE', side: 'bottom' }],
     curved: true,
   };
+  // The print on a white mat: the one to try Trim to content on. The detector answers with the paper edge and holds it.
+  const matted: SampleDef = {
+    name: 'print_on_white_mat.jpg',
+    kind: 'document',
+    score: 0.99,
+    forced: 'check',
+    reasons: [{ code: 'DETECTORS_DISAGREE' }],
+    matted: true,
+  };
   // The two pages the enhancement suggestion fires on (like the real app's shaded samples): a document lit from one side
   // and a faded receipt. They sit right after the curved page.
   const shaded: SampleDef[] = [
     { name: 'document_5_shaded.jpg', kind: 'document', score: 0.98, forced: null, reasons: [], noise: 0.003, shade: true },
     { name: 'receipt_5_faded_warm.jpg', kind: 'receipt', score: 0.98, forced: null, reasons: [], noise: 0.003, shade: true, faded: true },
   ];
-  return [curved, ...shaded, ...multi, ...defs];
+  return [curved, matted, ...shaded, ...multi, ...defs];
 }
 
 async function analyseSample(m: MockItem, d: SampleDef, seed: number): Promise<void> {
@@ -499,6 +516,18 @@ async function analyseSample(m: MockItem, d: SampleDef, seed: number): Promise<v
       src.width * 2,
       src.height * 2,
       documentState(defaultEdit(curvedDetectedQuad()), { score: d.score, forced: d.forced, reasons: d.reasons }),
+    );
+    return;
+  }
+  if (d.matted) {
+    m.matted = true;
+    const src = drawMattedScene();
+    await finishAnalysis(
+      m,
+      src,
+      src.width * 2,
+      src.height * 2,
+      documentState(defaultEdit(MATTED_PAPER.map((p) => ({ ...p })) as Quad), { score: d.score, forced: d.forced, reasons: d.reasons }),
     );
     return;
   }
@@ -1133,6 +1162,31 @@ const api: Api = {
       mirror: c.mirror,
       size: [m.src?.width ?? 1000, m.src?.height ?? 1000],
     });
+  },
+
+  // ---- trim to content ------------------------------------------------------------------------------------
+  async trimToContent(id, crop) {
+    const m = ready(id);
+    // A few milliseconds to a few tens on the engine's worker. Asking records nothing: no history entry, no gen bump.
+    await sleep(120);
+    const c = current(m).crops.find((x) => x.id === crop);
+    if (!c) throw 'NO_CROP';
+    if (c.curves) throw 'ITEM_OP';
+    return mockTrim(m.matted, c.quad);
+  },
+  async applyTrim(id, crop) {
+    const m = ready(id);
+    const c = current(m).crops.find((x) => x.id === crop);
+    if (!c) throw 'NO_CROP';
+    const proposal = c.curves ? null : mockTrim(m.matted, c.quad);
+    if (!proposal) throw 'ITEM_OP';
+    const dims = dimsOf(m);
+    // The engine bakes the fine angle into the corners; the turns and the mirror stay.
+    return commitOp(
+      m,
+      (b) => labelled(TRIM_LABEL, b, crop),
+      (s) => editCrop(s, crop, { quad: proposal.quad.map((p) => ({ ...p })) as Quad, quarterTurns: c.quarterTurns, fineDeg: 0 }, dims),
+    );
   },
 
   // ---- enhancement ----------------------------------------------------------------------------------------
