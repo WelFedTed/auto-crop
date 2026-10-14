@@ -1,0 +1,284 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+# A Linux x86_64 build of the desktop app WITH the `heif` feature (AVIF, HEIC and HEIF input), for the
+# owner's own use, built on `ubuntu-22.04` (glibc 2.35, the oldest supported). The pinned native
+# libraries (`cargo xtask build-native`, as heif.yml does), the UI and the app are built here and
+# packaged three ways from one tree: a `.tar.gz` folder, an AppImage (appimagetool 1.9.1, pinned by
+# SHA-256; a thin image: WebKitGTK and GTK come from the host) and a `.deb` (plain dpkg-deb). All
+# three are uploaded as one workflow artifact (14 days). Nothing is published: no release, no tag.
+#
+# Each package is proven by running the PACKAGED layout: the tarball is unpacked into a clean folder,
+# the build tree is moved away and LD_LIBRARY_PATH is cleared, then the command-line tool decodes a
+# committed AVIF and the HEIC of the pinned libheif archive (packaging/smoke-cli.sh). The AppImage
+# runs the same decodes through its own AppRun, and the .deb is installed with dpkg and checked
+# through /usr/bin. The app is started under Xvfb for ten seconds (informational: the window is not
+# driven by a test, a window list and a screenshot are kept).
+name: Package Linux
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  package:
+    name: ubuntu-22.04 x86_64 with heif
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install build tools (NASM, Meson, Ninja, patchelf), WebKitGTK and GTK headers, and the smoke-test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            nasm meson ninja-build patchelf pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+            xvfb xauth x11-utils imagemagick dbus libfuse2 libgl1-mesa-dri
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - name: Install cargo-about
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        with:
+          tool: cargo-about
+      - name: Toolchain report
+        run: |
+          rustc --version && cargo --version && node --version && npm --version && cmake --version | head -1
+          meson --version; ninja --version; nasm --version; patchelf --version
+          ldd --version | head -1; pkg-config --modversion webkit2gtk-4.1 gtk+-3.0
+      - name: Build the pinned libheif, dav1d and libde265 (and libjpeg-turbo)
+        run: cargo xtask build-native
+      - name: Check the built libraries (no GPL or AV1 encoders, allowed dependencies, libheif links dav1d)
+        run: cargo xtask check-native
+      - name: Build the UI
+        working-directory: ui
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+          test -f dist/index.html
+      - name: Build the app and the command-line tool with the heif feature (release)
+        env:
+          AUTOCROP_NATIVE_PREFIX: ${{ github.workspace }}/target/native/prefix
+        run: |
+          cargo build --release -p auto-crop-shell --features "gui,custom-protocol,heif"
+          cargo build --release -p auto-crop-cli --features heif
+          ls -l target/release/AutoCrop target/release/auto-crop
+          file target/release/AutoCrop target/release/auto-crop
+      - name: Third-party notices (cargo about)
+        run: |
+          # The shell tree first (Tauri and wry are not in the default workspace build); the default
+          # tree is the fallback so the notices file always exists.
+          if cargo about generate about.hbs --manifest-path crates/shell/Cargo.toml --features gui,heif -o THIRD_PARTY_NOTICES.md; then
+            echo "notices: shell tree"
+          else
+            echo "::warning::cargo about failed for the shell tree; using the default workspace tree"
+            cargo about generate about.hbs -o THIRD_PARTY_NOTICES.md
+          fi
+          test -s THIRD_PARTY_NOTICES.md
+      - name: Assemble the package tree, the tar.gz, the AppImage and the .deb
+        id: pkg
+        env:
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          ver=$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' Cargo.toml | head -1)
+          [ -n "$ver" ] || { echo "workspace version not found"; exit 1; }
+          name="auto-crop-linux-x86_64-$ver"
+          dist="$GITHUB_WORKSPACE/dist"
+          rm -rf "$dist"; mkdir -p "$dist"
+          PREFIX="$GITHUB_WORKSPACE/target/native/prefix" RELEASE="$GITHUB_WORKSPACE/target/release" \
+            SRC="$GITHUB_WORKSPACE/target/native" OUT="$dist/$name" VERSION="$ver" COMMIT="$COMMIT" \
+            bash packaging/linux/assemble.sh
+          (cd "$dist/$name" && find . -type f -o -type l | sort | while read -r f; do printf '%12s  %s\n' "$(stat -c %s "$f")" "$f"; done | grep -v '/licenses/')
+          # The tarball.
+          tar --owner=0 --group=0 --numeric-owner --sort=name -C "$dist" -czf "$dist/$name.tar.gz" "$name"
+          # The AppImage (a thin image; tools are downloaded and checked against a pinned SHA-256).
+          bash packaging/linux/make-appimage.sh "$dist/$name" "$dist/AutoCrop-$ver-x86_64.AppImage" "$RUNNER_TEMP/tools"
+          # The .deb.
+          bash packaging/linux/make-deb.sh "$dist/$name" "$ver" "$dist/auto-crop_${ver}_amd64.deb"
+          (cd "$dist" && sha256sum "$name.tar.gz" "AutoCrop-$ver-x86_64.AppImage" "auto-crop_${ver}_amd64.deb" | tee "SHA256SUMS-linux-x86_64-$ver.txt")
+          {
+            echo "name=$name"
+            echo "ver=$ver"
+            echo "tree=$dist/$name"
+            echo "tarball=$dist/$name.tar.gz"
+            echo "appimage=$dist/AutoCrop-$ver-x86_64.AppImage"
+            echo "deb=$dist/auto-crop_${ver}_amd64.deb"
+            echo "sums=$dist/SHA256SUMS-linux-x86_64-$ver.txt"
+          } >> "$GITHUB_OUTPUT"
+          ls -l "$dist"
+      - name: Fixtures for the smoke test (a committed AVIF and the HEIC of the pinned libheif archive)
+        run: |
+          set -euo pipefail
+          fx="$RUNNER_TEMP/fixtures"; mkdir -p "$fx"
+          cp crates/codecs/tests/fixtures/heif/gradient-444-48x32.avif "$fx/"
+          heic=$(find target/native -name rainbow-451x461.heic -type f | head -1)
+          [ -n "$heic" ] || { echo "rainbow-451x461.heic not found in the libheif archive"; exit 1; }
+          cp "$heic" "$fx/"
+          ls -l "$fx"
+      - name: Verify the checksums, sizes and names of the three packages
+        env:
+          SUMS: ${{ steps.pkg.outputs.sums }}
+          VER: ${{ steps.pkg.outputs.ver }}
+        run: |
+          set -euo pipefail
+          cd "$(dirname "$SUMS")"
+          sha256sum -c "$SUMS"
+          for f in "auto-crop-linux-x86_64-$VER.tar.gz" "AutoCrop-$VER-x86_64.AppImage" "auto-crop_${VER}_amd64.deb"; do
+            size=$(stat -c %s "$f"); echo "$f: $size bytes"
+            [ "$size" -gt 3000000 ] && [ "$size" -lt 250000000 ] || { echo "implausible size of $f"; exit 1; }
+          done
+          file "AutoCrop-$VER-x86_64.AppImage" "auto-crop_${VER}_amd64.deb"
+      - name: Smoke test of the PACKAGED tarball (clean folder, no build tree, no LD_LIBRARY_PATH)
+        env:
+          TARBALL: ${{ steps.pkg.outputs.tarball }}
+          NAME: ${{ steps.pkg.outputs.name }}
+        run: |
+          set -euo pipefail
+          clean="$RUNNER_TEMP/unpacked"; rm -rf "$clean"; mkdir -p "$clean"
+          tar -xzf "$TARBALL" -C "$clean"
+          pkg="$clean/$NAME"
+          # Nothing may resolve from the build tree.
+          mv "$GITHUB_WORKSPACE/target/native/prefix" "$GITHUB_WORKSPACE/target/native/prefix.moved-away"
+          trap 'mv "$GITHUB_WORKSPACE/target/native/prefix.moved-away" "$GITHUB_WORKSPACE/target/native/prefix"' EXIT
+          unset LIBHEIF_PLUGIN_PATH AUTOCROP_NATIVE_PREFIX LD_LIBRARY_PATH
+          echo "--- what the executables load"
+          ldd "$pkg/bin/auto-crop" | grep -E "heif|dav1d|de265"
+          ldd "$pkg/bin/auto-crop" | grep -E "heif|dav1d|de265" | grep -vq "$clean" && { echo "a library comes from outside the package"; exit 1; }
+          ldd "$pkg/bin/AutoCrop" | grep -E "not found" && { echo "AutoCrop has an unresolved library"; exit 1; }
+          cd "$clean"
+          summary=$(bash "$GITHUB_WORKSPACE/packaging/smoke-cli.sh" "$pkg/bin/auto-crop" "$pkg/lib/libheif" "$pkg/lib/libheif.so.1" \
+            "$RUNNER_TEMP/fixtures/gradient-444-48x32.avif" "$RUNNER_TEMP/fixtures/rainbow-451x461.heic" "$RUNNER_TEMP/smoke-out-tar")
+          echo "$summary"
+          {
+            echo "### Linux x86_64 tarball smoke test (headless CLI from the unpacked folder)"
+            echo
+            echo "$summary"
+            echo "* every heif, dav1d and de265 library of the tool resolves inside the package folder (ldd)"
+            echo "* build tree moved away; LIBHEIF_PLUGIN_PATH and LD_LIBRARY_PATH cleared"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Smoke test of the AppImage (extract-and-run, the same decodes through its AppRun, and the extracted tree)
+        env:
+          APPIMAGE: ${{ steps.pkg.outputs.appimage }}
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/appimage-check"; rm -rf "$work"; mkdir -p "$work"
+          cp "$APPIMAGE" "$work/AutoCrop.AppImage"; chmod +x "$work/AutoCrop.AppImage"
+          mv "$GITHUB_WORKSPACE/target/native/prefix" "$GITHUB_WORKSPACE/target/native/prefix.moved-away"
+          trap 'mv "$GITHUB_WORKSPACE/target/native/prefix.moved-away" "$GITHUB_WORKSPACE/target/native/prefix"' EXIT
+          unset LIBHEIF_PLUGIN_PATH AUTOCROP_NATIVE_PREFIX LD_LIBRARY_PATH
+          cd "$work"
+          fx="$RUNNER_TEMP/fixtures"
+          # Without FUSE (what a container or a system without libfuse2 does).
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          ./AutoCrop.AppImage --cli --version
+          ./AutoCrop.AppImage --cli doctor | tee doctor.txt
+          grep -Eq "^heif: +built in; libheif .*HEVC found, AV1 found" doctor.txt
+          ./AutoCrop.AppImage --cli dev-pipeline "$fx/gradient-444-48x32.avif" --json --out avif.jpg | grep -q '"source":\[48,32\]'
+          ./AutoCrop.AppImage --cli dev-pipeline "$fx/rainbow-451x461.heic" --json --out heic.jpg | grep -q '"source":\[451,461\]'
+          test -s avif.jpg && test -s heic.jpg
+          echo "extract-and-run: AVIF and HEIC decode through AppRun"
+          # With FUSE (libfuse2 is installed here; informational, a runner may not allow the mount).
+          unset APPIMAGE_EXTRACT_AND_RUN
+          if ./AutoCrop.AppImage --cli doctor > fuse-doctor.txt 2> fuse-err.txt && grep -q "HEVC found" fuse-doctor.txt; then
+            echo "FUSE mount: works"; fuse=works
+          else
+            echo "::warning::the AppImage did not run through a FUSE mount on this runner"; cat fuse-err.txt; fuse="did not work on the runner"
+          fi
+          # The extracted tree (squashfs-root) has the same layout as the package folder: run the full smoke test on it.
+          ./AutoCrop.AppImage --appimage-extract > /dev/null
+          root="$work/squashfs-root/usr"
+          summary=$(bash "$GITHUB_WORKSPACE/packaging/smoke-cli.sh" "$root/bin/auto-crop" "$root/lib/libheif" "$root/lib/libheif.so.1" \
+            "$fx/gradient-444-48x32.avif" "$fx/rainbow-451x461.heic" "$work/smoke-out")
+          {
+            echo "### Linux x86_64 AppImage smoke test"
+            echo
+            echo "* AppRun --cli: doctor, AVIF and HEIC decode (extract-and-run mode); FUSE mount: $fuse"
+            echo "* the extracted AppDir passes the same tarball checks:"
+            echo "$summary"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Smoke test of the .deb (dpkg -i, tools on PATH, files, remove)
+        env:
+          DEB: ${{ steps.pkg.outputs.deb }}
+        run: |
+          set -euo pipefail
+          dpkg-deb -c "$DEB" | grep -E "usr/(bin|lib/auto-crop/(bin|lib))/" | head -30
+          sudo dpkg -i "$DEB"
+          mv "$GITHUB_WORKSPACE/target/native/prefix" "$GITHUB_WORKSPACE/target/native/prefix.moved-away"
+          trap 'mv "$GITHUB_WORKSPACE/target/native/prefix.moved-away" "$GITHUB_WORKSPACE/target/native/prefix"; sudo dpkg -r auto-crop || true' EXIT
+          unset LIBHEIF_PLUGIN_PATH AUTOCROP_NATIVE_PREFIX LD_LIBRARY_PATH
+          fx="$RUNNER_TEMP/fixtures"; out="$RUNNER_TEMP/deb-out"; mkdir -p "$out"
+          command -v auto-crop AutoCrop
+          auto-crop --version
+          auto-crop doctor | tee "$out/doctor.txt"
+          grep -Eq "^heif: +built in; libheif .*HEVC found, AV1 found" "$out/doctor.txt"
+          auto-crop dev-pipeline "$fx/gradient-444-48x32.avif" --json --out "$out/avif.jpg" | grep -q '"source":\[48,32\]'
+          auto-crop dev-pipeline "$fx/rainbow-451x461.heic" --json --out "$out/heic.jpg" | grep -q '"source":\[451,461\]'
+          test -s "$out/avif.jpg" && test -s "$out/heic.jpg"
+          ldd /usr/bin/AutoCrop | grep -E "not found" && { echo "AutoCrop has an unresolved library"; exit 1; }
+          test -f /usr/share/applications/io.github.welfedted.AutoCrop.desktop
+          echo "### Linux x86_64 .deb smoke test: dpkg -i, auto-crop doctor, AVIF and HEIC decode through /usr/bin, dpkg -r" >> "$GITHUB_STEP_SUMMARY"
+      - name: The app starts under Xvfb and stays alive (informational; the window is not driven)
+        continue-on-error: true
+        env:
+          TARBALL: ${{ steps.pkg.outputs.tarball }}
+          NAME: ${{ steps.pkg.outputs.name }}
+        run: |
+          set -uo pipefail
+          out="$RUNNER_TEMP/gui-out"; mkdir -p "$out"
+          clean="$RUNNER_TEMP/gui-unpacked"; rm -rf "$clean"; mkdir -p "$clean"
+          tar -xzf "$TARBALL" -C "$clean"
+          export APP="$clean/$NAME/bin/AutoCrop" OUT="$out"
+          export AUTO_CROP_HOME="$RUNNER_TEMP/gui-home" NO_AT_BRIDGE=1 LIBGL_ALWAYS_SOFTWARE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1
+          unset LIBHEIF_PLUGIN_PATH AUTOCROP_NATIVE_PREFIX LD_LIBRARY_PATH
+          cat > "$RUNNER_TEMP/gui.sh" <<'GUI'
+          #!/usr/bin/env bash
+          "$APP" > "$OUT/app.log" 2>&1 &
+          pid=$!
+          sleep 10
+          if ! kill -0 "$pid" 2>/dev/null; then
+            wait "$pid"; echo "AutoCrop exited with code $? within 10 seconds"; cat "$OUT/app.log"; exit 1
+          fi
+          echo "AutoCrop is running after 10 seconds (pid $pid)"
+          xwininfo -root -tree > "$OUT/windows.txt" 2>&1 || true
+          grep -i "auto crop" "$OUT/windows.txt" || echo "no window titled Auto Crop in the X tree"
+          import -window root "$OUT/screenshot.png" || echo "import failed"
+          ls -l "$OUT/screenshot.png" || true
+          kill "$pid"; sleep 1; kill -9 "$pid" 2>/dev/null || true
+          GUI
+          chmod +x "$RUNNER_TEMP/gui.sh"
+          if command -v dbus-run-session >/dev/null; then
+            dbus-run-session -- xvfb-run -a -s "-screen 0 1440x900x24" "$RUNNER_TEMP/gui.sh"
+          else
+            xvfb-run -a -s "-screen 0 1440x900x24" "$RUNNER_TEMP/gui.sh"
+          fi
+          status=$?
+          cat "$out/app.log" || true
+          exit $status
+      - name: Upload the packages (14 days; nothing is published)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.pkg.outputs.name }}
+          path: |
+            ${{ steps.pkg.outputs.tarball }}
+            ${{ steps.pkg.outputs.appimage }}
+            ${{ steps.pkg.outputs.deb }}
+            ${{ steps.pkg.outputs.sums }}
+          retention-days: 14
+          if-no-files-found: error
+      - name: Upload the start-up log, window list and screenshot (informational)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gui-check-linux-x86_64
+          path: ${{ runner.temp }}/gui-out
+          retention-days: 14
+          if-no-files-found: warn

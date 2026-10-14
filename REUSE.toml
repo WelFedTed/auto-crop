@@ -12,6 +12,8 @@ path = [
     "**/*.md",
     "docs/**",
     "packaging/windows/**",
+    "packaging/macos/**",
+    "packaging/linux/**",
     ".github/**",
     ".gitattributes",
     ".gitignore",

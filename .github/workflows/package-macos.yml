@@ -1,0 +1,272 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+# A macOS build of the desktop app WITH the `heif` feature (AVIF, HEIC and HEIF input), for the
+# owner's own use: Apple silicon (arm64, `macos-latest`) and, best-effort, Intel (`macos-26-intel`).
+# The owner's machine has no cmake, ninja, meson or nasm, so the pinned native libraries
+# (`cargo xtask build-native`, as heif.yml does), the UI and the app are built here. The result is
+# `AutoCrop.app` (the app, the `auto-crop` command-line tool, the libheif, dav1d and libde265 dylibs
+# and the libheif plugin folder, ad-hoc signed, NOT notarised: decision B15, no Apple account) in a
+# zip and in a DMG, uploaded as one workflow artifact (14 days). Nothing is published: no release,
+# no tag.
+#
+# The package is proven by running the PACKAGED layout: the zip is unpacked into a clean folder, the
+# build tree is moved away and the library search variables are cleared, then the command-line tool
+# inside the app decodes a committed AVIF and the HEIC of the pinned libheif archive
+# (packaging/smoke-cli.sh). The DMG is mounted and its copy of the app is checked the same way. The
+# app is started for ten seconds and a screenshot is taken (informational: the window is not driven).
+name: Package macOS
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # The product floor (macOS 12); rustc, CMake, meson and cc all read this variable.
+  MACOSX_DEPLOYMENT_TARGET: "12.0"
+
+jobs:
+  package:
+    name: ${{ matrix.os }} ${{ matrix.arch }} with heif${{ matrix.best-effort && ' (best-effort)' || '' }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.best-effort }}
+    timeout-minutes: 150
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, arch: arm64, best-effort: false, brew: "meson ninja", arch_note: "Apple silicon Macs (M1 and later)" }
+          # Intel needs NASM (dav1d and libjpeg-turbo assembly); the arm64 build does not.
+          - { os: macos-26-intel, arch: x86_64, best-effort: true, brew: "meson ninja nasm", arch_note: "Intel Macs; this build is best-effort and even less tested than the Apple silicon one" }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Meson, Ninja (and NASM on Intel); they build dav1d and libjpeg-turbo
+        env:
+          BREW_PACKAGES: ${{ matrix.brew }}
+        run: |
+          # shellcheck disable=SC2086
+          brew install $BREW_PACKAGES
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - name: Install cargo-about
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        with:
+          tool: cargo-about
+      - name: Toolchain report
+        run: |
+          uname -m; sw_vers
+          rustc --version && cargo --version && node --version && npm --version && cmake --version | head -1
+          meson --version; ninja --version; nasm --version || true
+          xcode-select -p; hdiutil help | head -1 || true
+      - name: Build the pinned libheif, dav1d and libde265 (and libjpeg-turbo)
+        run: cargo xtask build-native
+      - name: Check the built libraries (no GPL or AV1 encoders, allowed dependencies, libheif links dav1d)
+        run: cargo xtask check-native
+      - name: Build the UI
+        working-directory: ui
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+          test -f dist/index.html
+      - name: Build the app and the command-line tool with the heif feature (release)
+        env:
+          AUTOCROP_NATIVE_PREFIX: ${{ github.workspace }}/target/native/prefix
+        run: |
+          cargo build --release -p auto-crop-shell --features "gui,custom-protocol,heif"
+          cargo build --release -p auto-crop-cli --features heif
+          ls -l target/release/AutoCrop target/release/auto-crop
+          file target/release/AutoCrop target/release/auto-crop
+      - name: Third-party notices (cargo about)
+        run: |
+          # The shell tree first (Tauri and wry are not in the default workspace build); the default
+          # tree is the fallback so the notices file always exists.
+          if cargo about generate about.hbs --manifest-path crates/shell/Cargo.toml --features gui,heif -o THIRD_PARTY_NOTICES.md; then
+            echo "notices: shell tree"
+          else
+            echo "::warning::cargo about failed for the shell tree; using the default workspace tree"
+            cargo about generate about.hbs -o THIRD_PARTY_NOTICES.md
+          fi
+          test -s THIRD_PARTY_NOTICES.md
+      - name: Assemble AutoCrop.app (dylibs, rpaths, plugin folder, ad-hoc signature), the zip and the DMG
+        id: pkg
+        env:
+          COMMIT: ${{ github.sha }}
+          ARCH: ${{ matrix.arch }}
+          ARCH_NOTE: ${{ matrix.arch_note }}
+        run: |
+          set -euo pipefail
+          ver=$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' Cargo.toml | head -1)
+          [ -n "$ver" ] || { echo "workspace version not found"; exit 1; }
+          name="auto-crop-macos-$ARCH-$ver"
+          dist="$GITHUB_WORKSPACE/dist/$name"
+          rm -rf "$GITHUB_WORKSPACE/dist"; mkdir -p "$dist"
+          PREFIX="$GITHUB_WORKSPACE/target/native/prefix" RELEASE="$GITHUB_WORKSPACE/target/release" \
+            SRC="$GITHUB_WORKSPACE/target/native" OUT="$dist" VERSION="$ver" COMMIT="$COMMIT" \
+            bash packaging/macos/assemble-app.sh
+          cp LICENSE-MIT LICENSE-APACHE THIRD_PARTY_NOTICES.md "$dist/"
+          sed -e "s/@VERSION@/$ver/g" -e "s/@COMMIT@/$COMMIT/g" -e "s/@ARCH@/$ARCH/g" -e "s/@ARCH_NOTE@/$ARCH_NOTE/g" \
+            packaging/macos/README-PACKAGE.txt > "$dist/README-PACKAGE.txt"
+          # ditto keeps symlinks, permissions and the code signature; a plain zip would not.
+          zip="$GITHUB_WORKSPACE/dist/$name.zip"
+          ditto -c -k --keepParent "$dist" "$zip"
+          # The DMG is a convenience: it is kept only if hdiutil works on this runner.
+          dmg="$GITHUB_WORKSPACE/dist/$name.dmg"
+          if hdiutil create -volname "Auto Crop $ver" -srcfolder "$dist" -ov -format UDZO "$dmg"; then
+            echo "dmg=$dmg" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::hdiutil create failed on this runner; no DMG"
+            rm -f "$dmg"
+            echo "dmg=" >> "$GITHUB_OUTPUT"
+          fi
+          (cd "$GITHUB_WORKSPACE/dist" && shasum -a 256 "$name.zip" $([ -f "$name.dmg" ] && echo "$name.dmg") | tee "$name.sha256")
+          {
+            echo "name=$name"
+            echo "zip=$zip"
+            echo "dist=$dist"
+            echo "sums=$GITHUB_WORKSPACE/dist/$name.sha256"
+          } >> "$GITHUB_OUTPUT"
+          ls -l "$GITHUB_WORKSPACE/dist"
+      - name: Fixtures for the smoke test (a committed AVIF and the HEIC of the pinned libheif archive)
+        run: |
+          set -euo pipefail
+          fx="$RUNNER_TEMP/fixtures"; mkdir -p "$fx"
+          cp crates/codecs/tests/fixtures/heif/gradient-444-48x32.avif "$fx/"
+          heic=$(find target/native -name rainbow-451x461.heic -type f | head -1)
+          [ -n "$heic" ] || { echo "rainbow-451x461.heic not found in the libheif archive"; exit 1; }
+          cp "$heic" "$fx/"
+          ls -l "$fx"
+      - name: Smoke test of the PACKAGED zip (clean folder, no build tree, no library search variables)
+        id: smoke
+        env:
+          NAME: ${{ steps.pkg.outputs.name }}
+          ZIP: ${{ steps.pkg.outputs.zip }}
+          SUMS: ${{ steps.pkg.outputs.sums }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          # The checksum file matches the artifact that is about to be uploaded.
+          (cd "$(dirname "$ZIP")" && shasum -a 256 -c "$SUMS")
+          size=$(stat -f %z "$ZIP"); echo "zip size: $size bytes"
+          [ "$size" -gt 5000000 ] && [ "$size" -lt 250000000 ] || { echo "implausible zip size"; exit 1; }
+          clean="$RUNNER_TEMP/unzipped"; rm -rf "$clean"; mkdir -p "$clean"
+          ditto -x -k "$ZIP" "$clean"
+          app="$clean/$NAME/AutoCrop.app"
+          [ -d "$app" ] || { echo "AutoCrop.app is not in the zip"; ls -l "$clean/$NAME"; exit 1; }
+          echo "--- layout"; (cd "$clean/$NAME" && find . -not -path '*/licenses/*' | sort)
+          echo "--- architecture and deployment target"
+          for f in "$app/Contents/MacOS/AutoCrop" "$app/Contents/MacOS/auto-crop"; do
+            lipo -archs "$f"; otool -l "$f" | awk '/LC_BUILD_VERSION/ {b=1} b && /minos/ {print "minos " $2; b=0}'
+          done
+          echo "--- signature after the zip round trip"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          echo "--- what Gatekeeper says about a quarantined copy (informational: unsigned apps are expected to be rejected)"
+          q="$RUNNER_TEMP/quarantined"; rm -rf "$q"; mkdir -p "$q"; ditto "$app" "$q/AutoCrop.app"
+          xattr -w com.apple.quarantine "0083;$(printf '%x' "$(date +%s)");Safari;" "$q/AutoCrop.app"
+          spctl --assess --type execute -vv "$q/AutoCrop.app" 2>&1 || true
+          xattr -dr com.apple.quarantine "$q/AutoCrop.app"
+          echo "after xattr -dr: $(xattr "$q/AutoCrop.app" | wc -l | tr -d ' ') attributes left"
+          rm -rf "$q"
+
+          # Nothing may resolve from the build tree: its prefix is the compiled-in plugin directory of
+          # libheif and the place the dylibs were built.
+          mv "$GITHUB_WORKSPACE/target/native/prefix" "$GITHUB_WORKSPACE/target/native/prefix.moved-away"
+          unset LIBHEIF_PLUGIN_PATH AUTOCROP_NATIVE_PREFIX DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH DYLD_FRAMEWORK_PATH LD_LIBRARY_PATH
+          cd "$clean"
+          fw="$app/Contents/Frameworks"
+          summary=$(bash "$GITHUB_WORKSPACE/packaging/smoke-cli.sh" "$app/Contents/MacOS/auto-crop" "$fw/libheif" "$fw/libheif.1.dylib" \
+            "$RUNNER_TEMP/fixtures/gradient-444-48x32.avif" "$RUNNER_TEMP/fixtures/rainbow-451x461.heic" "$RUNNER_TEMP/smoke-out")
+          echo "$summary"
+          mv "$GITHUB_WORKSPACE/target/native/prefix.moved-away" "$GITHUB_WORKSPACE/target/native/prefix"
+          {
+            echo "### macOS $ARCH package smoke test (headless CLI from the unpacked zip)"
+            echo
+            echo "* package: \`$NAME.zip\` ($size bytes), checksum file verified"
+            echo "$summary"
+            echo "* ad-hoc signature verified with \`codesign --verify --deep --strict\` after the zip round trip"
+            echo "* build tree moved away; LIBHEIF_PLUGIN_PATH and the DYLD variables cleared"
+            echo "* the desktop window was not driven by a test"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Restore the build tree
+        if: always()
+        run: |
+          m=target/native/prefix.moved-away
+          if [ -d "$m" ]; then mv "$m" target/native/prefix; fi
+      - name: Smoke test of the DMG (mount, copy the app out, check it the same way)
+        if: steps.pkg.outputs.dmg != ''
+        env:
+          NAME: ${{ steps.pkg.outputs.name }}
+          DMG: ${{ steps.pkg.outputs.dmg }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          mnt="$RUNNER_TEMP/dmg-mount"; mkdir -p "$mnt"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$DMG"
+          trap 'hdiutil detach "$mnt" -force || true' EXIT
+          ls -l "$mnt"
+          [ -d "$mnt/AutoCrop.app" ] && [ -f "$mnt/README-PACKAGE.txt" ] || { echo "the DMG lacks the app or the README"; exit 1; }
+          copy="$RUNNER_TEMP/from-dmg"; rm -rf "$copy"; mkdir -p "$copy"
+          ditto "$mnt/AutoCrop.app" "$copy/AutoCrop.app"
+          codesign --verify --deep --strict --verbose=2 "$copy/AutoCrop.app"
+          mv target/native/prefix target/native/prefix.moved-away
+          trap 'mv target/native/prefix.moved-away target/native/prefix; hdiutil detach "$mnt" -force || true' EXIT
+          unset LIBHEIF_PLUGIN_PATH AUTOCROP_NATIVE_PREFIX DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH LD_LIBRARY_PATH
+          fw="$copy/AutoCrop.app/Contents/Frameworks"
+          bash packaging/smoke-cli.sh "$copy/AutoCrop.app/Contents/MacOS/auto-crop" "$fw/libheif" "$fw/libheif.1.dylib" \
+            "$RUNNER_TEMP/fixtures/gradient-444-48x32.avif" "$RUNNER_TEMP/fixtures/rainbow-451x461.heic" "$RUNNER_TEMP/smoke-out-dmg" > /dev/null
+          echo "### macOS $ARCH DMG: mounted, the app copied out, signature and CLI smoke test pass" >> "$GITHUB_STEP_SUMMARY"
+      - name: The app starts from the unpacked zip and stays alive (informational; the window is not driven)
+        id: gui
+        continue-on-error: true
+        env:
+          NAME: ${{ steps.pkg.outputs.name }}
+        run: |
+          set -uo pipefail
+          app="$RUNNER_TEMP/unzipped/$NAME/AutoCrop.app"
+          mkdir -p "$RUNNER_TEMP/gui-out"
+          unset LIBHEIF_PLUGIN_PATH AUTOCROP_NATIVE_PREFIX DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH
+          export AUTO_CROP_HOME="$RUNNER_TEMP/gui-home"
+          "$app/Contents/MacOS/AutoCrop" > "$RUNNER_TEMP/gui-out/app.log" 2>&1 &
+          pid=$!
+          sleep 10
+          if ! kill -0 "$pid" 2>/dev/null; then
+            wait "$pid"; code=$?
+            echo "AutoCrop exited with code $code within 10 seconds"; cat "$RUNNER_TEMP/gui-out/app.log" || true
+            exit 1
+          fi
+          echo "AutoCrop is running after 10 seconds (pid $pid)"
+          # A screenshot works only when the runner has a logged-in desktop session and has granted
+          # screen recording; say honestly when it did not.
+          if screencapture -x "$RUNNER_TEMP/gui-out/window.png"; then
+            ls -l "$RUNNER_TEMP/gui-out/window.png"
+          else
+            echo "::warning::screencapture failed on this runner"
+          fi
+          ps -o pid,rss,command -p "$pid"
+          kill "$pid"; sleep 1; kill -9 "$pid" 2>/dev/null || true
+          cat "$RUNNER_TEMP/gui-out/app.log" || true
+      - name: Upload the zip and the DMG (14 days; nothing is published)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.pkg.outputs.name }}
+          path: |
+            ${{ steps.pkg.outputs.zip }}
+            ${{ steps.pkg.outputs.dmg }}
+            ${{ steps.pkg.outputs.sums }}
+          retention-days: 14
+          if-no-files-found: error
+      - name: Upload the start-up log and screenshot (informational)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gui-check-macos-${{ matrix.arch }}
+          path: ${{ runner.temp }}/gui-out
+          retention-days: 14
+          if-no-files-found: warn

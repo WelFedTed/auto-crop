@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Auto Crop
+GenericName=Image cropper
+Comment=Crop, straighten and clean up scans and photos
+Exec=AutoCrop
+Icon=io.github.welfedted.AutoCrop
+Terminal=false
+Categories=Graphics;Photography;
+Keywords=crop;deskew;scan;receipt;heic;
+StartupNotify=true
