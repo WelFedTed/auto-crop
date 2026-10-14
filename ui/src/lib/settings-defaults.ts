@@ -18,6 +18,7 @@ export function defaultSettings(): Settings {
     autoSaveSplits: false,
     curvedIntroAck: false,
     suggestEnhance: true,
+    saveFormat: 'auto',
   };
 }
 

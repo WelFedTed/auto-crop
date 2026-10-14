@@ -342,8 +342,9 @@ export interface ItemView {
   /** Stable undo position, for `revertCrop` to a step. */
   historyPosition: number;
   /**
-   * The notice code of the reason this source is never replaced in place (`tiff.multi_page` or
-   * `format.write_unavailable`), else null. Such a file can only be saved as a copy.
+   * The notice code of the reason this source is never replaced in place (`tiff.multi_page`,
+   * `format.write_unavailable`, `webp.lossy`, `tiff.low_depth`, `tiff.exif_not_carried` ...), else null. Such a file
+   * can only be saved as a copy.
    */
   openOnly: string | null;
   /** The default enhancement of this image (crops without their own override get it). Original until a person chose. */
@@ -379,6 +380,11 @@ export interface Settings {
   curvedIntroAck: boolean;
   /** Show the enhancement suggestion in the editor and the grid (on by default). It never applies anything. */
   suggestEnhance: boolean;
+  /**
+   * The format a saved copy is written in (`auto`: the source's own when it can be written back, else PNG, JPG
+   * for HEIC). A format other than the source's is only ever a copy: replacing a file under another format is Convert.
+   */
+  saveFormat: SaveFormat;
 }
 
 export type SaveTarget = 'replace' | 'copy';
@@ -482,7 +488,10 @@ export type QuadPts = [Pt, Pt, Pt, Pt];
 
 // ---- Convert (crates/engine/src/convert.rs and convert_batch.rs; the front end of ROADMAP M6.49) ----
 
-export type ConvertTarget = 'jpg' | 'png';
+/** What a Convert run writes. WebP is lossless; a PDF holds one picture per file (one page). */
+export type ConvertTarget = 'jpg' | 'png' | 'tiff' | 'webp' | 'pdf';
+/** The format of the files a save writes: `auto` keeps the source's own when it can be written back. */
+export type SaveFormat = 'auto' | 'jpeg' | 'png' | 'tiff' | 'webp' | 'pdf';
 export type ConvertColour = 'srgb' | 'preserve';
 export type ConvertPlacement = 'replace' | 'keep' | 'folder';
 export type QualityPreset = 'balanced' | 'small' | 'best';
@@ -500,7 +509,7 @@ export interface ConvertOptions {
 }
 
 /** The format names the engine reports. */
-export type ConvertFormat = 'jpeg' | 'png' | 'tiff' | 'webp' | 'heic' | 'avif' | 'gif' | 'bmp' | 'jxl' | 'unknown';
+export type ConvertFormat = 'jpeg' | 'png' | 'tiff' | 'webp' | 'heic' | 'avif' | 'gif' | 'bmp' | 'jxl' | 'pdf' | 'unknown';
 
 export interface ConvertAdded {
   added: number;

@@ -171,7 +171,7 @@ class Store {
   enhanceDismissed = $state.raw<ReadonlySet<string>>(new Set());
 
   /** The settings that change what the grid does with scans that have several items. */
-  reviewOpts = $derived({ autoSaveSplits: this.settings.autoSaveSplits, saveAsCopy: this.settings.saveAsCopy });
+  reviewOpts = $derived({ autoSaveSplits: this.settings.autoSaveSplits, saveAsCopy: this.settings.saveAsCopy || this.settings.saveFormat !== 'auto' });
   classified = $derived<Classified[]>(classify(this.items, this.strictness, this.decisions.map, this.reviewOpts));
   counts = $derived<Counts>(countsOf(this.classified));
   byId = $derived(new Map(this.items.map((i) => [i.id, i])));
@@ -407,7 +407,7 @@ class Store {
   async saveScan(id: number, target: SaveTarget): Promise<ScanSave | null> {
     if (this.saving) return null;
     const before = this.byId.get(id);
-    const planned = before ? plannedNames(before) : [];
+    const planned = before ? plannedNames(before, this.settings.saveFormat) : [];
     this.saving = true;
     try {
       const [outcome] = await api.saveItems([id], target, runName());
@@ -479,8 +479,9 @@ class Store {
   /** Writes `ids` with the current mode. Callers have already confirmed (and shown the first-write sheet). */
   async performSave(ids: number[], merge: SaveSummary | null = null, target?: SaveTarget): Promise<void> {
     if (this.saving || ids.length === 0) return;
-    const copy = target ? target === 'copy' : this.settings.saveAsCopy;
-    const planned = new Map(ids.map((id) => [id, plannedNames(this.byId.get(id) ?? ({ crops: [] } as unknown as ItemView))]));
+    // A save format other than "Same as the original" is only ever a copy (the engine refuses to replace under another format).
+    const copy = target ? target === 'copy' : this.settings.saveAsCopy || this.settings.saveFormat !== 'auto';
+    const planned = new Map(ids.map((id) => [id, plannedNames(this.byId.get(id) ?? ({ crops: [] } as unknown as ItemView), this.settings.saveFormat)]));
     this.saving = true;
     try {
       const outcomes: SaveOutcome[] = await api.saveItems(ids, copy ? 'copy' : 'replace', runName());

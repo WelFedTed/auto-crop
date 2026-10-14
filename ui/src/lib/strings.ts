@@ -235,6 +235,14 @@ export const NOTICES: Record<string, string> = {
     'This TIFF has more than one page, so it is never replaced. Save as copy writes the first page as a PNG and leaves the file as it is.',
   'format.write_unavailable':
     "Auto Crop can open this kind of file but can't write it back, so it is never replaced. Save as copy writes a PNG (a JPG for HEIC) and leaves the file as it is.",
+  'webp.lossy':
+    'This WebP is lossy, and Auto Crop can only write WebP without any loss, so it is never replaced. Save as copy writes a PNG and leaves the file as it is.',
+  'tiff.low_depth':
+    'This TIFF is black and white (1 bit). Writing it back would turn it into a much larger colour file, so it is never replaced. Save as copy writes a PNG and leaves the file as it is.',
+  'tiff.exif_not_carried':
+    'This TIFF holds camera or location details (Exif) that Auto Crop cannot write back into a TIFF yet, so it is never replaced. Save as copy writes a TIFF without them and leaves the file as it is.',
+  'format.change_needs_copy':
+    'A different format is always saved as a copy, so the original stays as it is. Choose Save as copy, or set the format back to Same as original.',
   'split.held':
     'This scan is held for review, so nothing was written. Accept the split to replace the original, or use Save as copy.',
   'derived.user_edited':
@@ -324,6 +332,7 @@ export function convertCannotText(code: string): string {
 const FORMAT_NAMES: Record<string, string> = {
   jpeg: 'JPG',
   png: 'PNG',
+  pdf: 'PDF',
   tiff: 'TIFF',
   webp: 'WebP',
   heic: 'HEIC',
@@ -341,7 +350,10 @@ export function formatName(format: string): string {
 
 /** The short form shown on a badge: why a source is open-only. */
 export function openOnlyShort(code: string | null): string {
-  return code === 'tiff.multi_page' ? 'Multi-page: copy only' : code ? 'Open only: copy only' : '';
+  if (code === 'tiff.multi_page') return 'Multi-page: copy only';
+  if (code === 'webp.lossy') return 'Lossy WebP: copy only';
+  if (code === 'tiff.low_depth') return 'Black and white TIFF: copy only';
+  return code ? 'Open only: copy only' : '';
 }
 
 /** "JPG, PNG, WebP, TIFF and HEIC": the formats this build opens, from the extension list the shell reports. */
@@ -1075,6 +1087,15 @@ export const S = {
     acceptFirst: 'Accept the split first, then you can replace the original.',
     acceptFirstCurved: 'Replace original is off until you accept this curved page. Save as copy needs no OK.',
     openOnly: 'This format is open-only: Save as copy.',
+    formatLabel: 'Save as',
+    formatAuto: 'Same as the original',
+    formatJpeg: 'JPG',
+    formatPng: 'PNG',
+    formatTiff: 'TIFF',
+    formatWebp: 'WebP (lossless)',
+    formatPdf: 'PDF (one page)',
+    formatNote: 'Another format is always saved as a copy. WebP is saved without any loss; a PDF page holds the picture at its own size (300 dpi when the file does not say).',
+    formatChange: 'A different format is saved as a copy, so Replace original is off. Set “Save as” back to Same as the original to replace.',
     copyNote: 'A copy goes to the AutoCrop folder next to the scan. The scan is not touched.',
     replaceNote: 'The original is backed up first and can be restored.',
     splitPreview: (n: number) => `${n} files`,
@@ -1216,6 +1237,12 @@ export const S = {
     targetLabel: 'Convert to',
     targetJpg: 'JPG',
     targetPng: 'PNG',
+    targetTiff: 'TIFF',
+    targetWebp: 'WebP (lossless)',
+    targetPdf: 'PDF',
+    pdfQualityNote: 'A PDF page holds the picture as a JPG, so the quality applies. One picture makes one single-page PDF.',
+    losslessNoQuality: (target: string) => `${target} is lossless, so there is no quality to choose.`,
+    tiffNote: 'TIFF keeps every pixel (LZW compression) and the colour profile. It is the usual format for scans.',
     qualityLabel: 'JPG quality',
     qualitySmall: 'Small',
     qualityBalanced: 'Balanced',

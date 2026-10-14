@@ -6,7 +6,7 @@
 // DOM, so it runs under `node --test`. The engine decides everything that touches disk; these rules only
 // decide what the screens offer and say.
 
-import type { Band, CropView, ItemView, Settings } from './types.ts';
+import type { Band, CropView, ItemView, SaveFormat, Settings } from './types.ts';
 
 /** Included crops that have a quad, in output order. */
 export function includedCrops(item: ItemView): CropView[] {
@@ -107,11 +107,26 @@ export function slotToIndex(item: ItemView, cropId: number, slot: number): numbe
   return others.indexOf(incOthers[slot]);
 }
 
-/** The output names the next split save plans, in output order. */
-export function plannedNames(item: ItemView): string[] {
+/** The Save formats the editor offers, in order. */
+export const SAVE_FORMATS: readonly SaveFormat[] = ['auto', 'jpeg', 'png', 'tiff', 'webp', 'pdf'];
+
+const SAVE_EXT: Record<SaveFormat, string | null> = { auto: null, jpeg: 'jpg', png: 'png', tiff: 'tif', webp: 'webp', pdf: 'pdf' };
+const OWN_FORMAT: Record<string, SaveFormat> = { jpg: 'jpeg', jpeg: 'jpeg', png: 'png', tif: 'tiff', tiff: 'tiff', webp: 'webp' };
+
+/** Whether saving this image in the chosen format changes its format (a copy is then the only way to save it). */
+export function changesFormat(item: Pick<ItemView, 'name'>, saveFormat: SaveFormat | undefined): boolean {
+  if (!saveFormat || saveFormat === 'auto') return false;
+  const ext = item.name.includes('.') ? (item.name.split('.').pop() ?? '').toLowerCase() : '';
+  return OWN_FORMAT[ext] !== saveFormat;
+}
+
+/** The output names the next split save plans, in output order, with the chosen format's extension. */
+export function plannedNames(item: ItemView, saveFormat: SaveFormat = 'auto'): string[] {
+  const ext = SAVE_EXT[saveFormat];
   return includedCrops(item)
     .map((c) => c.outputName)
-    .filter((n): n is string => !!n);
+    .filter((n): n is string => !!n)
+    .map((n) => (ext ? n.replace(/\.[^./\\]+$/, `.${ext}`) : n));
 }
 
 /** `a_01.jpg ... a_04.jpg` for four names; the whole list when three or fewer. */
@@ -135,6 +150,7 @@ export type SaveGate =
   | { replace: 'accept-first' } // a split scan the person has not accepted
   | { replace: 'accept-curved' } // a curved page the person has not accepted
   | { replace: 'open-only'; reason: string } // never replaced: copy only
+  | { replace: 'format-change' } // another Save format was chosen: a copy only
   | { replace: 'no-crop' };
 
 /**
@@ -142,9 +158,10 @@ export type SaveGate =
  * removes and overwrites nothing). Replacing a split scan needs the person's acceptance of the exact state,
  * or the experimental auto-save with every item Good; a source this build cannot write back is never replaced.
  */
-export function saveGate(item: ItemView, settings: Pick<Settings, 'autoSaveSplits'>): SaveGate {
+export function saveGate(item: ItemView, settings: Pick<Settings, 'autoSaveSplits'> & Partial<Pick<Settings, 'saveFormat'>>): SaveGate {
   if (item.status !== 'ready' || includedCrops(item).length === 0) return { replace: 'no-crop' };
   if (item.openOnly) return { replace: 'open-only', reason: item.openOnly };
+  if (changesFormat(item, settings.saveFormat)) return { replace: 'format-change' };
   if (isSplitScan(item)) {
     const approved = item.split?.triage.kind === 'approved';
     if (item.split?.accepted || (settings.autoSaveSplits && approved)) return { replace: 'ok' };

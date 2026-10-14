@@ -326,7 +326,7 @@ test('format names are the ones the person knows, and every engine format has on
   const start = src.indexOf('pub fn format_name');
   const names = [...src.slice(start, src.indexOf('\n}', start)).matchAll(/=> "([a-z]+)"/g)].map((m) => m[1]);
   assert.ok(names.length >= 10);
-  for (const n of names) assert.ok(n in { jpeg: 1, png: 1, tiff: 1, webp: 1, heic: 1, avif: 1, gif: 1, bmp: 1, jxl: 1, unknown: 1 }, `${n} is not in the ConvertFormat type`);
+  for (const n of names) assert.ok(n in { jpeg: 1, png: 1, tiff: 1, webp: 1, heic: 1, avif: 1, gif: 1, bmp: 1, jxl: 1, pdf: 1, unknown: 1 }, `${n} is not in the ConvertFormat type`);
 });
 
 test('the Convert copy has no empty line and says what the task asks', () => {

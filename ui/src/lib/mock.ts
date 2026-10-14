@@ -165,6 +165,8 @@ interface MockItem {
 const items = new Map<number, MockItem>();
 let nextId = 1;
 let settings: Settings = defaultSettings();
+/** The extension each Save format writes. */
+const SAVE_EXT: Record<Exclude<Settings['saveFormat'], 'auto'>, string> = { jpeg: 'jpg', png: 'png', tiff: 'tif', webp: 'webp', pdf: 'pdf' };
 let saveCount = 0;
 let failedOnce = false;
 let forcedFailure: ErrorCode | null = null;
@@ -472,7 +474,7 @@ function sampleDefs(): SampleDef[] {
     { name: 'scan_two.jpg', ...none, bed: 'two' },
     { name: 'scan_locked.jpg', ...none, bed: 'locked' },
     { name: 'ledger_pages.tif', kind: 'document', score: 0.98, forced: null, reasons: [], noise: 0.004, openOnly: 'tiff.multi_page' },
-    { name: 'holiday.webp', kind: 'receipt', score: 0.98, forced: null, reasons: [], noise: 0.004, openOnly: 'format.write_unavailable' },
+    { name: 'holiday.webp', kind: 'receipt', score: 0.98, forced: null, reasons: [], noise: 0.004, openOnly: 'webp.lossy' },
   ];
   // The curved page first: it is the one to try the curved-edges editor on. The detector, like the real one, finds a
   // rough quad and flags the top and bottom edges.
@@ -617,8 +619,10 @@ async function addFiles(files: File[]): Promise<OpenSummary> {
                   return { canvas: c, width: c.width * 3, height: c.height * 3 };
                 })()
               : await canvasFromFile(ok[i]);
-          if (e === 'webp') m.openOnly = 'format.write_unavailable';
-          if (e === 'tif' || e === 'tiff') m.openOnly = 'format.write_unavailable';
+          // Like the engine: a lossy WebP (the WebP writer is lossless only) and a 1-bit TIFF are open-only; a
+          // single-page 8-bit TIFF and a lossless WebP are written back.
+          if (e === 'webp' && /lossy|holiday/i.test(m.name)) m.openOnly = 'webp.lossy';
+          if ((e === 'tif' || e === 'tiff') && /bilevel|1bit|\bbw\b/i.test(m.name)) m.openOnly = 'tiff.low_depth';
           // Without a detector the mock proposes a slightly inset full frame.
           await finishAnalysis(m, canvas, width, height, documentState(defaultEdit(insetQuad(0.04)), confidence));
         } catch {
@@ -854,6 +858,12 @@ const api: Api = {
         fail('NOT_REPLACEABLE', [m.openOnly]);
         continue;
       }
+      // Another format is a conversion: a copy only (Convert replaces under a new name).
+      const chosen = settings.saveFormat === 'auto' ? null : SAVE_EXT[settings.saveFormat];
+      if (!copy && chosen && chosen !== m.ext.replace('tiff', 'tif')) {
+        fail('UNSUPPORTED_OUTPUT', ['format.change_needs_copy']);
+        continue;
+      }
       const split = inc.length >= 2;
       const curved = hasCurved(state);
       const sig = renderSignature(state);
@@ -867,7 +877,7 @@ const api: Api = {
         }
       }
       // Output names: a copy of an open-only source is a PNG; a taken name moves the WHOLE set to `name (2)`.
-      const ext = copy && m.openOnly ? 'png' : m.ext;
+      const ext = copy && chosen ? chosen : copy && m.openOnly ? 'png' : m.ext;
       let stem = m.stem;
       const plan = (s: string) => (split ? outputNames(s, ext, inc.length) : [outputName(s, ext, 1, 1)]);
       const ownOld = new Set(m.saved?.outputs ?? []);

@@ -9,7 +9,7 @@
   import RestoreDialog from '../lib/components/RestoreDialog.svelte';
   import Switch from '../lib/components/Switch.svelte';
   import { convert } from '../lib/convert.svelte.ts';
-  import { chipNotices, CUSTOM_QUALITY_START } from '../lib/convert.ts';
+  import { chipNotices, CUSTOM_QUALITY_START, TARGETS, usesQuality } from '../lib/convert.ts';
   import { formatBytes } from '../lib/format.ts';
   import { href } from '../lib/router.svelte.ts';
   import { store } from '../lib/store.svelte.ts';
@@ -56,7 +56,9 @@
 
   const o = $derived(convert.options);
   const days = $derived(store.settings.retentionDays);
-  const target = $derived(o.target === 'jpg' ? S.convert.targetJpg : S.convert.targetPng);
+  const targetNames = { jpg: S.convert.targetJpg, png: S.convert.targetPng, tiff: S.convert.targetTiff, webp: S.convert.targetWebp, pdf: S.convert.targetPdf } as const;
+  const target = $derived(targetNames[o.target]);
+  const qualityOn = $derived(usesQuality(o.target));
   const fixed = $derived(o.quality.kind === 'fixed' ? o.quality.value : null);
   const preset = $derived(o.quality.kind === 'preset' ? o.quality.preset : null);
   const n = $derived(convert.files.length);
@@ -275,13 +277,15 @@
 
             <fieldset class="group">
               <legend>{S.convert.targetLabel}</legend>
-              <div class="seg">
-                <button type="button" aria-pressed={o.target === 'jpg'} onclick={() => convert.setOptions({ target: 'jpg' })}>{S.convert.targetJpg}</button>
-                <button type="button" aria-pressed={o.target === 'png'} onclick={() => convert.setOptions({ target: 'png' })}>{S.convert.targetPng}</button>
+              <div class="seg wrap">
+                {#each TARGETS as t (t)}
+                  <button type="button" aria-pressed={o.target === t} onclick={() => convert.setOptions({ target: t })} data-target={t}>{targetNames[t]}</button>
+                {/each}
               </div>
+              {#if o.target === 'tiff'}<p class="caption">{S.convert.tiffNote}</p>{/if}
             </fieldset>
 
-            <fieldset class="group" disabled={o.target === 'png'}>
+            <fieldset class="group" disabled={!qualityOn}>
               <legend>{S.convert.qualityLabel}</legend>
               <div class="seg wrap">
                 {#each presets as pr (pr.id)}
@@ -289,8 +293,8 @@
                 {/each}
                 <button type="button" aria-pressed={fixed !== null} onclick={() => convert.setCustomQuality(fixed ?? CUSTOM_QUALITY_START)}>{S.convert.qualityCustom}</button>
               </div>
-              {#if o.target === 'png'}
-                <p class="caption">{S.convert.pngNoQuality}</p>
+              {#if !qualityOn}
+                <p class="caption">{S.convert.losslessNoQuality(target)}</p>
               {:else if fixed !== null}
                 <div class="custom">
                   <input

@@ -4,7 +4,7 @@
 // The pure rules of the Convert screen: option defaults and their storage, whether the run button is on and why
 // not, when a progress announcement is due, and how a conversion shows up in Backups. No DOM, no Tauri.
 
-import type { BackupFile, ConvertFileResult, ConvertOptions, ConvertPreview, ConvertQuality, QualityPreset } from './types.ts';
+import type { BackupFile, ConvertFileResult, ConvertOptions, ConvertPreview, ConvertQuality, ConvertTarget, QualityPreset } from './types.ts';
 
 export const DEFAULT_OPTIONS: ConvertOptions = {
   target: 'jpg',
@@ -19,6 +19,14 @@ export const DEFAULT_OPTIONS: ConvertOptions = {
 export const CUSTOM_QUALITY_START = 85;
 
 export const PRESETS: readonly QualityPreset[] = ['small', 'balanced', 'best'];
+
+/** The targets, in the order the screen lists them. */
+export const TARGETS: readonly ConvertTarget[] = ['jpg', 'png', 'tiff', 'webp', 'pdf'];
+
+/** Whether the quality setting does anything for this target: the JPG, and the JPG inside a PDF page. */
+export function usesQuality(target: ConvertTarget): boolean {
+  return target === 'jpg' || target === 'pdf';
+}
 
 export function clampQuality(n: number): number {
   if (!Number.isFinite(n)) return CUSTOM_QUALITY_START;
@@ -40,7 +48,7 @@ function qualityOf(v: unknown): ConvertQuality {
 export function sanitiseOptions(raw: unknown): ConvertOptions {
   const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   return {
-    target: oneOf(o.target, ['jpg', 'png'] as const, DEFAULT_OPTIONS.target),
+    target: oneOf(o.target, TARGETS, DEFAULT_OPTIONS.target),
     colour: oneOf(o.colour, ['srgb', 'preserve'] as const, DEFAULT_OPTIONS.colour),
     quality: qualityOf(o.quality),
     stripLocation: o.stripLocation === true,

@@ -48,6 +48,10 @@ const EXT_FORMAT: Record<string, string> = {
 
 export const CONVERT_ACCEPT = '.jpg,.jpeg,.png,.tif,.tiff,.webp,.heic,.heif,.avif,.gif,.bmp,image/*';
 
+/** The format name the engine reports for each Convert target, and the extension its files get. */
+const TARGET_FORMAT: Record<ConvertOptions['target'], string> = { jpg: 'jpeg', png: 'png', tiff: 'tiff', webp: 'webp', pdf: 'pdf' };
+const TARGET_EXT: Record<ConvertOptions['target'], string> = { jpg: 'jpg', png: 'png', tiff: 'tif', webp: 'webp', pdf: 'pdf' };
+
 const extOf = (name: string) => name.slice(name.lastIndexOf('.') + 1).toLowerCase();
 const stemOf = (name: string) => (name.lastIndexOf('.') > 0 ? name.slice(0, name.lastIndexOf('.')) : name);
 
@@ -82,7 +86,10 @@ function bytesOutOf(from: string, to: string, bytes: number, o: ConvertOptions):
   const q = o.quality.kind === 'fixed' ? Math.pow(o.quality.value / 85, 1.5) : { small: 0.7, balanced: 1, best: 1.6 }[o.quality.preset];
   const jpg: Record<string, number> = { heic: 1.5, png: 0.22, webp: 1.3, tiff: 0.1, bmp: 0.05, gif: 0.8, avif: 1.6, jpeg: 0.9, jxl: 1.1 };
   const png: Record<string, number> = { heic: 4, jpeg: 3.2, bmp: 0.3, gif: 1.2, webp: 2.5, tiff: 0.7, avif: 4, png: 0.97, jxl: 2 };
-  const r = to === 'jpeg' ? (jpg[from] ?? 1) * q : (png[from] ?? 1);
+  // JPG and a PDF page (a JPG inside) follow the quality; the lossless targets do not: a TIFF is a little larger
+  // than the PNG, a lossless WebP a little smaller.
+  const lossless = (png[from] ?? 1) * (to === 'tiff' ? 1.25 : to === 'webp' ? 0.8 : 1);
+  const r = to === 'jpeg' || to === 'pdf' ? (jpg[from] ?? 1) * q : lossless;
   return Math.max(2_000, Math.round(bytes * r));
 }
 
@@ -117,7 +124,7 @@ export function createConvertMock(deps: ConvertMockDeps) {
   function plan(e: Entry, o: ConvertOptions): { kind: 'convert' } | { kind: 'same' } | { kind: 'cannot'; code: string } {
     if (e.format === 'unknown') return { kind: 'cannot', code: 'UNSUPPORTED_FORMAT' };
     if ((e.format === 'heic' || e.format === 'avif') && !heifAvailable()) return { kind: 'cannot', code: 'HEIF_UNAVAILABLE' };
-    const target = o.target === 'jpg' ? 'jpeg' : 'png';
+    const target = TARGET_FORMAT[o.target];
     if (e.format === target && !o.reencode) return { kind: 'same' };
     return { kind: 'convert' };
   }
@@ -187,8 +194,8 @@ export function createConvertMock(deps: ConvertMockDeps) {
     const queue = files.filter((f) => !f.done);
     const runId = `conv-${Date.now().toString(36)}-${++runCount}`;
     const taken = new Set(files.map((f) => f.name.toLowerCase()));
-    const target = o.target === 'jpg' ? 'jpeg' : 'png';
-    const ext = o.target === 'jpg' ? 'jpg' : 'png';
+    const target = TARGET_FORMAT[o.target];
+    const ext = TARGET_EXT[o.target];
     const results: ConvertFileResult[] = [];
     let backup: BackupRun | null = null;
     let seed = 7;
@@ -235,7 +242,7 @@ export function createConvertMock(deps: ConvertMockDeps) {
             const notices: string[] = [];
             if (multi) notices.push(multi);
             if (e.format === 'heic' && /live/i.test(name)) notices.push('livephoto.video_untouched');
-            if (e.format === 'png' && o.target === 'jpg' && (/alpha/i.test(name) || e.id % 2 === 1)) notices.push('alpha.flattened');
+            if (e.format === 'png' && (o.target === 'jpg' || o.target === 'pdf') && (/alpha/i.test(name) || e.id % 2 === 1)) notices.push('alpha.flattened');
             if (e.format === 'heic' && o.colour === 'srgb') notices.push('colour.converted_to_srgb');
             if (e.format === 'heic' && e.id % 5 === 3) notices.push('colour.nclx_not_srgb');
             if (e.format === 'avif') notices.push('depth.reduced_to_8');

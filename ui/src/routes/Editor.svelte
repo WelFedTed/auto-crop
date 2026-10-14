@@ -75,6 +75,7 @@
     nextIncluded,
     pickSelection,
     plannedNames,
+    SAVE_FORMATS,
     saveGate,
     slotToIndex,
   } from '../lib/items.ts';
@@ -115,7 +116,7 @@
   } from '../lib/trim.ts';
   import { codeOf, store, type ScanSave } from '../lib/store.svelte.ts';
   import { FALLBACK_HOLD, S, errorMessage, holdAction, holdCause, holdTitle, noticeText } from '../lib/strings.ts';
-  import type { Band, CropView, CurveSet, Cut, Edit, Enhance, EnhanceMode, ItemView, Pt, SplitPolicy, SplitProfile } from '../lib/types.ts';
+  import type { Band, CropView, CurveSet, Cut, Edit, Enhance, EnhanceMode, ItemView, Pt, SaveFormat, SplitPolicy, SplitProfile } from '../lib/types.ts';
 
   let { id }: { id: number } = $props();
 
@@ -1141,12 +1142,20 @@
   }
 
   // ---- saving this scan -----------------------------------------------------------------------------------------
+  const saveFormatNames: Record<SaveFormat, string> = {
+    auto: S.save.formatAuto,
+    jpeg: S.save.formatJpeg,
+    png: S.save.formatPng,
+    tiff: S.save.formatTiff,
+    webp: S.save.formatWebp,
+    pdf: S.save.formatPdf,
+  };
   let lastSave = $state.raw<ScanSave | null>(null);
   let sheetOpen = $state(false);
   let splitSheetOpen = $state(false);
   let pendingTarget = $state<'copy' | 'replace'>('replace');
   const gate = $derived(item ? saveGate(item, store.settings) : ({ replace: 'no-crop' } as const));
-  const planned = $derived(item ? plannedNames(item) : []);
+  const planned = $derived(item ? plannedNames(item, store.settings.saveFormat) : []);
 
   function requestSave(target: 'copy' | 'replace'): void {
     pendingTarget = target;
@@ -1784,6 +1793,14 @@
                 <span class="mono">{nameSummary(planned)}</span>
               </div>
             {/if}
+            <label class="field">
+              {S.save.formatLabel}
+              <select class="select" value={store.settings.saveFormat} onchange={(e) => void store.updateSettings({ saveFormat: e.currentTarget.value as SaveFormat })} data-save-format>
+                {#each SAVE_FORMATS as f (f)}
+                  <option value={f}>{saveFormatNames[f]}</option>
+                {/each}
+              </select>
+            </label>
             <div class="btn-row">
               <button type="button" class="btn" disabled={!canSave} onclick={() => requestSave('copy')} data-save-copy>{S.save.saveAsCopy}</button>
               <button
@@ -1807,6 +1824,8 @@
               </div>
             {:else if gate.replace === 'open-only'}
               <div class="gate" data-gate="open-only">{S.save.openOnly} {noticeText(gate.reason)}</div>
+            {:else if gate.replace === 'format-change'}
+              <div class="gate" data-gate="format-change">{S.save.formatChange}</div>
             {:else}
               <div class="sub">{store.settings.saveAsCopy ? S.save.copyNote : S.save.replaceNote}</div>
             {/if}

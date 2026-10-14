@@ -25,6 +25,7 @@ export const defaultSettings = (patch: Partial<Settings> = {}): Settings => ({
   autoSaveSplits: false,
   curvedIntroAck: true,
   suggestEnhance: true,
+  saveFormat: 'auto',
   ...patch,
 });
 
