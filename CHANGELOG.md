@@ -1,5 +1,80 @@
 # Changelog
 
+## 0.0.4 (2026-10-14), pre-release, Windows only
+
+A fourth early test build. It is still **not** the CLI-only v0.1.0 of [ROADMAP.md](ROADMAP.md) milestone M2,
+the accuracy gates have not been measured on a proper real-photo set, and the confidence score is an
+uncalibrated heuristic. Treat it as a preview, not as something to trust with irreplaceable files.
+
+### What changed
+
+- **Convert formats.** A new **Convert** screen on Home (and `auto-crop convert --to jpg|png` on the command
+  line): drop files or folders, choose JPG or PNG, the quality and the colour handling, and choose whether the
+  originals are replaced (after a verified backup, as for crops), kept, or the results go to a folder. A
+  preview says what will happen to each file, then progress and a per-file result list; Restore returns the
+  original and handles the converted file. Anything the build can decode converts: HEIC, HEIF and AVIF with the
+  package below, plus TIFF, WebP, BMP, PNG and JPEG. A source with its own colour profile is converted to sRGB by
+  default (tested with Display P3; or kept as it is on request), EXIF is kept with the orientation applied once, GPS can be removed,
+  alpha is flattened on white for JPEG, and a file already in the target format is skipped. `AutoCrop.exe
+  --convert <paths>` opens the app on the Convert list.
+- **Enhancement for documents and receipts.** An Enhance panel in the editor with Original, Clean, Document
+  (black on white) and Receipt (faded thermal paper) and a strength slider, with a live preview, a hold-to-compare
+  and a split view. The app may *suggest* Clean for pages that look like documents (a gentle banner with Preview,
+  Apply and Not now); nothing is ever applied on its own in the app. For multi-item scans you can set it for one
+  item or the whole scan, and the grid has "Enhance all suggested" as one undo. On synthetic receipts and
+  prose pages, measured with Tesseract, the average reading error fell from about 13-16% to under 0.1% (shaded
+  and shadowed pages from 20-36% to about 0). Clean never read worse; the black-and-white modes can lose faint
+  marks, so keep Original if unsure. **No real photograph was used for this evidence.** PNG is recommended for
+  Document and Receipt output (they write a single grey channel and drop the colour profile, with a notice).
+  Command line: `process --enhance original|clean|document|receipt|auto` (`auto` applies only Clean, and only
+  where the page looks like a document) and `--enhance-strength`.
+- **Suggest curves.** In Curved mode a **Suggest curves** button fits the four edges of a page to the visible
+  paper edge, shows the result as a preview, and applies it only when you say so (one undo step; the page stays
+  held for review until you accept it). On synthetic pages the fitted edges were 1.5 px from the truth on
+  average against 2.0 px for the straight quad (strongly bent pages 2.1 against 4.3 px); on nearly straight
+  pages it is slightly worse, and on the one real curved receipt we have, the fit looked close to the paper edge by eye
+  (there is no measurement beyond that). There is no automatic "this page looks curved" badge: the flag was not reliable on real
+  receipts. A first-use sheet explains what Curved mode does and does not fix.
+- **A more honest page finder.** Tested against hand-drawn labels on 17 real pictures, the previous build
+  accepted 4 results as Good and 3 of them were wrong. Now a small box inside a larger page of the same colour
+  (a barcode on a receipt that fills the frame) is never accepted, a page that fills the whole frame comes back
+  as a held full-frame candidate, a quad whose edges have the same colour on both sides gets no credit (wood
+  grain), and a picture sitting inside a border of the page's own colour is held (`DETECTORS_DISAGREE`). On
+  those 17 pictures: mean IoU 0.62 to 0.69, silent failures 3 to 0, held 14 of 17. This is a small sample, the
+  rules were developed on synthetic reproductions, and hand-held receipts and some long receipts are still
+  wrong (held, not written). A print with a white mat is held: the finder keeps the paper edge, while the
+  owner's label is the picture inside.
+- Edits are saved in format **v4** (v1, v2 and v3 edits migrate without loss). A build older than 0.0.4 cannot
+  read edits saved by this one.
+
+### The package with HEIC, HEIF and AVIF
+
+`AutoCrop-0.0.4-windows-x64.zip` (the only download) contains the app, the command-line tool, three DLLs and a
+`libheif` plugin folder. HEIC and AVIF files are parsed **inside the app** (the sandboxed helper process of the
+plan does not exist yet), so use this build for your own files only. It is unsigned (Windows SmartScreen will
+warn). HEIC and AVIF files are open-only for crops: use Save as copy, or Convert to JPG or PNG.
+
+### Known limits
+
+- Real touch input, screen readers, the native file dialog and drag-and-drop were not tested for the new
+  screens; the window was driven through WebView2 remote debugging on synthetic images only.
+- There is no library.db (the backup manifests are the index), file identity and extended attributes are not
+  carried over, and power loss is not modelled.
+- The classical detector fails about 40% of the time on a second, independent set of synthetic scenes and gets
+  hand-held receipts wrong. A learned detector was studied (small net, GPU-trained on synthetic data) and is
+  **not** in this build: it beat the classical one on synthetic data and was only slightly better, not
+  significantly, on the 17 real pictures.
+- Curves are bent by hand or by the on-demand suggestion; wrinkles inside a page are not flattened.
+- No `--preset`, no 1-bit output, English only, Windows 10/11 x64 only.
+
+### Verification
+
+- Automated tests run on Windows, macOS and Ubuntu CI (core, kernels, detector, codecs, engine save and restore
+  invariants including fault injection and the kill loop, curved-page and enhancement oracles, 228 UI tests,
+  fuzz regressions, OCR checks for enhancement).
+- Built in GitHub Actions, **unsigned**, with no build attestation or SBOM. Check the download against
+  `SHA256SUMS`.
+
 ## 0.0.3 (2026-10-11), pre-release, Windows only
 
 A third early test build. It is still **not** the CLI-only v0.1.0 of [ROADMAP.md](ROADMAP.md) milestone M2,
