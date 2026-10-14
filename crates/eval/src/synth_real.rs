@@ -41,12 +41,23 @@ fn quad_of(c: [(f64, f64); 4]) -> Quad {
 
 /// One scene of the suite: the image, the truth and the tags.
 pub fn scene(spec: &SuiteSpec, i: usize) -> (Raster, Quad, BTreeMap<String, String>) {
+    let (img, truth, tags, _) = scene_with_picture(spec, i);
+    (img, truth, tags)
+}
+
+/// [`scene`] and, for a matted print, the corners of the picture inside the mat (what a "trim to
+/// content" should find); `None` for the other families.
+pub fn scene_with_picture(
+    spec: &SuiteSpec,
+    i: usize,
+) -> (Raster, Quad, BTreeMap<String, String>, Option<Quad>) {
     let family = i % FAMILIES.len();
     let mut r = SplitMix64(mix(spec.seed, 0xCA5E ^ i as u64));
     let seed = r.next_u64() >> 8;
     let e = spec.max_edge;
     let mut tags: BTreeMap<String, String> = BTreeMap::new();
     tags.insert("family".to_owned(), FAMILIES[family].to_owned());
+    let mut picture: Option<Quad> = None;
     let (img, truth) = match family {
         0 => {
             // Receipt photographs and screenshots: 2:1 to 3.4:1, white to cream, a little noise.
@@ -135,7 +146,8 @@ pub fn scene(spec: &SuiteSpec, i: usize) -> (Raster, Quad, BTreeMap<String, Stri
             };
             let mat = 0.03 + 0.03 * r.unit();
             let pic = mat + 0.06 + 0.03 * r.unit();
-            let (img, mat_corners, _) = matted_print((w, h), mat, pic, seed);
+            let (img, mat_corners, pic_corners) = matted_print((w, h), mat, pic, seed);
+            picture = Some(quad_of(pic_corners));
             tags.insert("policy".to_owned(), "paper-edge".to_owned());
             (img, quad_of(mat_corners))
         }
@@ -144,7 +156,7 @@ pub fn scene(spec: &SuiteSpec, i: usize) -> (Raster, Quad, BTreeMap<String, Stri
         "format".to_owned(),
         if i % 4 < 2 { "png" } else { "jpeg" }.to_owned(),
     );
-    (img, truth, tags)
+    (img, truth, tags, picture)
 }
 
 /// Writes `images/*` and `manifest.jsonl` under `out`.

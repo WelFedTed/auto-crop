@@ -48,6 +48,7 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (mut dir, mut labels, mut out, mut rows) = (None, None, None, false);
     let mut trace_n: Option<usize> = None;
+    let mut trim = false;
     let mut only: Option<usize> = None;
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -55,6 +56,7 @@ fn main() {
             "--labels" => labels = it.next().map(PathBuf::from),
             "--out" => out = it.next().map(PathBuf::from),
             "--rows" => rows = true,
+            "--trim" => trim = true,
             "--only" => only = it.next().and_then(|v| v.parse().ok()),
             "--trace" => trace_n = it.next().and_then(|v| v.parse().ok()),
             other => dir = Some(PathBuf::from(other)),
@@ -81,6 +83,10 @@ fn main() {
     files.sort();
 
     let (mut n, mut below, mut good, mut silent, mut held, mut none) = (0, 0, 0, 0, 0, 0);
+    // `--trim`: how often "Trim to content" has a proposal, and how the label compares to the
+    // paper edge and to the proposal on those pictures (aggregates only).
+    let (mut trims, mut iou_paper, mut iou_trim, mut trim_better) =
+        (0usize, 0.0f64, 0.0f64, 0usize);
     let (mut sum_iou, mut sum_ms) = (0.0f64, 0.0f64);
     for lf in &files {
         let v: serde_json::Value =
@@ -134,6 +140,22 @@ fn main() {
             }
             "Check" => held += 1,
             _ => none += 1,
+        }
+        if trim && let Some(q) = det.quad {
+            let proxy = resize_to_fit(&decoded.raster, 2048);
+            if let Some(t) = auto_crop_imgproc::trim::trim_to_content(&proxy, q) {
+                let tq: Quad = std::array::from_fn(|i| [t.quad[i].x, t.quad[i].y]);
+                let it = canonical_iou(&truth, &tq).unwrap_or(0.0);
+                trims += 1;
+                iou_paper += iou;
+                iou_trim += it;
+                if it > iou {
+                    trim_better += 1;
+                }
+                if rows {
+                    println!("#{n:02} trim proposed: IoU paper edge {iou:.3} -> trimmed {it:.3}");
+                }
+            }
         }
         if trace_n == Some(n as usize) {
             for c in auto_crop_imgproc::detect::trace(&decoded.raster)
@@ -201,6 +223,13 @@ fn main() {
         return;
     }
     let nf = f64::from(n);
+    if trim {
+        println!(
+            "trim to content: proposed on {trims} of {n} pictures; on those the mean IoU against the label is {:.3} for the paper edge and {:.3} for the proposal; the proposal is closer to the label on {trim_better}",
+            iou_paper / trims.max(1) as f64,
+            iou_trim / trims.max(1) as f64
+        );
+    }
     println!(
         "items {n}  mean IoU {:.3}  below 0.90: {below}  none: {none}  auto-accepted: {good}  silent failures: {silent}  held (Check): {held}  detect {:.0} ms/picture",
         sum_iou / nf,

@@ -18,6 +18,7 @@ pub mod render;
 pub mod scale;
 pub mod synth;
 pub mod threshold;
+pub mod trim;
 pub mod warp;
 
 /// Pixel dimensions of an image.
