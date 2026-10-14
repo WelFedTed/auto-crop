@@ -22,6 +22,10 @@ pub enum Format {
     Bmp,
     /// JPEG XL, codestream or container (recognised only).
     Jxl,
+    /// PDF: an output format only. [`sniff`] never returns it (a PDF input is not read in 1.0), and
+    /// it is neither decodable nor probeable; the engine verifies a PDF it wrote through
+    /// `encoders::pdf::read_pages`.
+    Pdf,
 }
 
 impl Format {
@@ -37,6 +41,7 @@ impl Format {
             Format::Gif => "gif",
             Format::Bmp => "bmp",
             Format::Jxl => "jxl",
+            Format::Pdf => "pdf",
         }
     }
 
@@ -55,9 +60,13 @@ impl Format {
         self.is_decodable() || matches!(self, Format::Heic | Format::Avif)
     }
 
-    /// True for the formats [`crate::encode`] writes in this build.
+    /// True for the formats this build writes: JPEG and PNG through [`crate::encode`] and the
+    /// encoders of [`crate::encoders`], TIFF, lossless WebP and PDF through the encoders only.
     pub fn is_encodable(self) -> bool {
-        matches!(self, Format::Jpeg | Format::Png)
+        matches!(
+            self,
+            Format::Jpeg | Format::Png | Format::Tiff | Format::Webp | Format::Pdf
+        )
     }
 }
 

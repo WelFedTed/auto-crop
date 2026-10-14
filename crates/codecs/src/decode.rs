@@ -277,6 +277,14 @@ pub(crate) fn decode_raw_alpha(
     {
         notices.push("cmyk.naive_conversion");
     }
+    // What a writer of this build could not give back exactly (the engine refuses to replace the
+    // file with its own re-encode): a lossy WebP, a TIFF stored below 8 bits (1-bit scans).
+    if h.lossy {
+        notices.push("webp.lossy");
+    }
+    if format == Format::Tiff && h.bit_depth < 8 {
+        notices.push("tiff.low_depth");
+    }
     let mut flattened = None;
     if colour.has_alpha() && has_translucent_pixels(&img) {
         if alpha == Alpha::OverWhite {

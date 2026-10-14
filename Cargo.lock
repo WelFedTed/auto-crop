@@ -181,11 +181,13 @@ dependencies = [
  "fax",
  "flate2",
  "image",
+ "image-webp",
  "jpeg-encoder",
  "png 0.18.1",
  "rayon",
  "thiserror 2.0.21",
  "tiff",
+ "weezl",
  "zune-jpeg",
 ]
 

@@ -14,7 +14,7 @@ publish.workspace = true
 [features]
 # Generators for synthetic and hostile test files (ROADMAP M1.12, M1.69). Never enabled in a shipped
 # build; `xtask` turns it on for `make-hostile`. The dev-dependencies below make it available to tests.
-fixtures = ["dep:tiff", "dep:fax"]
+fixtures = ["dep:tiff"]
 # libjpeg-turbo (>= 3.1.4, built by `cargo xtask build-native` from the pin in native-deps.toml):
 # DCT-domain scaled decode, lossless transforms through tj3Transform, the baseline JPEG encoder.
 # Off by default: the default build is pure Rust and needs no C toolchain (ROADMAP M1.18, ADR-0008).
@@ -40,20 +40,29 @@ jpeg-encoder = "0.7"
 # PNG writer for the baseline encoder (8/16-bit, pHYs, iCCP); the decoder side stays behind `image`.
 png = "0.18"
 tiff = { version = "0.11", optional = true }
-fax = { version = "0.2", optional = true }
+# CCITT Group 4 (T.6) row encoder and decoder: the 1-bit TIFF and PDF writers (M7.29, M11.30, M11.35).
+fax = "0.2"
+# TIFF-flavoured LZW (already in the tree through `tiff`): the TIFF writer's compression.
+weezl = "0.1"
+# Lossless WebP (VP8L) encoder with ICC, EXIF and XMP chunks; the decoder side stays behind `image`.
+image-webp = "0.2"
 # Bounded inflate of the PNG iCCP chunk before the PNG decoder sees it (already in the tree via `png`).
 flate2 = "1"
 
 [dev-dependencies]
 rayon = "1"
 tiff = "0.11"
-fax = "0.2"
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 
 # CI and timing helper of the `heif` feature (decode one file, print one line).
 [[example]]
 name = "heif_probe"
 required-features = ["heif"]
+
+# Writes one sample per output writer for the independent readers (tools/interop, CI `interop` job).
+[[example]]
+name = "write_samples"
+required-features = ["fixtures"]
 
 # ROADMAP M1.56; `cargo bench -p auto-crop-codecs --features fixtures[,turbojpeg] --bench decode`.
 [[bench]]

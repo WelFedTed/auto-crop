@@ -18,6 +18,14 @@ use auto_crop_core::ports::{EncodeMeta, Encoder, PixelFormat, RasterView, Sample
 use auto_crop_core::{CancelToken, ErrKind, Interrupt, OutputSpec};
 use std::borrow::Cow;
 
+pub mod bilevel;
+pub mod pdf;
+pub mod tiff_encoder;
+pub mod webp;
+pub use pdf::PdfEncoder;
+pub use tiff_encoder::{TiffCompression, TiffEncoder};
+pub use webp::WebpEncoder;
+
 /// Quality used when the spec does not pin one (the M1.21 baseline).
 pub const DEFAULT_JPEG_QUALITY: u8 = 90;
 
@@ -258,3 +266,9 @@ impl Encoder for PngEncoder {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_formats;
+#[cfg(test)]
+mod tests_notices;
+#[cfg(test)]
+mod tests_pdf;

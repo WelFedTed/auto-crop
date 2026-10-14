@@ -34,6 +34,9 @@ pub(crate) fn parse(b: &[u8], limits: &DecodeLimits) -> Result<Header, CodecErro
         let data = i + 8;
         let data_end = data.saturating_add(len);
         let in_file = data_end <= end;
+        if kind == b"VP8 " {
+            h.lossy = true;
+        }
         match kind {
             b"VP8X" if len >= 10 && in_file => {
                 let flags = b[data];

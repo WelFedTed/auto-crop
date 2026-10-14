@@ -84,6 +84,8 @@ pub(crate) struct Header {
     pub unsupported: Option<String>,
     /// HEIF and AVIF only.
     pub heif: Option<HeifInfo>,
+    /// WebP only: the picture is lossy (`VP8 `), so a lossless re-encode would not be the same file.
+    pub lossy: bool,
 }
 
 impl Header {
@@ -104,6 +106,7 @@ impl Header {
             compression: 0,
             unsupported: None,
             heif: None,
+            lossy: false,
         }
     }
 }

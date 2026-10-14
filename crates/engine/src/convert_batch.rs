@@ -65,6 +65,7 @@ pub fn format_name(f: Option<Format>) -> &'static str {
         Some(Format::Gif) => "gif",
         Some(Format::Bmp) => "bmp",
         Some(Format::Jxl) => "jxl",
+        Some(Format::Pdf) => "pdf",
         None => "unknown",
     }
 }
