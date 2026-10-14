@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.0.5 (2026-10-15), pre-release, Windows, macOS and Linux test builds
+
+A fifth early test build, and the first with **macOS and Linux downloads**. It is still **not** the CLI-only
+v0.1.0 of [ROADMAP.md](ROADMAP.md) milestone M2, the accuracy gates have not been measured on a proper
+real-photo set, and the confidence score is an uncalibrated heuristic. Treat it as a preview, not as something
+to trust with irreplaceable files.
+
+### What changed
 
 - **Trim to content.** A print on a wide white mat (or any page that holds a picture inside a border of the
   page's own colour) is still cropped at the paper edge and held for a look ("Two possible outlines"), but the
@@ -20,6 +27,44 @@
   the verified backup like a JPG or PNG; a lossy WebP, a 1-bit TIFF and a TIFF with Exif or GPS details stay
   copy-only and say why. See [docs/dev/output-formats.md](docs/dev/output-formats.md). AVIF and JPEG XL output
   are still missing.
+- **macOS and Linux test builds.** Besides the Windows zip, this release carries `AutoCrop` for **macOS** (Apple
+  silicon, and a best-effort Intel build; a zip and a DMG each) and **Linux x86_64** (a `.tar.gz`, an AppImage
+  and a `.deb`), all with the command-line tool and HEIC, HEIF and AVIF input. They are **unsigned** (macOS is
+  ad-hoc signed only, not notarised: right-click Open, or `xattr -dr com.apple.quarantine`, see
+  [docs/packaging.md](docs/packaging.md)); the Linux AppImage and `.deb` use WebKitGTK 4.1 and GTK 3 from your
+  distribution. They were built and smoke-tested **on CI runners only** (the command-line tool decodes the AVIF
+  and HEIC test files from a clean folder, and the window starts and stays up for 10 seconds), and have **not
+  yet run on a real Mac or Linux desktop**: expect rough edges (a placeholder icon, no file associations on
+  Linux, touch input on Linux is best-effort).
+
+### Packages and checksums
+
+`AutoCrop-0.0.5-windows-x64.zip`, `AutoCrop-0.0.5-macos-arm64.zip` and `.dmg`, `AutoCrop-0.0.5-macos-x86_64.zip`
+and `.dmg`, `AutoCrop-0.0.5-linux-x86_64.tar.gz`, `.AppImage` and `.deb`, and `SHA256SUMS` for all of them. HEIC
+and AVIF files are parsed **inside the app** (the sandboxed helper process of the plan does not exist yet), so
+use these builds for your own files only. HEIC and AVIF files are open-only for crops: use Save as copy, or
+Convert to JPG or PNG.
+
+### Known limits
+
+- Real touch input, screen readers, the native file dialog and drag-and-drop were not tested for the new
+  screens; the window was driven through WebView2 remote debugging on synthetic images only.
+- Trim to content, the new output writers and the enhancement evidence come from synthetic pages (one real
+  matted print: 0.709 to 0.993 IoU against the owner's label).
+- There is no library.db (the backup manifests are the index), file identity and extended attributes are not
+  carried over, and power loss is not modelled.
+- The classical detector fails about 40% of the time on a second, independent set of synthetic scenes and gets
+  hand-held receipts wrong (held, not written). A learned detector is **not** in this build.
+- No lossy WebP, no AVIF or JPEG XL output, no `--preset`, English only.
+
+### Verification
+
+- Automated tests run on Windows, macOS and Ubuntu CI (core, kernels, detector, codecs, engine save and restore
+  invariants including fault injection and the kill loop, curved-page and enhancement oracles, the new writers
+  checked with independent tools on Linux, 254 UI tests, fuzz regressions, a build of the shell with the GUI on
+  all three OSes).
+- Built in GitHub Actions, **unsigned**, with no build attestation or SBOM. Check every download against
+  `SHA256SUMS`.
 
 ## 0.0.4 (2026-10-14), pre-release, Windows only
 

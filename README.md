@@ -59,9 +59,13 @@ With no output option `process` **overwrites your files**, after saving a verifi
 
 ## Install
 
-A **pre-release** (0.0.4, Windows 10/11 x64 only) is on the [Releases page](https://github.com/WelFedTed/auto-crop/releases): download `AutoCrop-0.0.4-windows-x64.zip`, check it against `SHA256SUMS`, unzip, run `AutoCrop.exe`. It needs the Microsoft Edge WebView2 runtime (part of Windows 11 and current Windows 10). It is an early test build, see [CHANGELOG.md](CHANGELOG.md) for what it does and does not do. Planned: a Windows installer first, then macOS (Apple silicon) and Linux (AppImage, deb, rpm, Flatpak).
+A **pre-release** (0.0.5) is on the [Releases page](https://github.com/WelFedTed/auto-crop/releases), with test builds for three platforms. Check every download against `SHA256SUMS`.
 
-**Test builds for macOS and Linux** exist but are not on the Releases page: the manual workflows `package-macos.yml` (`AutoCrop.app` as zip and DMG, ad-hoc signed, not notarised; Apple silicon, and best-effort Intel) and `package-linux.yml` (`.tar.gz`, AppImage and `.deb` for x86_64, with WebKitGTK 4.1 and GTK 3 from your distribution) build them in CI and keep them as workflow artifacts for 14 days. They were smoke-tested on CI runners only, not yet on a real Mac or Linux desktop, and they parse HEIC and AVIF inside the app's own process. What is in them, how to open an unsigned macOS app, how to build them yourself and what is not verified: [docs/packaging.md](docs/packaging.md).
+- **Windows 10/11 x64:** download `AutoCrop-0.0.5-windows-x64.zip`, unzip, run `AutoCrop.exe`. It needs the Microsoft Edge WebView2 runtime (part of Windows 11 and current Windows 10).
+- **macOS (Apple silicon; Intel is best-effort):** download the `macos-arm64` (or `macos-x86_64`) zip or DMG and open `AutoCrop.app`. It is ad-hoc signed and not notarised: right-click, Open, or `xattr -dr com.apple.quarantine AutoCrop.app`.
+- **Linux x86_64:** the AppImage (`chmod +x`, then run) or the `.deb` or `.tar.gz`; they use WebKitGTK 4.1 and GTK 3 from your distribution (package names are in the package README).
+
+The macOS and Linux builds were smoke-tested on CI runners only and have not yet run on a real desktop. They parse HEIC and AVIF inside the app's own process. What is in each package, how to build them yourself and what is not verified: [docs/packaging.md](docs/packaging.md). These are early test builds: see [CHANGELOG.md](CHANGELOG.md) for what they do and do not do. Planned: a Windows installer, then rpm and Flatpak for Linux.
 
 Early builds will not be code-signed (the project has a $0 budget), so Windows SmartScreen and macOS Gatekeeper will show warnings. Step-by-step instructions and checksums will accompany every release.
 
