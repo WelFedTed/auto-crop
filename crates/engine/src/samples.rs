@@ -490,6 +490,102 @@ fn curved_sample() -> auto_crop_imgproc::Raster {
     r
 }
 
+// ---------------------------------------------------------------- the print on a white mat
+
+/// File name of the matted sample: a landscape print on a wide white mat lying on a desk. The
+/// detector answers with the paper edge and holds it (`DETECTORS_DISAGREE`: a picture sits inside a
+/// border); "Trim to content" proposes the picture. Synthetic, so a person can try it without
+/// private data (B21).
+pub const MATTED_SAMPLE: &str = "print_on_white_mat.jpg";
+
+/// Size of the matted sample picture.
+pub const MATTED_SIZE: (u32, u32) = (1800, 1350);
+
+/// The paper (the outer edge of the mat) on the matted sample, normalised, TL, TR, BR, BL.
+pub const MATTED_PAPER: [(f64, f64); 4] = [(0.27, 0.09), (0.73, 0.07), (0.74, 0.93), (0.26, 0.91)];
+
+/// The picture inside the mat, as shares of the paper's width and height: left, top, right, bottom.
+const MATTED_PICTURE: (f64, f64, f64, f64) = (0.17, 0.13, 0.83, 0.78);
+
+/// The picture inside the mat of the matted sample, normalised, TL, TR, BR, BL: where the paper's
+/// picture rectangle lands on the sample (the paper is a perspective quad).
+pub fn matted_sample_picture() -> [(f64, f64); 4] {
+    use auto_crop_imgproc::geometry::{apply, homography};
+    let (l, t, r, b) = MATTED_PICTURE;
+    let (w, h) = (f64::from(MATTED_SIZE.0), f64::from(MATTED_SIZE.1));
+    let quad: [(f64, f64); 4] = MATTED_PAPER.map(|(x, y)| (x * w, y * h));
+    let to_image =
+        homography([(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)], quad).expect("a plain quad");
+    [(l, t), (r, t), (r, b), (l, b)].map(|(u, v)| {
+        let (x, y) = apply(&to_image, u, v).expect("finite");
+        (x / w, y / h)
+    })
+}
+
+/// A landscape at `(u, v)` of the picture (0..1): sky shading to a pale horizon, a low sun, two
+/// ranges of hills and a dark foreground.
+fn landscape(u: f64, v: f64) -> [f32; 3] {
+    let hill = |amp: f64, freq: f64, phase: f64, base: f64| {
+        base + amp * ((u * freq + phase).sin() * 0.6 + (u * freq * 2.3 + phase * 1.7).sin() * 0.4)
+    };
+    let far = hill(0.035, 5.5, 0.4, 0.58);
+    let near = hill(0.05, 3.2, 2.1, 0.74);
+    let mut c = if v > near {
+        [34.0, 44.0, 36.0]
+    } else if v > far {
+        let k = ((v - far) / (near - far)).clamp(0.0, 1.0) as f32;
+        [74.0 - 22.0 * k, 90.0 - 24.0 * k, 78.0 - 22.0 * k]
+    } else {
+        let k = (v / far).clamp(0.0, 1.0) as f32;
+        [64.0 + 86.0 * k, 92.0 + 72.0 * k, 142.0 + 44.0 * k]
+    };
+    let d = ((u - 0.68) / 0.12).hypot((v - 0.42) / 0.16);
+    let sun = (-d * d * 2.2).exp() as f32;
+    for (ch, glow) in c.iter_mut().zip([252.0f32, 236.0, 190.0]) {
+        *ch += (glow - *ch) * sun * 0.85;
+    }
+    c
+}
+
+/// The matted sample picture: a print on a wide white mat, laid on a desk, 2x2 supersampled.
+fn matted_sample() -> auto_crop_imgproc::Raster {
+    use auto_crop_imgproc::Raster;
+    use auto_crop_imgproc::geometry::{apply, homography};
+    const DESK: [f32; 3] = [118.0, 98.0, 80.0];
+    const MAT: [f32; 3] = [248.0, 246.0, 240.0];
+    let (w, h) = MATTED_SIZE;
+    let quad: [(f64, f64); 4] = MATTED_PAPER.map(|(x, y)| (x * f64::from(w), y * f64::from(h)));
+    let to_page =
+        homography(quad, [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]).expect("a plain quad");
+    let (l, t, r, b) = MATTED_PICTURE;
+    let mut out = Raster::filled(w, h, [0, 0, 0]);
+    let mut rng = Rng::new(31);
+    for y in 0..h {
+        for x in 0..w {
+            let n = (rng.unit() - 0.5) * 6.0;
+            let mut acc = [0.0f32; 3];
+            for (dx, dy) in [(0.25, 0.25), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75)] {
+                let (u, v) =
+                    apply(&to_page, f64::from(x) + dx, f64::from(y) + dy).unwrap_or((-1.0, -1.0));
+                let c = if !(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v) {
+                    DESK
+                } else if u >= l && u < r && v >= t && v < b {
+                    landscape((u - l) / (r - l), (v - t) / (b - t))
+                } else {
+                    // A faint lighting gradient over the mat.
+                    let shade = 1.0 - 0.05 * (u as f32);
+                    MAT.map(|m| m * shade)
+                };
+                for k in 0..3 {
+                    acc[k] += c[k] * 0.25;
+                }
+            }
+            out.set_pixel(x, y, acc.map(|v| (v + n).clamp(0.0, 255.0) as u8));
+        }
+    }
+    out
+}
+
 /// Writes the sample set into `dir` (created if needed) and returns the files in order. Existing
 /// files are reused, so "Try sample images" is instant the second time.
 pub fn write_samples(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
@@ -503,6 +599,14 @@ pub fn write_samples(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
         fs::write(&curved, bytes)?;
     }
     out.push(curved);
+    // The print on a white mat: the one to try "Trim to content" on.
+    let matted = dir.join(MATTED_SAMPLE);
+    if !matted.exists() {
+        let bytes = encode(&matted_sample(), Format::Jpeg, 90, None)
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+        fs::write(&matted, bytes)?;
+    }
+    out.push(matted);
     // The shaded pages next: the ones to try Clean on.
     for (file, raster) in shaded_samples() {
         let path = dir.join(file);
@@ -558,7 +662,7 @@ mod tests {
         let first = write_samples(d.path()).unwrap();
         assert_eq!(
             first.len(),
-            specs().len() + bed_samples().len() + shaded_samples().len() + 1
+            specs().len() + bed_samples().len() + shaded_samples().len() + 2
         );
         assert!(
             first[0].ends_with(CURVED_SAMPLE),

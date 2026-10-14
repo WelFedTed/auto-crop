@@ -44,6 +44,12 @@ pub struct CropOut {
     /// one automatic application is `process --enhance auto`, which a run must ask for.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enhance_suggestion: Option<auto_crop_engine::EnhanceSuggestion>,
+    /// "Trim to content" is available for this crop: a picture sits inside a border of the page's own
+    /// colour (a print on a wide mat) and this is its outline (`quad`, as above), the confidence of
+    /// the proposal and why (`mat`, `thinBorder`). Absent when there is nothing to trim to (nearly
+    /// every page). A report only: `analyze` applies and writes nothing, and `process` never trims.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trim_to_content: Option<auto_crop_engine::TrimProposal>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -162,6 +168,7 @@ fn analyse_one(
                 mirror: c.mirror,
                 confidence: c.confidence.as_ref().map(|c| confidence_rec(c, sh.cutoff)),
                 enhance_suggestion: sh.engine.suggest_enhance(ready.id, c.id).ok().flatten(),
+                trim_to_content: sh.engine.trim_to_content(ready.id, c.id).ok().flatten(),
             })
         })
         .collect();
@@ -247,6 +254,18 @@ fn text_line(it: &AnalysisItem) -> String {
                     line.push_str(&format!(
                         " turn {}x90 + {:.2} deg",
                         c.quarter_turns, c.fine_deg
+                    ));
+                }
+                if let Some(t) = &c.trim_to_content {
+                    let q = t
+                        .quad
+                        .iter()
+                        .map(|p| format!("({:.3},{:.3})", p.x, p.y))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    line.push_str(&format!(
+                        "\n    trim to content available: {q} confidence {:.2}",
+                        t.confidence
                     ));
                 }
             }

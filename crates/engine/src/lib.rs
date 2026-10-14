@@ -36,6 +36,7 @@ pub mod skeleton;
 pub mod source;
 pub mod space;
 pub mod store;
+pub mod trim;
 pub mod util;
 
 pub use api::*;
@@ -51,6 +52,7 @@ pub use output::{EngineOptions, QualityPreset, QualitySetting};
 pub use paths::AppPaths;
 pub use scan::{CropImage, ProcessedInfo};
 pub use settings::Settings;
+pub use trim::{TRIM_LABEL, TrimProposal, TrimWhy};
 
 use auto_crop_core::EditState;
 

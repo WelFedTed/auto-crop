@@ -357,6 +357,13 @@ black-and-white look that fits (`black_and_white`: `receipt` for a long thin pag
 `document`, with what it writes), and the numbers measured on the page. The key is absent for a crop to leave
 alone (a photograph, a clean black-on-white scan). Nothing is applied or written by `analyze`.
 
+A crop that holds a picture inside a border of the page's own colour (a print on a wide white mat, a
+photograph with a white edge) also carries `trim_to_content`: whether **Trim to content** is available in the
+editor, the picture's outline (`quad`, same convention as the crop's), the proposal's `confidence` (0.5 to
+0.95, uncalibrated) and `reason` (`mat` or `thinBorder`). The detector still answers with the paper edge
+(held, `DETECTORS_DISAGREE`); the key is absent for every other page, and there is no `process` option that
+trims: it is an editor action a person chooses.
+
 ### `render`
 
 ```text
