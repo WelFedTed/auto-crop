@@ -70,6 +70,8 @@ jobs:
         run: |
           cargo build --release -p auto-crop-shell --features "gui,custom-protocol,heif"
           cargo build --release -p auto-crop-cli --features heif
+          # the sandboxed decode worker (ADR-0013) ships beside the executables
+          cargo build --release -p auto-crop-worker --features heif
           ls -l target/release/AutoCrop target/release/auto-crop
           file target/release/AutoCrop target/release/auto-crop
       - name: Third-party notices (cargo about)

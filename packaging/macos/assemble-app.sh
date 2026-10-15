@@ -11,6 +11,7 @@
 #   AutoCrop.app/Contents/Info.plist
 #   AutoCrop.app/Contents/MacOS/AutoCrop            the desktop app
 #   AutoCrop.app/Contents/MacOS/auto-crop           the command-line tool
+#   AutoCrop.app/Contents/MacOS/auto-crop-worker    the sandboxed decode worker (ADR-0013), beside the executables
 #   AutoCrop.app/Contents/Frameworks/               libheif, dav1d, libde265 dylibs (@rpath)
 #   AutoCrop.app/Contents/Frameworks/libheif/       the libde265 plugin of libheif (HEVC, HEIC)
 #   AutoCrop.app/Contents/Resources/                icon, licence texts, native-deps.toml
@@ -30,7 +31,9 @@ rm -rf "$app"
 mkdir -p "$contents/MacOS" "$fw/libheif" "$contents/Resources/licenses"
 
 # Executables
-cp "$RELEASE/AutoCrop" "$RELEASE/auto-crop" "$contents/MacOS/"
+cp "$RELEASE/AutoCrop" "$RELEASE/auto-crop" "$RELEASE/auto-crop-worker" "$contents/MacOS/"
+# A shipped worker has none of the test-only escape hooks (crates/worker/tests/guard.rs).
+if grep -a -q -e AUTOCROP_ESCAPE -e AUTOCROP-FAULT: "$contents/MacOS/auto-crop-worker"; then echo "the worker contains the escape-tests hooks" >&2; exit 1; fi
 
 # Libraries: copy with the symlinks (libheif.dylib -> libheif.1.dylib -> libheif.1.23.5.dylib).
 copy_libs() { # name-prefix
@@ -84,7 +87,7 @@ real_files() { find "$1" -maxdepth 1 -type f -name "$2"; }
 
 while read -r f; do fix_macho "$f" "@loader_path"; done < <(real_files "$fw" '*.dylib')
 fix_macho "$fw/libheif/$plugin_name" "@loader_path/.."
-for exe in AutoCrop auto-crop; do fix_macho "$contents/MacOS/$exe" "@executable_path/../Frameworks"; done
+for exe in AutoCrop auto-crop auto-crop-worker; do fix_macho "$contents/MacOS/$exe" "@executable_path/../Frameworks"; done
 
 echo "== Mach-O files after the edits"
 find "$contents" -type f \( -name '*.dylib' -o -name '*.so' -o -path '*/MacOS/*' \) | sort | while read -r f; do
@@ -159,7 +162,7 @@ plutil -lint "$contents/Info.plist"
 # Ad-hoc signature (free, no Apple account): inner to outer. install_name_tool invalidated every
 # earlier signature, so everything is signed again.
 while read -r f; do codesign --force --sign - "$f" </dev/null; done < <(find "$fw" -type f \( -name '*.dylib' -o -name '*.so' \))
-for exe in auto-crop AutoCrop; do codesign --force --sign - "$contents/MacOS/$exe"; done
+for exe in auto-crop auto-crop-worker AutoCrop; do codesign --force --sign - "$contents/MacOS/$exe"; done
 codesign --force --deep --sign - "$app"
 codesign --verify --deep --strict --verbose=2 "$app"
 codesign -dvv "$app" 2>&1 | grep -E "^(Identifier|Format|Signature|Authority|TeamIdentifier)" || true

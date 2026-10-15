@@ -8,7 +8,8 @@
 # needs patchelf, readelf, objdump, nm and python3.
 #
 # Layout (the engine finds the plugin folder through `packaged::plugin_dir_candidates`: bin/ to lib/libheif):
-#   bin/AutoCrop, bin/auto-crop          RUNPATH $ORIGIN/../lib
+#   bin/AutoCrop, bin/auto-crop, bin/auto-crop-worker   RUNPATH $ORIGIN/../lib (the worker decodes HEIC and AVIF
+#                                        in a sandbox, ADR-0013; it must sit beside the executables)
 #   lib/libheif.so.1, libdav1d.so.7, libde265.so.0 (and their versioned files)   RUNPATH $ORIGIN
 #   lib/libheif/libheif-libde265.so      the libde265 plugin of libheif (HEVC, HEIC)   RUNPATH $ORIGIN/..
 #   share/applications/, share/icons/    desktop entry and icon
@@ -26,8 +27,10 @@ app_id=io.github.welfedted.AutoCrop
 rm -rf "$OUT"
 mkdir -p "$OUT/bin" "$OUT/lib/libheif" "$OUT/licenses" "$OUT/share/applications" "$OUT/share/icons/hicolor/32x32/apps"
 
-cp "$RELEASE/AutoCrop" "$RELEASE/auto-crop" "$OUT/bin/"
-strip --strip-unneeded "$OUT/bin/AutoCrop" "$OUT/bin/auto-crop"
+cp "$RELEASE/AutoCrop" "$RELEASE/auto-crop" "$RELEASE/auto-crop-worker" "$OUT/bin/"
+strip --strip-unneeded "$OUT/bin/AutoCrop" "$OUT/bin/auto-crop" "$OUT/bin/auto-crop-worker"
+# A shipped worker has none of the test-only escape hooks (crates/worker/tests/guard.rs).
+if grep -a -q -e AUTOCROP_ESCAPE -e AUTOCROP-FAULT: "$OUT/bin/auto-crop-worker"; then echo "the worker contains the escape-tests hooks" >&2; exit 1; fi
 
 copy_libs() { # glob
   local found=0 f
@@ -49,7 +52,7 @@ cp -a "$plugin" "$OUT/lib/libheif/"
 # the plugin finds libheif and libde265 one folder up, the executables find lib/ beside bin/.
 while read -r f; do patchelf --set-rpath '$ORIGIN' "$f"; strip --strip-unneeded "$f"; done < <(find "$OUT/lib" -maxdepth 1 -type f -name '*.so*')
 for f in "$OUT"/lib/libheif/*; do patchelf --set-rpath '$ORIGIN/..' "$f"; strip --strip-unneeded "$f"; done
-for exe in AutoCrop auto-crop; do patchelf --set-rpath '$ORIGIN/../lib' "$OUT/bin/$exe"; done
+for exe in AutoCrop auto-crop auto-crop-worker; do patchelf --set-rpath '$ORIGIN/../lib' "$OUT/bin/$exe"; done
 
 echo "== ELF files"
 status=0

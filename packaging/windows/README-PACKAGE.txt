@@ -43,17 +43,28 @@ libraries are built with MSVC; it is installed on most PCs and is a free downloa
 Your data stays on your PC: there is no network access and no telemetry. Settings and backups
 are in %LOCALAPPDATA%\AutoCrop, or in the folder named by the environment variable AUTO_CROP_HOME if you set it.
 
-IMPORTANT: HEIC/AVIF PARSING RUNS IN-PROCESS
---------------------------------------------
-The design (ADR-0006, decision B12) decodes untrusted HEIC, HEIF and AVIF files, which are
-parsed by C and C++ libraries (libheif, dav1d, libde265), in a sandboxed worker-process pool
-with pixel, memory and time caps. THAT POOL DOES NOT EXIST YET. In this build the libraries run
-inside the app's own process, with the user's full rights. Size and memory limits and a decode
-time limit are enforced before and during decoding, and the libraries are run against a
-hostile-file corpus and fuzz seeds in CI, but a crafted file that finds a bug in one of them could run code as
-you. This was decided acceptable for the owner's own use with files the owner trusts. Do not
-hand this build to other people and do not open files from untrusted sources with it. It is not
-suitable for a public release.
+HEIC/AVIF ARE DECODED IN A SANDBOXED WORKER PROCESS
+---------------------------------------------------
+The files are untrusted input parsed by C and C++ libraries (libheif, dav1d, libde265). In this
+build they are decoded by a separate program, "auto-crop-worker.exe", that sits beside the application and
+confines itself BEFORE it reads any image: in the best level this PC allows, tried in this order and reported: an AppContainer with no
+capabilities (no network, no access to your files) plus a job object (one process, memory limit),
+then a restricted token plus the job object (files blocked, the network is NOT), then the job object
+alone (no new processes and a memory limit only). It has a memory limit, a
+time limit and a pixel cap, and if it crashes, hangs or runs out of memory only that one file fails
+("Reading this file crashed the safe reader"), the worker is replaced and the rest of the batch
+goes on. Run  auto-crop.exe doctor  to see the level the worker really reached and what it saw when it tried
+to open a file, connect to the network and start a program from the inside: that line is printed
+by the worker itself, not assumed. Set AUTOCROP_DECODE=inproc to decode inside the app instead
+(level "none": the libraries then run with your full rights), AUTOCROP_DECODE=worker to force
+every format through the worker. If the worker is missing or cannot start, the app says so once
+and decodes HEIC and AVIF inside its own process (level "none").
+
+What this does NOT cover: it was proven on GitHub-hosted CI runners (see docs/testing/sandbox-worker.md
+for the exact levels and results), not on a Surface or a Windows 10 PC; the confinement of a crafted file that exploits the
+operating system itself is out of scope. On first use the worker and its DLLs are copied into %LOCALAPPDATA%\AutoCrop\worker-stage so that the
+AppContainer may read them (a folder you unzipped into is not readable by an AppContainer). JPEG, PNG, TIFF and WebP are decoded by safe Rust
+code inside the app (set AUTOCROP_DECODE=worker to send them through the worker as well).
 
 KNOWN LIMITS OF THIS BUILD
 --------------------------

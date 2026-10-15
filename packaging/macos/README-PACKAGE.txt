@@ -55,16 +55,26 @@ Your data stays on your Mac: there is no network access and no telemetry. Settin
 in ~/Library/Application Support/AutoCrop (or the folder named by the environment variable
 AUTO_CROP_HOME if you set it).
 
-IMPORTANT: HEIC/AVIF PARSING RUNS IN-PROCESS, THERE IS NO SANDBOX
------------------------------------------------------------------
-The design (ADR-0006, decision B12) decodes untrusted HEIC, HEIF and AVIF files, which are
-parsed by C and C++ libraries (libheif, dav1d, libde265), in a sandboxed worker-process pool
-with pixel, memory and time caps. THAT POOL DOES NOT EXIST YET, and the macOS sandbox profile
-for it is not written. In this build the libraries run inside the app's own process, with your
-full rights. Size and memory limits and a decode time limit are enforced before and during
-decoding, and the libraries are run against a hostile-file corpus and fuzz seeds in CI, but a crafted file that finds a bug in one of them could run code as you. Do not hand
-this build to other people and do not open files from untrusted sources with it. It is not suitable
-for a public release.
+HEIC/AVIF ARE DECODED IN A SANDBOXED WORKER PROCESS
+---------------------------------------------------
+The files are untrusted input parsed by C and C++ libraries (libheif, dav1d, libde265). In this
+build they are decoded by a separate program, "auto-crop-worker", that sits beside the application and
+confines itself BEFORE it reads any image: it enters a Seatbelt sandbox with everything denied (no files, no network, no new processes)
+after its libraries and the libde265 plugin are loaded. macOS does not enforce an address-space
+limit, so the memory limit is the app watching the worker's size and stopping it. It has a memory limit, a
+time limit and a pixel cap, and if it crashes, hangs or runs out of memory only that one file fails
+("Reading this file crashed the safe reader"), the worker is replaced and the rest of the batch
+goes on. Run  Contents/MacOS/auto-crop doctor  to see the level the worker really reached and what it saw when it tried
+to open a file, connect to the network and start a program from the inside: that line is printed
+by the worker itself, not assumed. Set AUTOCROP_DECODE=inproc to decode inside the app instead
+(level "none": the libraries then run with your full rights), AUTOCROP_DECODE=worker to force
+every format through the worker. If the worker is missing or cannot start, the app says so once
+and decodes HEIC and AVIF inside its own process (level "none").
+
+What this does NOT cover: it was proven on GitHub-hosted CI runners (see docs/testing/sandbox-worker.md
+for the exact levels and results), not on a real Mac (the Seatbelt call is deprecated by Apple but is what browsers use); the confinement of a crafted file that exploits the
+operating system itself is out of scope. JPEG, PNG, TIFF and WebP are decoded by safe Rust
+code inside the app (set AUTOCROP_DECODE=worker to send them through the worker as well).
 
 KNOWN LIMITS OF THIS BUILD
 --------------------------
@@ -78,4 +88,4 @@ KNOWN LIMITS OF THIS BUILD
   yet covered by the notices tool (ROADMAP M3.67, M3.68).
 - Apple silicon (arm64) is the main target; the Intel (x86_64) build is best-effort. The macOS
   specific parts of the plan (native menu bar, trackpad gestures, Finder integration, APFS
-  clone backups, sandboxed decoding) are not built yet.
+  clone backups) are not built yet.
