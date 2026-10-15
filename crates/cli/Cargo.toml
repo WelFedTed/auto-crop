@@ -22,6 +22,7 @@ standin-canny = ["auto-crop-engine/standin-canny"]
 
 [dependencies]
 auto-crop-engine = { path = "../engine" }
+auto-crop-sandbox = { path = "../sandbox" }
 auto-crop-core = { path = "../core" }
 # The output modes that write copies (`--output`, `--suffix`, `--copy`, `render`) decode, render and
 # encode through the same functions the engine's own save path uses.

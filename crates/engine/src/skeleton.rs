@@ -284,7 +284,8 @@ impl Ctx<'_> {
         let span = stage.span();
         let _enter = span.enter();
         let t = Instant::now();
-        let r = f(self.cancel);
+        // A cancelled run stops a sandboxed decode worker too (the pool kills it).
+        let r = auto_crop_sandbox::with_cancel(self.cancel, || f(self.cancel));
         let ms = t.elapsed().as_secs_f64() * 1e3;
         match r {
             Ok((value, px)) => {

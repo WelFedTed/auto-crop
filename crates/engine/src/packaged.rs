@@ -59,6 +59,24 @@ pub fn configure_heif_from_exe() -> Option<PathBuf> {
     None
 }
 
+/// Installs the sandboxed decode worker pool as the HEIC and AVIF decoder of this process
+/// (ADR-0013): the worker `auto-crop-worker` is looked for beside the executable (every package
+/// layout keeps it in the executable's folder), the libheif plugin folder is the packaged one
+/// (see [`packaged_plugin_dir`]). `AUTOCROP_DECODE=inproc|worker|auto` (default `auto`) chooses:
+/// `auto` decodes HEIC and AVIF in the worker when it is found and can start, otherwise in this
+/// process with a one-time notice and the sandbox level `none`. No worker is started here; the
+/// first HEIC or AVIF decode does. Call once at start-up, after [`configure_heif_from_exe`].
+pub fn configure_decode_from_exe() -> std::sync::Arc<auto_crop_sandbox::PoolDecoder> {
+    let exe = std::env::current_exe().unwrap_or_default();
+    let plugin_dir = packaged_plugin_dir(&exe);
+    auto_crop_sandbox::install(auto_crop_sandbox::InstallOptions {
+        exe,
+        plugin_dir,
+        inflight_cap: Some(crate::memory::system_cap()),
+        mode: None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -3,7 +3,8 @@
 
 //! `auto-crop doctor` and `--version` (ROADMAP M2.48): what this machine and this build can do.
 //! Reads only: it never creates the store, never purges, never writes a settings file. No webview
-//! is needed (the CLI has none); there is no sandbox yet and it says so.
+//! is needed (the CLI has none). It starts one decode worker, when the package has one, to read the
+//! sandbox level the worker itself reports (ADR-0013); without a worker it says `none`.
 
 use crate::env::{Env, avx2_applies, has_avx2};
 use crate::exit;
@@ -91,8 +92,28 @@ struct Report {
     heif: Heif,
     /// `auto-crop convert` can convert HEIC and HEIF files in this build (libheif and the HEVC decoder are there).
     heic_conversion: bool,
-    sandbox: &'static str,
+    /// The sandbox level HEIC and AVIF decode under, as the worker reported it, or `none`.
+    sandbox: String,
+    decode: Decode,
     network: &'static str,
+}
+
+#[derive(Serialize)]
+struct Decode {
+    /// `inproc`, `worker` or `auto` (`AUTOCROP_DECODE`).
+    mode: &'static str,
+    /// The worker found beside the executable.
+    worker: Option<String>,
+    /// HEIC and AVIF decode inside this process (no worker, or it could not start).
+    in_process: bool,
+    /// `full`, `reduced`, `process-only` or `none`.
+    tier: String,
+    /// What the worker saw when it tried to open a file, connect and spawn from inside.
+    probes: Option<String>,
+    /// The confinement attempt that worked (Windows: appcontainer+job, restricted-token+job, job).
+    attempt: Option<String>,
+    /// Why the stronger attempts failed, or why decoding is in-process.
+    notes: Vec<String>,
 }
 
 #[cfg(feature = "heif")]
@@ -138,6 +159,36 @@ fn gather(env: &Env) -> Report {
     };
     let settings = env.paths.settings_file();
     let heif = heif_info();
+    let sb = auto_crop_sandbox::describe(true);
+    let level = sb.level();
+    let tier = match (&sb.status, sb.in_process) {
+        (Some(s), false) => s.tier.map_or("none", auto_crop_sandbox::Tier::name),
+        _ => "none",
+    };
+    let mut notes: Vec<String> = Vec::new();
+    if let Some(s) = &sb.status {
+        notes.extend(s.attempt_failures.iter().cloned());
+    }
+    if let Some(r) = &sb.reason {
+        notes.push(r.clone());
+    }
+    let decode = Decode {
+        mode: sb.mode.name(),
+        worker: sb.worker.as_ref().map(|p| p.to_string_lossy().into_owned()),
+        in_process: sb.in_process,
+        tier: tier.to_owned(),
+        probes: sb
+            .status
+            .as_ref()
+            .filter(|_| !sb.in_process)
+            .and_then(|s| s.probes.clone()),
+        attempt: sb
+            .status
+            .as_ref()
+            .filter(|_| !sb.in_process)
+            .and_then(|s| s.attempt.clone()),
+        notes,
+    };
     Report {
         schema: "auto-crop/doctor",
         v: 1,
@@ -168,7 +219,8 @@ fn gather(env: &Env) -> Report {
         encoders: vec!["jpeg", "png"],
         heic_conversion: heif.feature && heif.hevc == Some(true),
         heif,
-        sandbox: "none",
+        sandbox: level,
+        decode,
         network: "none",
     }
 }
@@ -284,10 +336,39 @@ pub fn run(env: &Env) -> u8 {
         }
     );
     let _ = writeln!(out, "webview:   not needed (the CLI has none)");
-    let _ = writeln!(
-        out,
-        "sandbox:   none yet (decoders run inside this process)"
-    );
+    let _ = writeln!(out, "sandbox:   {} [{}]", r.sandbox, r.decode.tier);
+    match (&r.decode.worker, r.decode.in_process) {
+        (Some(w), false) => {
+            let _ = writeln!(
+                out,
+                "worker:    {w} (HEIC and AVIF decode there; mode {})",
+                r.decode.mode
+            );
+            if let Some(p) = &r.decode.probes {
+                let _ = writeln!(out, "           checked from inside the worker: {p}");
+            }
+            if let Some(a) = &r.decode.attempt {
+                let _ = writeln!(out, "           confinement attempt that worked: {a}");
+            }
+        }
+        (Some(w), true) => {
+            let _ = writeln!(
+                out,
+                "worker:    {w} (NOT in use: HEIC and AVIF decode inside this process; mode {})",
+                r.decode.mode
+            );
+        }
+        (None, _) => {
+            let _ = writeln!(
+                out,
+                "worker:    not found beside the executable (HEIC and AVIF decode inside this process, unsandboxed; mode {})",
+                r.decode.mode
+            );
+        }
+    }
+    for n in &r.decode.notes {
+        let _ = writeln!(out, "           note: {n}");
+    }
     let _ = writeln!(out, "network:   none (no network code is linked)");
     code
 }

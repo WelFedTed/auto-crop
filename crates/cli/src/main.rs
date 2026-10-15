@@ -85,6 +85,8 @@ fn execute(cli: args::Cli) -> u8 {
 fn main() -> ExitCode {
     // A packaged build keeps the HEIC plugin folder beside the executable (no-op otherwise).
     auto_crop_engine::packaged::configure_heif_from_exe();
+    // HEIC and AVIF decode in the sandboxed worker beside the executable when there is one.
+    auto_crop_engine::packaged::configure_decode_from_exe();
     // Lossy for the rare argument that is not valid Unicode, instead of a panic.
     let argv: Vec<String> = std::env::args_os()
         .skip(1)

@@ -424,8 +424,13 @@ by an explicit `--id`) one that is pinned in the app. `--dry-run` lists what wou
 it decodes and writes, and that no network code is linked. `auto-crop doctor` (`--json` too) reports the CPU
 and the **AVX2 floor** (Auto Crop is built and tested for CPUs with AVX2; `process`, `analyze` and `render` exit 6
 on one without it), RAM and the memory cap, the backup store (path, entries, bytes, interrupted saves that the next
-start will finish), the settings file, the decoders, the HEIF libraries when built in, and that there is no
-sandbox yet (decoders run inside the process) and no webview is needed. It never creates or writes anything.
+start will finish), the settings file, the decoders, the HEIF libraries when built in, the **sandbox level**
+(HEIC and AVIF decode in the `auto-crop-worker` beside the executable; `doctor` starts one worker and prints
+the level the worker itself reports, what it saw when it tried to open a file, connect and spawn from inside,
+and the confinement attempt that worked; `AUTOCROP_DECODE=inproc|worker|auto` switches it, default `auto`;
+without a worker the level is `none` and the text says so) and that no webview is needed. It never creates
+or writes anything of yours (on Windows the first worker start copies the worker and its DLLs into
+`%LOCALAPPDATA%\AutoCrop\worker-stage`, a private folder, so the AppContainer can run them).
 
 ## Exit codes
 

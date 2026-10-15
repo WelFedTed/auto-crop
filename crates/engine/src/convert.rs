@@ -502,7 +502,9 @@ impl Engine {
         .map_err(fail)?;
 
         // The pixels: decoded once, the EXIF turn applied once, translucent pixels over white.
-        let decoded = decode_flattened_with(&bytes, &limits).map_err(|e| fail(codec_err(e)))?;
+        let decoded =
+            auto_crop_sandbox::with_cancel(cancel, || decode_flattened_with(&bytes, &limits))
+                .map_err(|e| fail(codec_err(e)))?;
         if cancelled() {
             return Err(fail(ErrKind::Cancelled));
         }
