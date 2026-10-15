@@ -16,3 +16,4 @@ Numbered `NNNN-slug.md` records using [0000-template.md](0000-template.md). Ever
 | [0010](0010-learned-detector-feasibility.md) | Learned page-corner detector: feasibility study (GO-IF) | accepted |
 | [0011](0011-cli-argument-parser.md) | CLI argument parser: hand-written, table-driven (no clap) | accepted |
 | [0012](0012-convert-flow.md) | The Convert flow: one engine path for the CLI and the app, what a conversion replaces, colour and metadata | accepted |
+| [0013](0013-decode-worker-pool.md) | The sandboxed decode worker: crates, protocol, levels per OS, shared memory, pool, switches | accepted |

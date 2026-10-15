@@ -251,7 +251,13 @@ struct State {
     closed: bool,
 }
 
+type LaunchReply = std::io::Result<Launched>;
+
 struct Inner {
+    /// Workers are started by one long-lived thread of the pool: on Linux a child dies with the
+    /// *thread* that created it (`PR_SET_PDEATHSIG`), and the caller's thread may be a short-lived
+    /// pool thread of the application.
+    launcher: Mutex<Sender<(LaunchSpec, Sender<LaunchReply>)>>,
     cfg: PoolConfig,
     state: Mutex<State>,
     cv: Condvar,
@@ -310,8 +316,21 @@ fn read_frames(mut r: Box<dyn Read + Send>, tx: Sender<Event>, result_cap: Arc<A
 
 impl WorkerPool {
     pub fn new(cfg: PoolConfig) -> WorkerPool {
+        let (tx, rx) = channel::<(LaunchSpec, Sender<LaunchReply>)>();
+        let spawned = std::thread::Builder::new()
+            .name("auto-crop-worker-launcher".into())
+            .spawn(move || {
+                while let Ok((spec, reply)) = rx.recv() {
+                    let _ = reply.send(os::launch(&spec));
+                }
+            });
+        if let Err(e) = spawned {
+            // Extremely unlikely; the first start then fails with a typed error.
+            eprintln!("auto-crop: could not start the decode launcher thread: {e}");
+        }
         WorkerPool {
             inner: Arc::new(Inner {
+                launcher: Mutex::new(tx),
                 cfg,
                 state: Mutex::new(State::default()),
                 cv: Condvar::new(),
@@ -397,6 +416,18 @@ impl WorkerPool {
         Err(msg)
     }
 
+    fn launch(&self, spec: &LaunchSpec) -> LaunchReply {
+        let (rtx, rrx) = channel();
+        self.inner
+            .launcher
+            .lock()
+            .map_err(|_| std::io::Error::other("launcher lock poisoned"))?
+            .send((spec.clone(), rtx))
+            .map_err(|_| std::io::Error::other("the launcher thread is gone"))?;
+        rrx.recv()
+            .map_err(|_| std::io::Error::other("the launcher thread died"))?
+    }
+
     fn start_attempt(&self, spec: &LaunchSpec, capacity_pixels: u64) -> Result<Worker, String> {
         let cfg = &self.inner.cfg;
         let Launched {
@@ -405,7 +436,9 @@ impl WorkerPool {
             stderr,
             proc,
             shm,
-        } = os::launch(spec).map_err(|e| format!("could not start: {e}"))?;
+        } = self
+            .launch(spec)
+            .map_err(|e| format!("could not start: {e}"))?;
         let tail = Arc::new(Mutex::new(Vec::new()));
         let t2 = tail.clone();
         std::thread::Builder::new()
