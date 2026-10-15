@@ -6,7 +6,7 @@
 //! the independent readers of `tools/interop/check-output-formats.sh` (libtiff, ImageMagick, `dwebp`,
 //! `qpdf`, Poppler). The pictures are the repo's synthetic test patterns, never real photographs.
 //!
-//! Run: `cargo run -p auto-crop-codecs --features fixtures --example write_samples -- target/interop`
+//! Run: `cargo run -p auto-crop-codecs --features fixtures[,avif] --example write_samples -- target/interop`
 
 use auto_crop_codecs::encoders::bilevel::{BilevelImage, DEFAULT_CUT};
 use auto_crop_codecs::encoders::pdf::{PageImage, PdfEncoder, PdfWriter};
@@ -195,4 +195,69 @@ fn main() {
     )
     .unwrap();
     write(dir, "pdf_multi.pdf", &doc.finish().unwrap());
+
+    #[cfg(feature = "avif")]
+    write_avif_samples(dir);
+}
+
+/// AVIF (the `avif` feature): colour in both chroma layouts, grey, and one with a profile and EXIF,
+/// each with the exact picture it must come back as (within the bar of
+/// `tools/interop/check-avif.py`). `avif_icc.bin` and `avif_exif.bin` are the bytes that must be
+/// found in `avif_meta.avif` again.
+#[cfg(feature = "avif")]
+fn write_avif_samples(dir: &Path) {
+    use auto_crop_codecs::encoders::{AvifChroma, AvifEncoder};
+    use auto_crop_codecs::fixtures::{exif_blob, fake_icc};
+    use std::sync::Arc;
+    let never = CancelToken::never();
+    let (w, h) = (251u32, 173u32);
+    let spec = OutputSpec {
+        quality: Quality::Fixed { value: 80 },
+        ..OutputSpec::default()
+    };
+    let none = EncodeMeta::default();
+    let px = photo(w, h, 11);
+    write(dir, "ref_photo.png", &png_of_rgb(w, h, px.clone()));
+    let rgb = Raster::from_samples(w, h, PixelFormat::Rgb8, Samples::U8(px)).unwrap();
+    for (name, chroma) in [("444", AvifChroma::Yuv444), ("420", AvifChroma::Yuv420)] {
+        let enc = AvifEncoder {
+            chroma,
+            ..AvifEncoder::default()
+        };
+        write(
+            dir,
+            &format!("avif_rgb{name}.avif"),
+            &enc.encode(&rgb.view(), &spec, &none, &never).unwrap(),
+        );
+    }
+    let grey = pattern_gray(w, h);
+    write(
+        dir,
+        "ref_photo_gray.png",
+        &png_of_rgb(w, h, grey.iter().flat_map(|v| [*v; 3]).collect()),
+    );
+    let gray8 = Raster::from_samples(w, h, PixelFormat::Gray8, Samples::U8(grey)).unwrap();
+    write(
+        dir,
+        "avif_gray.avif",
+        &AvifEncoder::default()
+            .encode(&gray8.view(), &spec, &none, &never)
+            .unwrap(),
+    );
+    let (icc, exif) = (fake_icc(1500), exif_blob(1, true));
+    fs::write(dir.join("avif_icc.bin"), &icc).unwrap();
+    fs::write(dir.join("avif_exif.bin"), &exif).unwrap();
+    let meta = EncodeMeta {
+        icc: Some(Arc::from(icc.as_slice())),
+        dpi: None,
+    };
+    let enc = AvifEncoder {
+        exif: Some(exif),
+        ..AvifEncoder::default()
+    };
+    write(
+        dir,
+        "avif_meta.avif",
+        &enc.encode(&rgb.view(), &spec, &meta, &never).unwrap(),
+    );
 }

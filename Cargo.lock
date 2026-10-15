@@ -185,6 +185,7 @@ dependencies = [
  "image-webp",
  "jpeg-encoder",
  "png 0.18.1",
+ "rav1e",
  "rayon",
  "thiserror 2.0.21",
  "tiff",

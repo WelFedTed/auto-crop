@@ -18,10 +18,15 @@ use auto_crop_core::ports::{EncodeMeta, Encoder, PixelFormat, RasterView, Sample
 use auto_crop_core::{CancelToken, ErrKind, Interrupt, OutputSpec};
 use std::borrow::Cow;
 
+#[cfg(feature = "avif")]
+pub mod avif;
+pub mod avif_box;
 pub mod bilevel;
 pub mod pdf;
 pub mod tiff_encoder;
 pub mod webp;
+#[cfg(feature = "avif")]
+pub use avif::{AvifChroma, AvifEncoder};
 pub use pdf::PdfEncoder;
 pub use tiff_encoder::{TiffCompression, TiffEncoder};
 pub use webp::WebpEncoder;
@@ -266,6 +271,8 @@ impl Encoder for PngEncoder {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_avif;
 #[cfg(test)]
 mod tests_formats;
 #[cfg(test)]

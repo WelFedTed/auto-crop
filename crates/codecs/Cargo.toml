@@ -24,6 +24,10 @@ turbojpeg = []
 # default: the default build is pure Rust, needs no C toolchain and probes (header only) but does
 # not decode HEIC and AVIF.
 heif = []
+# AVIF writer: `rav1e` with our own ISOBMFF container (ravif is 4:4:4 only and writes no ICC), built WITHOUT rav1e's `asm` feature (that needs nasm, which only
+# CI has), so the build stays pure Rust and slower (ROADMAP M11.22; docs/dev/output-formats.md has
+# the measured cost). Off by default until the numbers say otherwise.
+avif = ["dep:rav1e"]
 
 [dependencies]
 auto-crop-core = { path = "../core" }
@@ -48,6 +52,9 @@ weezl = "0.1"
 image-webp = "0.2"
 # Bounded inflate of the PNG iCCP chunk before the PNG decoder sees it (already in the tree via `png`).
 flate2 = "1"
+# AVIF encoder (`avif` feature): rav1e (BSD-2-Clause), driven directly; ravif and avif-serialize are not
+# used (docs/dev/output-formats.md says why). No `asm` (nasm), so pure Rust; `threading` is rayon.
+rav1e = { version = "0.8", default-features = false, features = ["threading"], optional = true }
 
 [dev-dependencies]
 rayon = "1"
@@ -58,6 +65,11 @@ criterion = { version = "0.8", default-features = false, features = ["cargo_benc
 [[example]]
 name = "heif_probe"
 required-features = ["heif"]
+
+# Times the AVIF writer on a synthetic detailed picture (docs/dev/output-formats.md has the numbers).
+[[example]]
+name = "avif_bench"
+required-features = ["avif", "fixtures"]
 
 # Writes one sample per output writer for the independent readers (tools/interop, CI `interop` job).
 [[example]]

@@ -70,6 +70,16 @@ impl Format {
     }
 }
 
+impl Format {
+    /// True for the formats a save or a conversion can write as a **new** file: everything
+    /// [`Format::is_encodable`] says, plus AVIF in a build with the `avif` feature. AVIF is lossy,
+    /// so it is never a reason to replace an AVIF source in place (`is_encodable` stays false for
+    /// it, and `fsplan::replace_refusal` keeps saying `format.write_unavailable`).
+    pub fn is_writable(self) -> bool {
+        self.is_encodable() || (cfg!(feature = "avif") && self == Format::Avif)
+    }
+}
+
 const PNG_SIG: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
 const JXL_CONTAINER: [u8; 12] = [
     0x00, 0x00, 0x00, 0x0C, b'J', b'X', b'L', b' ', 0x0D, 0x0A, 0x87, 0x0A,
