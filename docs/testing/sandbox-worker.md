@@ -26,7 +26,7 @@ The test builds need `--features escape-tests`; a shipped worker is built withou
 
 ## Escape-test expectations and results
 
-Expectations (copied from the spike, ADR-0006). Results: `worker.yml`, run [38711660710](https://github.com/WelFedTed/auto-crop/actions/runs/38711660710) (commit 2c063c8; earlier run [38709310953](https://github.com/WelFedTed/auto-crop/actions/runs/38709310953) for the first three Linux and macOS rows). Every cell below was printed by the worker (`ESCAPE ...` lines); `blocked` is what the test asserts for a level that blocks it.
+Expectations (copied from the spike, ADR-0006). Results: `worker.yml`, run [38789975407](https://github.com/WelFedTed/auto-crop/actions/runs/38789975407) (commit f0cfd96), all jobs green; the same rows were green in the earlier runs [38711660710](https://github.com/WelFedTed/auto-crop/actions/runs/38711660710) and [38709310953](https://github.com/WelFedTed/auto-crop/actions/runs/38709310953). Every cell below was printed by the worker (`ESCAPE ...` lines); `blocked` is what the test asserts for a level that blocks it.
 
 | OS and level (as reported by the worker) | file | tcp | spawn | alloc 1 GiB |
 |---|---|---|---|---|
@@ -65,3 +65,7 @@ The Windows job ran the AppContainer from a worker staged out of `D:\a\...\targe
 - Seccomp denies with `EPERM`, not by killing the process; both stop the call (ADR-0013).
 - The `AUTOCROP_DECODE=worker` route of JPEG, PNG, TIFF and WebP is tested, but only HEIC and AVIF are routed by default.
 - `--require-sandbox` and a setting to refuse unsandboxed HEIC are not built (M6.54, M6.57).
+
+## Packaged layout (Linux), run [38789999789](https://github.com/WelFedTed/auto-crop/actions/runs/38789999789)
+
+`package-linux.yml` unpacked the tarball, the AppImage (extract-and-run) and the installed `.deb`; `packaging/smoke-cli.sh` ran `auto-crop doctor` from each, with every decode under `AUTOCROP_DECODE=worker` (never falls back): all three printed `sandbox:   rlimit(as=2549MiB,cpu=3600s,core=0)+landlock=FullyEnforced+seccomp(43 syscalls) [full]` and `checked from inside the worker: file=denied(PermissionDenied) net=denied(PermissionDenied) spawn=denied(PermissionDenied)`; the worker reports `auto-crop-worker 0.0.5 (heif=on, escape-tests=off)`; with the worker renamed a forced-worker decode fails (`AUTOCROP_DECODE=worker but no worker was found beside the executable`) and the default mode says `sandbox: none`. The Windows and macOS package workflows have the same checks (`package-windows.yml` in PowerShell); the macOS package run and a Windows package run on a green tree are listed in the final report of the task as pending or blocked (the Windows run of 65c1e97 stopped in `cargo about`, see below).
