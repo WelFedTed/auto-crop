@@ -71,7 +71,7 @@ fn decode_scaled_inner(
     let source = (h.width, h.height);
 
     #[cfg(feature = "turbojpeg")]
-    if format == Format::Jpeg && h.channels != 4 {
+    if format == Format::Jpeg && h.channels != 4 && !crate::remote::remote_handles(Format::Jpeg) {
         return turbo_scaled(bytes, &h, denom, limits);
     }
 

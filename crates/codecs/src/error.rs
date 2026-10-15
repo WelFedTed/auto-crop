@@ -38,6 +38,16 @@ pub enum CodecError {
     /// `max_decode_ms` elapsed; the decode result, if any, is discarded.
     #[error("decoding took too long")]
     DecodeTimeout,
+    /// The sandboxed decode worker died (crash, blocked system call, killed): the worker was
+    /// replaced and the batch continues. The text says how it ended.
+    #[error("the decoder process crashed: {0}")]
+    WorkerCrashed(String),
+    /// The decode was cancelled (the sandboxed worker, if any, was stopped).
+    #[error("the decode was cancelled")]
+    Cancelled,
+    /// The sandboxed worker hit its memory limit and was stopped.
+    #[error("the decoder ran out of its memory allowance")]
+    MemoryLimit,
 }
 
 impl CodecError {
@@ -58,6 +68,9 @@ impl CodecError {
             CodecError::Encode(_) => "encode",
             CodecError::InternalPanic(_) => "internal_panic",
             CodecError::DecodeTimeout => "decode_timeout",
+            CodecError::WorkerCrashed(_) => "worker_crashed",
+            CodecError::MemoryLimit => "memory_limit",
+            CodecError::Cancelled => "cancelled",
         }
     }
 }

@@ -21,8 +21,14 @@ pub fn codec_err(e: auto_crop_codecs::CodecError) -> ErrKind {
         C::HevcDecoderMissing => ErrKind::HevcDecoderMissing,
         C::Corrupt(_) => ErrKind::Corrupt,
         C::TooLarge(_) | C::LimitExceeded { .. } => ErrKind::TooLarge,
+        // The UI has copy for these three (`ui/src/lib/strings.ts`): a sandboxed worker that died
+        // or ran over its memory or time allowance fails its own item, nothing else.
+        C::WorkerCrashed(_) => ErrKind::DecoderCrashed,
+        C::MemoryLimit => ErrKind::MemoryLimit,
+        C::Cancelled => ErrKind::Cancelled,
+        C::DecodeTimeout => ErrKind::DecodeTimeout,
         // The early slice reported these as Internal and the UI has copy for that code only.
-        C::Encode(_) | C::InternalPanic(_) | C::DecodeTimeout => ErrKind::Internal,
+        C::Encode(_) | C::InternalPanic(_) => ErrKind::Internal,
     }
 }
 

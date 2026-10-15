@@ -218,7 +218,50 @@ pub(crate) fn decode_raw_alpha(
     apply_orientation: bool,
     alpha: Alpha,
 ) -> Result<Decoded, CodecError> {
+    decode_raw_alpha_via(bytes, limits, apply_orientation, alpha, true)
+}
+
+/// The decode of a file that the *worker process* was asked to do: never handed to a remote
+/// decoder again, whatever is installed (a worker installs none; this is the explicit guard for
+/// in-process tests and the differential test of ROADMAP M6.62).
+///
+/// `flatten_alpha` composites translucent pixels over white; `apply_orientation` turns by the
+/// EXIF value. Never panics: a panic becomes [`CodecError::InternalPanic`].
+pub fn decode_in_process(
+    bytes: &[u8],
+    limits: &DecodeLimits,
+    apply_orientation: bool,
+    flatten_alpha: bool,
+) -> Result<Decoded, CodecError> {
+    let alpha = if flatten_alpha {
+        Alpha::OverWhite
+    } else {
+        Alpha::Drop
+    };
+    guard_item(|| decode_raw_alpha_via(bytes, limits, apply_orientation, alpha, false))
+}
+
+fn decode_raw_alpha_via(
+    bytes: &[u8],
+    limits: &DecodeLimits,
+    apply_orientation: bool,
+    alpha: Alpha,
+    allow_remote: bool,
+) -> Result<Decoded, CodecError> {
     let (format, h) = precheck(bytes, limits)?;
+
+    // A sandboxed worker pool, when one is installed, takes the formats it handles (HEIC and AVIF
+    // by default). Everything above ran here, in the parent, on safe-Rust parsers; the worker
+    // repeats the checks and its answer is distrusted again ([`crate::remote::check_reply`]).
+    if allow_remote && let Some(remote) = crate::remote::remote_for(format) {
+        let reply = remote.decode(crate::remote::RemoteRequest {
+            bytes,
+            limits,
+            apply_orientation,
+            flatten_alpha: alpha == Alpha::OverWhite,
+        })?;
+        return crate::remote::check_reply(reply, limits);
+    }
 
     // HEIC and AVIF go through libheif, which applies `irot`, `imir` and `clap` itself: the pixels
     // come back upright whatever `apply_orientation` says, and `exif_orientation` reports the turn

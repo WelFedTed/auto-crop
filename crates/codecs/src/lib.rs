@@ -44,13 +44,16 @@ pub mod heif;
 #[path = "../native_header.rs"]
 mod native_header;
 mod parse;
+pub mod remote;
 mod scaled;
 #[cfg(test)]
 mod suite;
 #[cfg(feature = "turbojpeg")]
 pub mod turbo;
 
-pub use decode::{Decoded, decode, decode_flattened_with, decode_with, probe, probe_with};
+pub use decode::{
+    Decoded, decode, decode_flattened_with, decode_in_process, decode_with, probe, probe_with,
+};
 pub use error::CodecError;
 pub use exif::orientation as exif_orientation;
 pub use format::{Format, sniff};
@@ -63,6 +66,7 @@ pub use limits::{
 pub use meta_extract::{
     RawTag, TAG_IPTC, TAG_XMP, TiffMeta, extract_dpi, extract_exif, extract_tiff_meta,
 };
+pub use remote::{RemoteDecoder, RemoteRequest, remote_handles, set_remote_decoder};
 pub use scaled::{DENOMS, ScaledDecoded, decode_scaled, pick_denom};
 
 use auto_crop_imgproc::Raster;
