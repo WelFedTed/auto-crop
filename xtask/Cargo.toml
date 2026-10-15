@@ -37,7 +37,7 @@ auto-crop-engine = { path = "../crates/engine" }
 auto-crop-imgproc = { path = "../crates/imgproc" }
 # Per-run random token of the labeller's local server. `getrandom` is the OS entropy source (no
 # network, no I/O beyond the OS call); it is already in the lock through the std ecosystem.
-getrandom = "0.3"
+getrandom = "0.4"
 auto-crop-infer = { path = "../crates/infer" }
 sysinfo = { version = "0.37", default-features = false, features = ["system"] }
 
