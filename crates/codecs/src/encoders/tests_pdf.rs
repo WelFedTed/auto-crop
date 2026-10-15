@@ -567,3 +567,134 @@ fn a_thousand_pages_write_in_constant_memory_per_page() {
     }
     assert!(w.finish().unwrap().0 > 1000 * 300);
 }
+
+// ---------------------------------------------------------------------------------------------
+// The streaming reader (a file read with seeks, one page in memory at a time)
+// ---------------------------------------------------------------------------------------------
+
+fn streaming(bytes: &[u8]) -> Option<Vec<PdfPageRead>> {
+    let mut pages = Vec::new();
+    read_pages_streaming(&mut std::io::Cursor::new(bytes), &mut |_, p| {
+        pages.push(p);
+        true
+    })
+    .map(|_| pages)
+}
+
+fn three_page_doc() -> Vec<u8> {
+    let b = marks(40, 40);
+    let mut w = PdfWriter::new(Vec::new()).unwrap();
+    w.set_title("three");
+    let jpeg = default_jpeg_encoder()
+        .encode(
+            &rgb(48, 32).view(),
+            &OutputSpec::default(),
+            &EncodeMeta::default(),
+            &never(),
+        )
+        .unwrap();
+    let icc = icc_of(b"RGB ", 700);
+    w.add_page(
+        PageImage::Jpeg {
+            bytes: &jpeg,
+            icc: Some(&icc),
+        },
+        Some((150, 150)),
+    )
+    .unwrap();
+    w.add_page(PageImage::G4(&b), Some((600, 600))).unwrap();
+    let g = pattern_gray(30, 20);
+    w.add_page(
+        PageImage::Flate {
+            width: 30,
+            height: 20,
+            channels: 1,
+            samples: &g,
+            icc: None,
+        },
+        None,
+    )
+    .unwrap();
+    w.finish().unwrap()
+}
+
+#[test]
+fn the_streaming_reader_gives_the_same_pages_as_the_slice_reader() {
+    let pdf = three_page_doc();
+    let a = read_pages(&pdf).unwrap();
+    let b = streaming(&pdf).unwrap();
+    assert_eq!(a.len(), 3);
+    assert_eq!(a.len(), b.len());
+    for (x, y) in a.iter().zip(&b) {
+        assert_eq!(
+            (x.width_px, x.height_px, x.media_box, x.codec, x.channels),
+            (y.width_px, y.height_px, y.media_box, y.codec, y.channels)
+        );
+        assert_eq!(x.icc, y.icc);
+        assert_eq!(x.stream_bytes(), y.stream_bytes());
+    }
+    assert_eq!(b[0].icc.as_deref().map(<[u8]>::len), Some(700));
+}
+
+#[test]
+fn the_streaming_reader_refuses_exactly_what_the_slice_reader_refuses() {
+    let pdf = three_page_doc();
+    for cut in (0..pdf.len()).step_by(7) {
+        assert_eq!(
+            streaming(&pdf[..cut]).is_some(),
+            read_pages(&pdf[..cut]).is_some(),
+            "cut at {cut}"
+        );
+        assert!(streaming(&pdf[..cut]).is_none(), "cut at {cut}");
+    }
+    // A flipped byte at every 5th position: both readers agree (some flips hit image data, which
+    // is not structure and passes in both).
+    for i in (0..pdf.len()).step_by(5) {
+        let mut bad = pdf.clone();
+        bad[i] ^= 0x55;
+        assert_eq!(
+            streaming(&bad).is_some(),
+            read_pages(&bad).is_some(),
+            "flip at {i}"
+        );
+    }
+    let mut junk = pdf.clone();
+    junk.extend_from_slice(b"junk");
+    assert!(streaming(&junk).is_none());
+    assert!(streaming(b"hello").is_none() && streaming(&[]).is_none());
+}
+
+#[test]
+fn the_streaming_reader_stops_when_the_caller_refuses_a_page() {
+    let pdf = three_page_doc();
+    let mut seen = Vec::new();
+    let r = read_pages_streaming(&mut std::io::Cursor::new(&pdf), &mut |i, _| {
+        seen.push(i);
+        i < 1
+    });
+    assert!(r.is_none());
+    assert_eq!(seen, vec![0, 1]);
+}
+
+#[test]
+fn a_thousand_page_document_is_read_back_with_one_page_in_memory() {
+    let b = marks(64, 64);
+    let mut w = PdfWriter::new(Vec::new()).unwrap();
+    for _ in 0..1000 {
+        w.add_page(PageImage::G4(&b), Some((300, 300))).unwrap();
+    }
+    let pdf = w.finish().unwrap();
+    let mut n = 0;
+    let mut largest = 0;
+    let c = read_pages_streaming(&mut std::io::Cursor::new(&pdf), &mut |i, p| {
+        assert_eq!(i, n);
+        n += 1;
+        largest = largest.max(p.stream_bytes().len());
+        true
+    });
+    assert_eq!(c, Some(1000));
+    assert!(
+        largest < 1000,
+        "a page stream is a few hundred bytes: {largest}"
+    );
+}

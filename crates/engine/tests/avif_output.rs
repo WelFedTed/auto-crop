@@ -5,6 +5,10 @@
 //! Save format, the verify step that reads the container back, and the rule that an AVIF source is
 //! open-only (never replaced in place; a copy is PNG unless AVIF is chosen).
 
+// The helpers below serve the tests of a build with the writer; a build without it keeps only the
+// refusal tests.
+#![cfg_attr(not(feature = "avif"), allow(unused_imports, dead_code))]
+
 use auto_crop_codecs::encoders::avif_box::read_info;
 use auto_crop_codecs::fixtures::{fake_icc, png_rgb, png_with_icc};
 use auto_crop_codecs::{Format, sniff};

@@ -229,8 +229,8 @@ fn verify(t: &Temp, r: &Rendered) -> Result<(), ErrKind> {
     // An AVIF is read back through its container (size, no rotation box); a build with the libheif
     // decoder goes on to decode it like any other format.
     if r.format == Format::Avif {
-        let info = auto_crop_codecs::encoders::avif_box::read_info(&back)
-            .ok_or(ErrKind::VerifyFailed)?;
+        let info =
+            auto_crop_codecs::encoders::avif_box::read_info(&back).ok_or(ErrKind::VerifyFailed)?;
         if (info.width, info.height) != (r.width, r.height)
             || info.has_irot_or_imir
             || !info.av1_header_ok

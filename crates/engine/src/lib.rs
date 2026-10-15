@@ -29,6 +29,7 @@ pub mod outputs;
 pub mod packaged;
 pub mod paths;
 mod restore;
+pub mod run_pdf;
 pub mod samples;
 mod scan;
 pub mod settings;

@@ -372,6 +372,30 @@ fn verify_pdf(bytes: &[u8], e: &Expect) -> Result<()> {
     {
         return Err(ErrKind::VerifyFailed);
     }
+    verify_pdf_page_pixels(page, e)
+}
+
+/// One page of a multi-page PDF against what it must be: the size, the profile, and the image
+/// decoded again (exact pixels for a lossless page, the luma fingerprint for a JPEG page).
+pub(crate) fn verify_pdf_page(
+    page: &auto_crop_codecs::encoders::pdf::PdfPageRead,
+    e: &Expect,
+) -> Result<()> {
+    if (page.width_px, page.height_px) != e.dims {
+        return Err(ErrKind::VerifyFailed);
+    }
+    if let Some(want) = &e.icc
+        && page.icc.as_ref() != Some(want)
+    {
+        return Err(ErrKind::VerifyFailed);
+    }
+    verify_pdf_page_pixels(page, e)
+}
+
+fn verify_pdf_page_pixels(
+    page: &auto_crop_codecs::encoders::pdf::PdfPageRead,
+    e: &Expect,
+) -> Result<()> {
     let (w, h, rgb) = page.to_rgb().ok_or(ErrKind::VerifyFailed)?;
     let raster = Raster::from_raw(w, h, rgb).ok_or(ErrKind::VerifyFailed)?;
     if (raster.width, raster.height) != e.dims {

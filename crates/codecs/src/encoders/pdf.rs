@@ -44,7 +44,7 @@ use super::{check, samples_u8};
 use auto_crop_core::output::{Bits, OutFormat, Quality};
 use auto_crop_core::ports::{EncodeMeta, Encoder, RasterView};
 use auto_crop_core::{CancelToken, ErrKind, OutputSpec};
-use std::io::Write;
+use std::io::{Seek, SeekFrom, Write};
 
 /// The dpi assumed when the source says none (PLAN 5.9).
 pub const NOMINAL_DPI: u32 = 300;
@@ -625,6 +625,11 @@ pub struct PdfPageRead {
 }
 
 impl PdfPageRead {
+    /// The image stream exactly as it is in the file (JPEG data, zlib data or Group 4 data).
+    pub fn stream_bytes(&self) -> &[u8] {
+        &self.stream
+    }
+
     /// The embedded image as RGB8 (grey expanded, a bilevel page black 0 and white 255).
     pub fn to_rgb(&self) -> Option<(u32, u32, Vec<u8>)> {
         let (w, h) = (self.width_px, self.height_px);
@@ -901,6 +906,235 @@ pub fn read_pages(bytes: &[u8]) -> Option<Vec<PdfPageRead>> {
         });
     }
     Some(pages)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Reading back a document on disk, one page at a time
+// ---------------------------------------------------------------------------------------------
+
+/// A reader that can fetch a window at an offset (what the streaming check needs).
+struct Windows<'a, R: Read + Seek> {
+    r: &'a mut R,
+    len: u64,
+}
+
+impl<R: Read + Seek> Windows<'_, R> {
+    /// Up to `max` bytes at `off` (fewer at the end of the file); `None` past the end.
+    fn at(&mut self, off: u64, max: usize) -> Option<Vec<u8>> {
+        if off > self.len {
+            return None;
+        }
+        self.r.seek(SeekFrom::Start(off)).ok()?;
+        let mut v = Vec::new();
+        (&mut *self.r).take(max as u64).read_to_end(&mut v).ok()?;
+        Some(v)
+    }
+
+    /// The dictionary starting at `off` (text and the absolute offset just after it). The window
+    /// grows from 8 KiB to 8 MiB: a page tree of 10,000 pages is about 100 KB.
+    fn dict(&mut self, off: u64) -> Option<(String, u64)> {
+        let mut size = 8 * 1024usize;
+        loop {
+            let w = self.at(off, size)?;
+            if let Some((d, end)) = dict_at(&w, 0) {
+                return Some((d.to_owned(), off + end as u64));
+            }
+            if w.len() < size || size >= 8 * 1024 * 1024 {
+                return None;
+            }
+            size *= 4;
+        }
+    }
+
+    /// The `len` bytes of the stream whose dictionary ended at `dict_end`, framing checked.
+    fn stream(&mut self, dict_end: u64, len: usize) -> Option<Vec<u8>> {
+        const PRE: &[u8] = b"\nstream\n";
+        const POST: &[u8] = b"\nendstream\nendobj\n";
+        let w = self.at(
+            dict_end,
+            PRE.len().checked_add(len)?.checked_add(POST.len())?,
+        )?;
+        if w.len() != PRE.len() + len + POST.len()
+            || &w[..PRE.len()] != PRE
+            || &w[PRE.len() + len..] != POST
+        {
+            return None;
+        }
+        Some(w[PRE.len()..PRE.len() + len].to_vec())
+    }
+}
+
+/// [`read_pages`] for a document on disk: the same checks, but only one page's stream is in memory
+/// at a time, so a document of hundreds of 12 MP pages is verified in constant memory. `each` gets
+/// every page in order (index from 0) and says whether it is acceptable; the result is the page
+/// count when the whole structure holds and `each` accepted every page.
+pub fn read_pages_streaming<R: Read + Seek>(
+    r: &mut R,
+    each: &mut dyn FnMut(usize, PdfPageRead) -> bool,
+) -> Option<usize> {
+    let len = r.seek(SeekFrom::End(0)).ok()?;
+    let mut w = Windows { r, len };
+    if !w.at(0, 7)?.starts_with(b"%PDF-1.") {
+        return None;
+    }
+    let tail = w.at(len.checked_sub(64)?, 64)?;
+    let tail_s = String::from_utf8_lossy(&tail);
+    let sx = tail_s.rfind("startxref")?;
+    let mut lines = tail_s[sx + 9..].split_whitespace();
+    let xref_pos: u64 = lines.next()?.parse().ok()?;
+    if lines.next()? != "%%EOF" || lines.next().is_some() {
+        return None;
+    }
+    // The table.
+    let head = w.at(xref_pos, 64)?;
+    let mut c = Cur { b: &head, i: 0 };
+    if !c.lit(b"xref") || c.int()? != 0 {
+        return None;
+    }
+    let n = usize::try_from(c.int()?).ok()?;
+    if !(5..=MAX_PAGES * 4 + 8).contains(&n) {
+        return None;
+    }
+    c.ws();
+    let table_at = xref_pos + c.i as u64;
+    let table = w.at(table_at, n * 20)?;
+    if table.len() != n * 20 {
+        return None;
+    }
+    let mut offsets: Vec<u64> = Vec::with_capacity(n);
+    for (k, line) in table.as_chunks::<20>().0.iter().enumerate() {
+        if &line[10..] != b" 00000 n \n" && &line[10..] != b" 65535 f \n" {
+            return None;
+        }
+        let off: u64 = std::str::from_utf8(&line[..10]).ok()?.parse().ok()?;
+        if k == 0 {
+            if &line[10..] != b" 65535 f \n" {
+                return None;
+            }
+        } else {
+            let want = format!("{k} 0 obj\n");
+            if w.at(off, want.len())? != want.as_bytes() {
+                return None;
+            }
+            offsets.push(off);
+        }
+    }
+    let trailer_head = w.at(table_at + (n * 20) as u64, 256)?;
+    let mut c = Cur {
+        b: &trailer_head,
+        i: 0,
+    };
+    if !c.lit(b"trailer") {
+        return None;
+    }
+    c.ws();
+    let (trailer, _) = dict_at(&trailer_head, c.i)?;
+    if key_int(trailer, "Size")? != n as i64 || key_ref(trailer, "Root")? != 1 {
+        return None;
+    }
+    // The absolute offset of the dictionary of object `id`.
+    let obj = |id: usize| -> Option<u64> {
+        let off = *offsets.get(id.checked_sub(1)?)?;
+        Some(off + format!("{id} 0 obj\n").len() as u64)
+    };
+    let (cat, _) = w.dict(obj(1)?)?;
+    if !cat.contains("/Type /Catalog") || key_ref(&cat, "Pages")? != 2 {
+        return None;
+    }
+    let (tree, _) = w.dict(obj(2)?)?;
+    let count = usize::try_from(key_int(&tree, "Count")?).ok()?;
+    let kids_at = tree.find("/Kids [")? + 7;
+    let kids_end = tree[kids_at..].find(']')? + kids_at;
+    let mut kid_ids = Vec::new();
+    let mut toks = tree[kids_at..kids_end].split_whitespace();
+    while let Some(t) = toks.next() {
+        let id: usize = t.parse().ok()?;
+        if toks.next()? != "0" || toks.next()? != "R" {
+            return None;
+        }
+        kid_ids.push(id);
+    }
+    if kid_ids.len() != count || count == 0 {
+        return None;
+    }
+    for (index, pid) in kid_ids.into_iter().enumerate() {
+        let (pd, _) = w.dict(obj(pid)?)?;
+        if !pd.contains("/Type /Page ") || key_ref(&pd, "Parent")? != 2 {
+            return None;
+        }
+        let mb = pd.find("/MediaBox [")? + 11;
+        let mb_end = pd[mb..].find(']')? + mb;
+        let v: Vec<f64> = pd[mb..mb_end]
+            .split_whitespace()
+            .filter_map(|t| t.parse().ok())
+            .collect();
+        if v.len() != 4 || v[0] != 0.0 || v[1] != 0.0 {
+            return None;
+        }
+        let xo = pd.find("/XObject << /Im0 ")? + 17;
+        let img_id: usize = pd[xo..].split_whitespace().next()?.parse().ok()?;
+        let content_id = key_ref(&pd, "Contents")?;
+        let (cd, cend) = w.dict(obj(content_id)?)?;
+        let clen = usize::try_from(key_int(&cd, "Length")?).ok()?;
+        let cdata = w.stream(cend, clen)?;
+        if !cdata.ends_with(b"/Im0 Do Q")
+            || cdata.contains(&b'T') && cdata.windows(2).any(|x| x == b"BT")
+        {
+            return None;
+        }
+        let (id_s, iend) = w.dict(obj(img_id)?)?;
+        if !id_s.contains("/Subtype /Image") {
+            return None;
+        }
+        let ilen = usize::try_from(key_int(&id_s, "Length")?).ok()?;
+        let stream = w.stream(iend, ilen)?;
+        let width_px = u32::try_from(key_int(&id_s, "Width")?).ok()?;
+        let height_px = u32::try_from(key_int(&id_s, "Height")?).ok()?;
+        let codec = if id_s.contains("/DCTDecode") {
+            PageCodec::Dct
+        } else if id_s.contains("/FlateDecode") {
+            PageCodec::Flate
+        } else if id_s.contains("/CCITTFaxDecode") {
+            PageCodec::G4
+        } else {
+            return None;
+        };
+        let (channels, icc) = if id_s.contains("/DeviceGray") && !id_s.contains("/ICCBased") {
+            (1, None)
+        } else if id_s.contains("/DeviceRGB") && !id_s.contains("/ICCBased") {
+            (3, None)
+        } else {
+            let at = id_s.find("/ICCBased ")?;
+            let prof: usize = id_s[at + 10..].split_whitespace().next()?.parse().ok()?;
+            let (pdict, pend) = w.dict(obj(prof)?)?;
+            let n = u8::try_from(key_int(&pdict, "N")?).ok()?;
+            let plen = usize::try_from(key_int(&pdict, "Length")?).ok()?;
+            let raw = w.stream(pend, plen)?;
+            let mut icc = Vec::new();
+            flate2::read::ZlibDecoder::new(&raw[..])
+                .take(1 << 26)
+                .read_to_end(&mut icc)
+                .ok()?;
+            (n, Some(icc))
+        };
+        if codec == PageCodec::G4 && (channels != 1 || !id_s.contains("/K -1")) {
+            return None;
+        }
+        let page = PdfPageRead {
+            width_px,
+            height_px,
+            media_box: (v[2], v[3]),
+            codec,
+            channels,
+            icc,
+            stream,
+        };
+        if !each(index, page) {
+            return None;
+        }
+        // (the page's strings are dropped here: one page lives at a time)
+    }
+    Some(count)
 }
 
 /// The `len` bytes of the stream whose dictionary ended at `dict_end`, checking the framing.
