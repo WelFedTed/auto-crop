@@ -1887,7 +1887,7 @@ mod tests {
         );
         for bad in [
             &["convert", "a.png"][..],
-            &["convert", "--to", "avif", "a.png"],
+            &["convert", "--to", "jxl", "a.png"],
             &["convert", "--to", "jpg"],
             &["convert", "--to", "jpg", "--copy", "--in-place", "a.png"],
             &["convert", "--to", "jpg", "--colour", "x", "a.png"],

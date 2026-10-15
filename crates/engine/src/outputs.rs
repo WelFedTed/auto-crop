@@ -173,7 +173,7 @@ mod tests {
             ErrKind::NoCrop
         );
         assert_eq!(
-            render_outputs(&src, &[quad()], Some(Format::Avif), &o).unwrap_err(),
+            render_outputs(&src, &[quad()], Some(Format::Jxl), &o).unwrap_err(),
             ErrKind::UnsupportedOutput
         );
         assert!(render_outputs(b"not an image", &[quad()], None, &o).is_err());
