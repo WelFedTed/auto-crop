@@ -125,7 +125,8 @@ else:
     print("SKIP missing tool: avifdec")
 
 # ImageMagick, only where its build can read AVIF (libheif with an AV1 decoder).
-magick = shutil.which("magick") or shutil.which("convert")
+# (`convert` is ImageMagick 6 on Linux and a disk tool on Windows.)
+magick = shutil.which("magick") or (shutil.which("convert") if os.name != "nt" else None)
 if magick:
     r = subprocess.run([magick, os.path.join(D, "avif_rgb444.avif"), os.path.join(tempfile.mkdtemp(), "o.png")], capture_output=True, text=True)
     if r.returncode == 0:

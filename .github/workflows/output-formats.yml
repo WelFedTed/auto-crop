@@ -4,7 +4,8 @@
 # Independent readers for what the output writers make (ROADMAP M7.32, M11.56, M11.57, M11.59;
 # docs/dev/output-formats.md). The writers' own round-trip tests run in every CI job; this one
 # reads the files with software that shares no code with ours: libtiff (`tiffinfo`), ImageMagick,
-# libwebp (`dwebp`), qpdf and Poppler (`pdfinfo`, `pdfimages`, `pdftoppm`). Pure Rust writers,
+# libwebp (`dwebp`), qpdf and Poppler (`pdfinfo`, `pdfimages`, `pdftoppm`); AVIF by Pillow (its
+# wheel bundles libavif and dav1d), `avifdec` and ImageMagick (libheif). Pure Rust writers,
 # so no native build is needed: the example that writes the samples compiles in a minute.
 
 name: Output formats
@@ -26,7 +27,7 @@ env:
 
 jobs:
   interop:
-    name: TIFF, WebP and PDF in independent readers
+    name: TIFF, WebP, PDF and AVIF in independent readers
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -41,8 +42,44 @@ jobs:
           pdfinfo -v 2>&1 | head -1
           dwebp -version
           convert -version | head -1
+      - name: Install the AVIF readers (Pillow pinned from PyPI; avifdec from the Ubuntu 22.04 archive, its version is printed)
+        run: |
+          sudo apt-get install -y --no-install-recommends libavif-bin
+          avifdec --version | head -3
+          python3 -m pip install --user "pillow==12.3.0"
+          python3 -c "from PIL import Image, features; print('Pillow', Image.__version__, 'avif', features.version('avif')); assert features.check('avif')"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - name: Write one sample per writer (TIFF in every compression, 1-bit G4, WebP, PDF in every page type)
-        run: cargo run -q -p auto-crop-codecs --features fixtures --example write_samples -- target/interop
+      - name: Write one sample per writer (TIFF in every compression, 1-bit G4, WebP, PDF in every page type, AVIF)
+        run: cargo run -q -p auto-crop-codecs --features fixtures,avif --example write_samples -- target/interop
       - name: Read them back with libtiff, ImageMagick, dwebp, qpdf and Poppler
         run: bash tools/interop/check-output-formats.sh target/interop --require-all
+      - name: Read the AVIF files with Pillow (libavif, dav1d), avifdec and ImageMagick (PSNR bars, ICC and EXIF byte-exact, no rotation)
+        run: python3 tools/interop/check-avif.py target/interop --require-all
+
+  avif:
+    # The writer is pure Rust (rav1e without its nasm assembly), so it builds and tests on every OS.
+    name: AVIF writer (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, macos-latest, ubuntu-22.04]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Lints with the feature (warnings are errors)
+        run: cargo clippy -p auto-crop-codecs -p auto-crop-engine -p auto-crop-cli --all-targets --features auto-crop-codecs/fixtures,auto-crop-codecs/avif,auto-crop-engine/avif,auto-crop-cli/avif -- -D warnings
+      - name: Writer, container, engine and CLI tests with the feature
+        run: |
+          cargo test -p auto-crop-codecs --features fixtures,avif --lib tests_avif
+          cargo test -p auto-crop-engine --features avif --test avif_output
+          cargo test -p auto-crop-cli --features avif --test avif_output
+      - name: Time a 12 MP encode (speed 8 and 6, 4:2:0) for the record
+        shell: bash
+        run: |
+          cargo build --release -q -p auto-crop-codecs --features fixtures,avif --example avif_bench
+          bin=target/release/examples/avif_bench
+          [ -f "$bin" ] || bin="$bin.exe"
+          for s in 8 6; do "$bin" 4000 3000 "$s" 75 420; done

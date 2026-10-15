@@ -130,6 +130,10 @@ jobs:
         run: cargo test -p auto-crop-codecs --features heif -- --nocapture
       - name: Engine tests with the feature (open AVIF, never replace it, copy it as PNG)
         run: cargo test -p auto-crop-engine --features heif --lib --test formats
+      - name: AVIF writer round trip (our rav1e output decoded by libheif and dav1d: PSNR bar, orientation, engine verify with a real decode)
+        run: |
+          cargo test -p auto-crop-codecs --features heif,avif,fixtures libheif_decodes_what_this_writer_makes -- --nocapture
+          cargo test -p auto-crop-engine --features heif,avif --test avif_output -- --nocapture
       - name: Convert flow with the feature (HEIC and AVIF to JPG and PNG, sizes, sRGB, orientation once, replace and restore)
         run: cargo test -p auto-crop-engine --features heif --test convert_heif -- --nocapture
       - name: CLI convert on real HEIC and AVIF files (manifest, sizes, sRGB, decodes, restore byte-identical)

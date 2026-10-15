@@ -11,8 +11,9 @@ Roadmap: M11.20 to M11.21 (lossless half), M11.29, M11.30 (one page), M11.32 to 
 | WebP (lossless) | `WebpEncoder` over `image-webp` | `encoders/webp.rs` | VP8L only; **no lossy WebP in this build** |
 | PDF | `PdfWriter`, `PdfEncoder` (own, pure Rust) | `encoders/pdf.rs` | one image per page; multi-page in the writer |
 | 1-bit | `BilevelImage` + `fax` Group 4 | `encoders/bilevel.rs` | shared by the TIFF and PDF writers |
+| AVIF (lossy) | `AvifEncoder` over `rav1e` + own container | `encoders/avif.rs`, `avif_box.rs` | feature `avif`; see the AVIF section |
 
-Not written yet: lossy WebP (needs libwebp, a C library built with CMake in CI: a cargo feature like `turbojpeg`, M11.21), AVIF (M11.22), JPEG XL (M11.25), BigTIFF, multi-page TIFF, TIFF alpha, the PDF page-size presets and the "combine N results into one file" front ends (the PDF writer itself takes any number of pages; M11.31, M11.54).
+Not written yet: lossy WebP (needs libwebp, a C library built with CMake in CI: a cargo feature like `turbojpeg`, M11.21), JPEG XL (M11.25), BigTIFF, multi-page TIFF, TIFF alpha, the PDF page-size presets and the "combine N results into one file" front ends (the PDF writer itself takes any number of pages; M11.31, M11.54).
 
 No `unsafe`, no new native code, no network. New dependencies: `fax` 0.2 (MIT, was optional), `weezl` 0.1 (MIT OR Apache-2.0, LZW; already in the tree through `tiff`), `image-webp` 0.2 (MIT OR Apache-2.0; already in the tree through `image`). `cargo deny check` passes.
 
@@ -41,6 +42,31 @@ Own writer, about 1,000 lines with tests, classic xref, deterministic object num
 * **Which page type the engine picks:** a colour picture is a JPEG page at the save's quality; an enhanced grey page is a lossless Flate page, or Group 4 with `one_bit`. (A lossless colour PDF is not offered yet.)
 * **Verification** (`encoders::pdf::read_pages`, run by the commit protocol's verify step through `commit::verify_bytes`): header, `startxref`, every xref offset pointing at its `N 0 obj`, trailer size and root, page tree and count, `/Length` of every stream, no text operator in the content stream; then the page image is decoded again and compared (exact blake3 for lossless pages, the luma fingerprint for JPEG pages) and the profile must come back byte-exact. It parses what this writer makes, not arbitrary PDFs.
 
+## AVIF
+
+`AvifEncoder` (feature `avif`; the `auto-crop-cli` and `auto-crop-shell` crates turn it on by default, the library crates do not). It drives **rav1e 0.8.1 directly** and writes its own ISOBMFF container (`avif_box.rs`, writer and reader, no dependency). `ravif` (the plan's choice) is not used: it always writes 4:4:4, has no ICC route, and its container crate `avif-serialize` writes `colr` as `nclx` only, so the "own ISOBMFF box insertion" fallback of PLAN 3.3 would have been needed anyway; driving rav1e is shorter than patching `iloc` offsets in someone else's output. rav1e is built **without its `asm` feature** (that needs `nasm`, which only CI has): pure Rust, and the package build needs no assembler.
+
+* **Pixels:** 8-bit, full range, BT.601 (nclx matrix 6, the most widely decoded choice); 4:2:0 (default) or 4:4:4 for colour, **4:0:0 (one plane) for a grey page** and for a colour raster whose channels are equal and that has no profile. Alpha is not written (the engine's rasters are flattened; `alpha.flattened` already says so). Odd sizes are exact (chroma planes round up); 1 x 1 works.
+* **Boxes:** `ftyp avif/mif1/miaf`; `meta` with `hdlr pict`, `pitm`, `iloc` (v0), `iinf`, `iref cdsc`, `iprp` (`ispe`, `pixi`, `av1C` from rav1e's own sequence header, `colr`); `mdat`. **No `irot`, no `imir`, no `clap`**: the pixels were turned once. `colr`: without a profile `nclx` sRGB (primaries 1, transfer 13); with one a `prof` box with the profile **byte-exact** next to an `nclx` that claims only the matrix (primaries and transfer unspecified, as libavif does). EXIF: an `Exif` item with the 4-byte TIFF-offset prefix, Orientation 1, GPS per the metadata policy (`strip_metadata` drops it). XMP, pixel density: not written.
+* **Quality** (`QualitySetting::avif_quality`, PROVISIONAL): Small 60, Balanced 75, Best 88, or the fixed number; unlike JPEG it does not follow the source's quality. `quality_to_quantizer` maps 1 to 100 to rav1e's base quantiser index with the curve of the `cavif` tool (75 -> 128, 90 -> 66, 100 -> 0). A fixed quantiser for the whole picture (no rate control).
+* **Speed:** rav1e preset 0 to 10, `EngineOptions::avif_speed`, CLI `--avif-speed`, default **8**. Tiles (never smaller than 256 x 256 px) are the only parallelism inside one frame.
+* **Cancellation:** rav1e cannot stop inside a frame. The encode runs on its own thread, the caller polls every 20 ms, and a cancel returns `Cancelled` at once; the thread finishes its frame and drops the result (a test checks the return is well under the encode time). The engine's save and convert paths do not pass the batch token into the encoder yet, so a cancel there takes effect between files (M11.24 is not done).
+* **Verify:** the commit protocol's verify step re-reads the temp (blake3), then `avif_box::read_info` checks the primary picture's size, the profile byte-exact, no rotation property, an AV1 OBU header, EXIF Orientation 1. A build with the libheif decoder (`heif`) also decodes the picture and compares the luma fingerprint. Without it the check is structural: the file's pixels are verified by the independent decoders in CI, not in the shipped app.
+* **Replace in place: never.** AVIF is lossy, so an AVIF source stays open-only (`format.write_unavailable`, `Format::is_encodable` is false for AVIF) and its default copy is PNG; choosing AVIF is explicit (`SaveFormat::Avif`, Convert target, `--format avif`). Converting any other source to AVIF with "replace" goes through the same verified backup and Restore as any conversion (the loss is the user's choice; notice `avif.lossy`).
+
+**Measured** (this machine: Windows 11, 12 threads; a synthetic 4000 x 3000 picture of multi-octave noise, harder than most photographs: 1.5 bpp at quality 75; `cargo run --release -p auto-crop-codecs --features avif,fixtures --example avif_bench`):
+
+| Setting | Time | Size |
+|---|---|---|
+| speed 10, 4:2:0, q75 | 4.0 s | 2.29 MB |
+| speed 8 (default), 4:2:0, q75 | 7.0 s | 2.29 MB |
+| speed 6, 4:2:0, q75 | 13.2 s | 2.30 MB |
+| speed 8, 4:4:4, q75 | about 2x the 4:2:0 time | 4.30 MB |
+
+The same runs were 2.5x slower while other builds were running on the machine; peak RSS of the 4:2:0 speed 8 run was 311 MB (including the 36 MB source picture). The PROVISIONAL gate "AVIF default <= 10 s at 12 MP" holds on this machine and is **not** established for the Tier-M reference machine. The CLI release binary grows from 6.23 MB to 7.55 MB (+1.3 MB, +21%) with the feature and a cold build takes about a minute longer, which is why the feature is on by default for the CLI and the app (B10 keeps AVIF in 1.0) and off for the library crates.
+
+**Independent decoders** (`tools/interop/check-avif.py`, CI job `Output formats`, plus the `heif` workflow): on the first run here Pillow 12.3.0 (libavif with dav1d) and ImageMagick 7.1.2 (libheif) decode every sample at the right size; PSNR against the picture the encoder was given, quality 80, 251 x 173 synthetic photo: 4:4:4 39.8 dB (bar 38), 4:2:0 39.7 dB (bar 36), grey 44.3 dB (bar 40); the profile and the EXIF come back byte-exact; Orientation 1; odd sizes down to 1 x 1 decode. `avifdec` was not installed on this machine: the CI job installs it (`libavif-bin`) and must be green. The repo's own libheif/dav1d path decodes the same files in the `heif` workflow (`libheif_decodes_what_this_writer_makes`, PSNR >= 33 dB at 160 x 120, both chroma layouts).
+
 ## What may be replaced in place now
 
 `fsplan::replace_refusal` is still the only rule. A source is replaced when it is a single-frame image and none of the decode notices `LOSSY_DECODE_NOTICES` is present:
@@ -52,16 +78,16 @@ Own writer, about 1,000 lines with tests, classic xref, deterministic object num
 | WebP, still, lossless | **yes** |
 | TIFF with `tiff.low_depth` (1-bit), `tiff.exif_not_carried`, `depth.reduced_to_8`, `alpha.dropped`, `cmyk.naive_conversion` | no, with that notice |
 | WebP with `webp.lossy`, `depth.reduced_to_8`, `alpha.dropped` | no, with that notice |
-| multi-page TIFF, animated WebP/PNG/GIF, HEIC, AVIF, BMP, GIF | no (unchanged) |
+| multi-page TIFF, animated WebP/PNG/GIF, HEIC, AVIF (lossy writer: never replaced), BMP, GIF | no (unchanged) |
 
 The 16-bit and alpha refusals stay: the engine's raster is 8-bit RGB, so a writer that could hold 16 bit (the TIFF encoder can) is never given the pixels. Converting to another format is the Convert flow (`convert --to`), not an in-place save. Copies keep the source's format when it can be written back as itself (`output::copy_format`): TIFF stays TIFF, lossless WebP stays WebP, a lossy WebP or a 1-bit TIFF gives PNG.
 
 ## Choosing the format
 
-* **Convert screen and `auto-crop convert --to jpg|png|tiff|webp|pdf`**: any decodable source; replace (verified backup, restore), keep, or a folder.
+* **Convert screen and `auto-crop convert --to jpg|png|tiff|webp|pdf|avif`**: any decodable source; replace (verified backup, restore), keep, or a folder.
 * **Editor "Save as"** (`Settings.save_format`): applies to copies. Another format than the source's turns "Replace original" off (`format.change_needs_copy` in the engine, the gate `format-change` in the UI), because replacing under another name is a conversion.
-* **`process --format tiff|webp|pdf`**, `render --format` or the output extension: copies only, like the existing `--format`.
-* `--tiff-compression none|lzw|deflate|packbits`, `--one-bit`.
+* **`process --format tiff|webp|pdf|avif`**, `render --format` or the output extension: copies only, like the existing `--format`.
+* `--tiff-compression none|lzw|deflate|packbits`, `--one-bit`, `--avif-speed 0-10`, `--avif-chroma 420|444`.
 
 ## How it is checked
 
@@ -73,4 +99,4 @@ The 16-bit and alpha refusals stay: the engine's raster is 8-bit RGB, so a write
 
 ## Limits and follow-ups
 
-Lossy WebP, AVIF and JPEG XL are not written (M11.21 lossy half, M11.22 to M11.27). TIFF carries no EXIF/GPS/thumbnail, no alpha, no BigTIFF, one page. The PDF has no page-size presets, no multi-page front end (the writer is ready), and the engine writes lossy JPEG pages for colour pictures only. WebP carries no XMP. Fuzz targets for the writers (`tiff_multipage_writer`, `pdf_writer`, M11.66) are not written; the decoders' fuzz seeds are unchanged. Performance and memory of the writers are unmeasured (M11.61, M11.64, M11.65). The Windows, macOS and Linux behaviour is identical (pure Rust), but only Windows and the Linux CI job have run it.
+Lossy WebP and JPEG XL are not written (M11.21 lossy half, M11.25 to M11.27). AVIF: no alpha, no XMP, no 10-bit, no HDR, no animation, no grid for pictures above rav1e's limits (65,535 px per side is the cap we set); cancel is between files in the engine. TIFF carries no EXIF/GPS/thumbnail, no alpha, no BigTIFF, one page. The PDF has no page-size presets, no multi-page front end (the writer is ready), and the engine writes lossy JPEG pages for colour pictures only. WebP carries no XMP. Fuzz targets for the writers (`tiff_multipage_writer`, `pdf_writer`, M11.66) are not written; the decoders' fuzz seeds are unchanged. Performance and memory of the writers are unmeasured (M11.61, M11.64, M11.65). The Windows, macOS and Linux behaviour is identical (pure Rust), but only Windows and the Linux CI job have run it.
