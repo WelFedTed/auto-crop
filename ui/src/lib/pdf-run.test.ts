@@ -30,7 +30,7 @@ test('the progress stages are the ones the engine reports, and the line counts p
   assert.deepEqual([...new Set(stages)].sort(), ['rendering', 'saving', 'verifying']);
   assert.equal(S.pdf.progress('rendering', 0, 5), 'Writing page 1 of 5');
   assert.equal(S.pdf.progress('verifying', 4, 5), 'Checking page 5 of 5');
-  assert.equal(S.pdf.progress('rendering', 0, 0), 'Writing page 1 of …');
+  assert.equal(S.pdf.progress('rendering', 0, 0), 'Choose a name for the PDF…', 'before the Save dialog is answered there is no page count');
   assert.equal(S.pdf.progress('saving', 5, 5), 'Saving the PDF…');
   assert.equal(S.pdf.saved(1, 'a.pdf'), 'Saved 1 page as a.pdf.');
   assert.equal(S.pdf.saved(3, 'Scans.pdf'), 'Saved 3 pages as Scans.pdf.');

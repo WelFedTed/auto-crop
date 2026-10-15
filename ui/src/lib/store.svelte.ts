@@ -548,7 +548,7 @@ class Store {
       if (!r) return; // the dialog was cancelled
       const line = S.pdf.saved(r.pages, r.name);
       this.announce(line);
-      this.toast(r.renamed ? `${line} ${S.pdf.renamed(r.name)}` : line, 'success', {
+      this.toast(r.renamed ? `${line} ${S.pdf.renamed}` : line, 'success', {
         label: S.pdf.openFolder,
         run: () => void api.openPdfFolder().catch((e: unknown) => this.fail(e)),
       });

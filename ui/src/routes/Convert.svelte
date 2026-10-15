@@ -289,7 +289,7 @@
             </fieldset>
 
             <fieldset class="group" disabled={!qualityOn}>
-              <legend>{S.convert.qualityLabel}</legend>
+              <legend>{o.target === 'avif' ? S.convert.qualityLabelAvif : S.convert.qualityLabel}</legend>
               <div class="seg wrap">
                 {#each presets as pr (pr.id)}
                   <button type="button" aria-pressed={preset === pr.id} onclick={() => convert.setPreset(pr.id)}>{pr.label}</button>

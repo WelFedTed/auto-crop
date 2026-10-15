@@ -1253,6 +1253,7 @@ export const S = {
     losslessNoQuality: (target: string) => `${target} is lossless, so there is no quality to choose.`,
     tiffNote: 'TIFF keeps every pixel (LZW compression) and the colour profile. It is the usual format for scans.',
     qualityLabel: 'JPG quality',
+    qualityLabelAvif: 'AVIF quality',
     qualitySmall: 'Small',
     qualityBalanced: 'Balanced',
     qualityBest: 'Best',
@@ -1404,9 +1405,13 @@ export const S = {
     hint: 'One PDF with a page for every crop of the selected images, in the order they are shown. The originals are not touched.',
     cancel: 'Cancel PDF',
     progress: (stage: 'rendering' | 'verifying' | 'saving', done: number, total: number) =>
-      stage === 'saving' ? 'Saving the PDF…' : `${stage === 'rendering' ? 'Writing' : 'Checking'} page ${Math.min(done + 1, Math.max(total, 1))} of ${total || '…'}`,
+      stage === 'saving'
+        ? 'Saving the PDF…'
+        : total === 0
+          ? 'Choose a name for the PDF…'
+          : `${stage === 'rendering' ? 'Writing' : 'Checking'} page ${Math.min(done + 1, total)} of ${total}`,
     saved: (pages: number, name: string) => `Saved ${pages} ${pages === 1 ? 'page' : 'pages'} as ${name}.`,
-    renamed: (name: string) => `A file with that name was already there, so the PDF is called ${name}. Nothing was replaced.`,
+    renamed: 'A file with that name was already there, so nothing was replaced.',
     openFolder: 'Show in folder',
     cancelled: 'PDF cancelled. Nothing was written.',
     nothing: 'Select images with a crop to put in a PDF.',
