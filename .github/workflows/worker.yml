@@ -212,10 +212,13 @@ jobs:
             grep -E "= -1 (EPERM|ENOSYS)" target/trace.txt >> target/denied.txt || true
           done
           echo "denied system calls:"; sort target/denied.txt | sed -E 's/^[0-9]+ +//; s/\(.*//' | sort | uniq -c | sort -rn
-          # expected: openat of /etc/passwd, socket/connect, clone/execve for the probe, clone3 (ENOSYS)
-          unexpected=$(grep -v -E "etc/passwd|socket\(|connect\(|execve|clone3|/bin/true|fork|vfork|clone\(.*SIGCHLD" target/denied.txt | sort -u || true)
-          if [ -n "$unexpected" ]; then
-            echo "UNEXPECTED denied system calls (widen the allow-list in crates/sandbox/src/os/linux.rs):"; echo "$unexpected"; exit 1
+          # Expected, per worker: the escape probes (a file open and the open of /dev/null for the spawn,
+          # both `openat`; one `socket`; the spawn itself) and clone3 answered ENOSYS so glibc falls back
+          # to clone. Anything else denied is a gap in the allow-list; so is a fourth openat per worker.
+          unexpected=$(grep -v -E "clone3|socket\(|connect\(|execve|fork|vfork|clone\(" target/denied.txt | grep -v -E "openat\(" | sort -u || true)
+          too_many=$(grep -E "openat\(" target/denied.txt | awk '{print $1}' | sort | uniq -c | awk '$1 > 3' || true)
+          if [ -n "$unexpected" ] || [ -n "$too_many" ]; then
+            echo "UNEXPECTED denied system calls (widen the allow-list in crates/sandbox/src/os/linux.rs):"; echo "$unexpected"; echo "$too_many"; exit 1
           fi
           echo "the allow-list covers every system call libheif, dav1d and libde265 made"
       - name: Added latency per image through the worker (12 MP, informational, shared runner, NOISY)
@@ -246,9 +249,12 @@ jobs:
             sips -s format heic -s formatOptions 60 target/heif-12mp.png --out target/heif-12mp.heic >/dev/null
           elif [ "$RUNNER_OS" = Linux ]; then
             sudo apt-get install -y libheif-examples >/dev/null
-            heif-enc -q 60 target/heif-12mp.png -o target/heif-12mp.heic >/dev/null
+            heif-enc -q 60 target/heif-12mp.png -o target/heif-12mp.heic >/dev/null || echo "heif-enc has no HEVC encoder here"
           fi
-          if [ -f target/heif-12mp.heic ]; then "$lat" target/heif-12mp.heic 10 | tee -a target/latency.txt; else echo "no HEIC encoder on this runner"; fi
+          if [ -s target/heif-12mp.heic ]; then "$lat" target/heif-12mp.heic 10 | tee -a target/latency.txt; else echo "no 12 MP HEIC on this runner (no HEVC encoder)"; fi
+          # the small HEIC of the libheif archive: the fixed cost of a job with almost no decode work
+          src=$(find target/native -maxdepth 4 -type d -name 'libheif-*' -path '*/src/*' | head -1)
+          "$lat" "$src/tests/data/rainbow-451x461.heic" 20 | tee -a target/latency.txt
           {
             echo "### Added latency of the sandboxed worker (${{ matrix.os }}, release, NOISY)"
             echo '```'
