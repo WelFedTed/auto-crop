@@ -8,15 +8,16 @@ use auto_crop_engine::convert_batch::{
     ConvertAdded, ConvertFileView, ConvertPreview, ConvertProgress, ConvertSummary,
 };
 use auto_crop_engine::curved::CurveSuggestion;
+use auto_crop_engine::run_pdf::{PdfRunOptions, PdfSelect};
 use auto_crop_engine::{
-    AppPaths, CurveWarp, Cut, DerivedAction, Edit, Engine, EnhanceBatch, EnhanceMode,
+    AppPaths, CancelToken, CurveWarp, Cut, DerivedAction, Edit, Engine, EnhanceBatch, EnhanceMode,
     EnhanceSuggestion, ErrKind, ItemView, Notify, OpenSummary, Pt, RestoreMode, RestoreOutcome,
     RevertTo, SaveOutcome, SaveTarget, SessionStep, Settings, SplitPatch, Superseded, TrimProposal,
 };
 use serde::Serialize;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use tauri::http::{Response, StatusCode};
 use tauri::{AppHandle, DragDropEvent, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
@@ -37,6 +38,15 @@ struct Shared {
     /// The Convert screen is showing: files dropped on the window go to its list, not to the crop
     /// flow. Set by the webview (`convert_mode`), read by the drop handler.
     convert_mode: Arc<AtomicBool>,
+    /// The "save as one PDF" run in progress (its cancel token) and the last file it wrote (for
+    /// "Show in folder"). The webview only ever sees the file's name.
+    pdf: Arc<Mutex<PdfState>>,
+}
+
+#[derive(Default)]
+struct PdfState {
+    cancel: Option<CancelToken>,
+    last: Option<PathBuf>,
 }
 
 type Cmd<T> = Result<T, ErrKind>;
@@ -784,6 +794,149 @@ fn convert_open_folder(shared: State<'_, Shared>, id: Option<u32>) -> Cmd<()> {
         .map_err(|_| ErrKind::Unreadable)
 }
 
+// ---------------------------------------------------------------- scan to PDF (ids and names only)
+
+/// What the webview may choose about a "save as one PDF" run.
+#[derive(serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct PdfOptionsIn {
+    /// Pixel density of every page; `None` = each scan's own, 300 when it says none.
+    dpi: Option<u32>,
+    one_bit: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PdfSaved {
+    /// The file name only: the folder stays on this side.
+    name: String,
+    pages: u32,
+    bytes: u64,
+    pass_through_pages: u32,
+    notices: Vec<String>,
+    /// The name was taken, so the file got the next free one.
+    renamed: bool,
+}
+
+/// Asks where to save (a Rust-side dialog, starting in the folder of the first scan) and writes the
+/// selected scans' crops, in the order given, as one PDF. `None` when the dialog was cancelled.
+/// Progress arrives as `pdf-progress` events.
+#[tauri::command]
+async fn save_pdf(
+    app: AppHandle,
+    shared: State<'_, Shared>,
+    ids: Vec<u32>,
+    options: PdfOptionsIn,
+) -> Cmd<Option<PdfSaved>> {
+    let (dir, name) = shared
+        .engine
+        .pdf_default_target(&ids)
+        .ok_or(ErrKind::Internal)?;
+    let picked = app
+        .dialog()
+        .file()
+        .set_directory(dir)
+        .set_file_name(name)
+        .add_filter("PDF", &["pdf"])
+        .blocking_save_file()
+        .and_then(|p| p.into_path().ok());
+    let Some(mut path) = picked else {
+        return Ok(None);
+    };
+    if !path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
+    {
+        path.set_extension("pdf");
+    }
+    let token = CancelToken::new_batch();
+    {
+        let mut st = shared.pdf.lock().unwrap_or_else(|e| e.into_inner());
+        if st.cancel.is_some() {
+            return Err(ErrKind::Internal);
+        }
+        st.cancel = Some(token.clone());
+    }
+    let engine = shared.engine.clone();
+    let pdf = shared.pdf.clone();
+    let wanted = path.clone();
+    let result = blocking(move || {
+        let select: Vec<PdfSelect> = ids
+            .iter()
+            .map(|id| PdfSelect {
+                item: *id,
+                crop: None,
+            })
+            .collect();
+        let o = PdfRunOptions {
+            dpi: options.dpi.filter(|d| (36..=1200).contains(d)),
+            one_bit: options.one_bit,
+            ..PdfRunOptions::default()
+        };
+        engine.save_run_pdf(&select, &wanted, &o, &token, &|p| {
+            let _ = app.emit("pdf-progress", p);
+        })
+    })
+    .await;
+    let mut st = pdf.lock().unwrap_or_else(|e| e.into_inner());
+    st.cancel = None;
+    let saved = result??;
+    st.last = Some(saved.path.clone());
+    let renamed = saved
+        .notices
+        .iter()
+        .any(|n| n == auto_crop_engine::run_pdf::NOTICE_PDF_RENAMED);
+    Ok(Some(PdfSaved {
+        name: saved
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        pages: saved.pages,
+        bytes: saved.bytes,
+        pass_through_pages: saved.pass_through_pages,
+        notices: saved.notices,
+        renamed,
+    }))
+}
+
+/// Stops the PDF run after the page in progress; nothing is written.
+#[tauri::command]
+fn cancel_pdf(shared: State<'_, Shared>) {
+    if let Some(t) = &shared.pdf.lock().unwrap_or_else(|e| e.into_inner()).cancel {
+        t.cancel();
+    }
+}
+
+/// Opens the folder of the last PDF in the file manager, the file selected where the OS can. The
+/// path is ours, never the webview's.
+#[tauri::command]
+fn open_pdf_folder(shared: State<'_, Shared>) -> Cmd<()> {
+    let last = shared
+        .pdf
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .last
+        .clone()
+        .ok_or(ErrKind::Unreadable)?;
+    let dir = last.parent().ok_or(ErrKind::Unreadable)?;
+    let mut cmd = if cfg!(windows) {
+        let mut c = std::process::Command::new("explorer");
+        // `/select,<file>` shows the file in its folder.
+        c.arg(format!("/select,{}", last.display()));
+        c
+    } else if cfg!(target_os = "macos") {
+        let mut c = std::process::Command::new("open");
+        c.arg("-R").arg(&last);
+        c
+    } else {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(dir);
+        c
+    };
+    cmd.spawn().map(|_| ()).map_err(|_| ErrKind::Unreadable)
+}
+
 fn image_response(status: StatusCode, mime: &str, body: Vec<u8>) -> Response<Vec<u8>> {
     Response::builder()
         .status(status)
@@ -879,6 +1032,7 @@ pub fn run() {
         live_preview: Arc::new(AtomicU64::new(0)),
         full_preview: Arc::new(AtomicU64::new(0)),
         convert_mode: Arc::new(AtomicBool::new(false)),
+        pdf: Arc::new(Mutex::new(PdfState::default())),
     };
     let for_scheme = shared.clone();
 
@@ -959,6 +1113,9 @@ pub fn run() {
             convert_run,
             convert_cancel,
             convert_open_folder,
+            save_pdf,
+            cancel_pdf,
+            open_pdf_folder,
         ])
         .setup(|app| {
             // "Open with" and `AutoCrop.exe file-or-folder ...`: paths on the command line are opened like a

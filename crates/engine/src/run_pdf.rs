@@ -258,6 +258,25 @@ impl Engine {
         run.finish(progress)
     }
 
+    /// Where a "save these as one PDF" dialog should start: the folder of the first scan and a
+    /// file name (the scan's own name for one scan, `Scans.pdf` for several). `None` when the first
+    /// id is not an open image.
+    pub fn pdf_default_target(&self, ids: &[u32]) -> Option<(PathBuf, String)> {
+        let item = self.item(*ids.first()?)?;
+        let it = lock(&item);
+        let dir = it.path.parent()?.to_path_buf();
+        let stem = it
+            .path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .filter(|s| !s.is_empty());
+        let name = match (ids.len(), stem) {
+            (1, Some(s)) => format!("{s}.pdf"),
+            _ => "Scans.pdf".to_owned(),
+        };
+        Some((dir, name))
+    }
+
     /// Starts a document at `out` (a `.pdf` path; the folder must exist). `expected_bytes` is the
     /// size of what will be read (a free-space check, 0 skips it).
     pub fn begin_run_pdf<'e>(

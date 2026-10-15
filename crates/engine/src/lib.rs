@@ -42,7 +42,7 @@ pub mod trim;
 pub mod util;
 
 pub use api::*;
-pub use auto_crop_core::{Curve, CurveWarp, Cut, CutAxis, Enhance, EnhanceMode, Pt};
+pub use auto_crop_core::{CancelToken, Curve, CurveWarp, Cut, CutAxis, Enhance, EnhanceMode, Pt};
 pub use curved::{PageShape, Superseded, curved_job_weight};
 pub use engine::{Engine, Housekeeping, Notify, RunOptions};
 pub use enhance::{EnhanceBatch, EnhanceMeasures, EnhanceSuggestion, OutputHint};
