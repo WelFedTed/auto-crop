@@ -240,7 +240,7 @@ jobs:
             "* package: ``$env:NAME.zip`` (SHA-256 ``$env:SHA256``)",
             "* HEIC and AVIF decoded by the sandboxed worker (AUTOCROP_DECODE=worker never falls back); sandbox level reported by the worker itself: ``$level`` (tier $tier)",
             '* worker renamed: a forced-worker decode fails, the default mode says sandbox none',
-            '* AVIF 48x32 decoded, HEIC 451x461 decoded, HEIC without' the plugin folder fails with HevcDecoderMissing, AVIF without it still decodes, no heif.dll means no start',
+            '* AVIF 48x32 decoded, HEIC 451x461 decoded, HEIC without the plugin folder fails with HevcDecoderMissing, AVIF without it still decodes, no heif.dll means no start',
             '* build tree moved away, PATH reduced to System32, LIBHEIF_PLUGIN_PATH cleared',
             '* the desktop window was not driven by a test'
           ) | Add-Content -Path $env:GITHUB_STEP_SUMMARY
