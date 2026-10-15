@@ -194,6 +194,7 @@ fn the_targets_serialise_as_the_names_the_ui_and_cli_use() {
         (ConvertTarget::Tiff, "tiff"),
         (ConvertTarget::Webp, "webp"),
         (ConvertTarget::Pdf, "pdf"),
+        (ConvertTarget::Avif, "avif"),
     ] {
         assert_eq!(t.name(), name);
         assert_eq!(serde_json::to_string(&t).unwrap(), format!("\"{name}\""));
@@ -202,7 +203,7 @@ fn the_targets_serialise_as_the_names_the_ui_and_cli_use() {
             t
         );
     }
-    assert_eq!(ConvertTarget::ALL.len(), 5);
+    assert_eq!(ConvertTarget::ALL.len(), 6);
 }
 
 // ------------------------------------------------------------------ TIFF re-save keeps what it can

@@ -314,6 +314,14 @@ pub fn verify_bytes(bytes: &[u8], e: &Expect, mode: VerifyMode) -> Result<()> {
     if e.format == Format::Pdf {
         return verify_pdf(bytes, e);
     }
+    if e.format == Format::Avif {
+        verify_avif_structure(bytes, e)?;
+        // A build with the libheif decoder also decodes the picture and checks its luma; one
+        // without it checks the container (and the re-read hash that came before).
+        if !Format::Avif.is_decodable() {
+            return Ok(());
+        }
+    }
     let limits = limits_for(e.dims);
     let fast = mode == VerifyMode::Fast && e.format == Format::Jpeg;
     let (format, dims, orientation, icc, raster) = if fast {
@@ -370,6 +378,33 @@ fn verify_pdf(bytes: &[u8], e: &Expect) -> Result<()> {
         return Err(ErrKind::VerifyFailed);
     }
     check_content(&raster, e)
+}
+
+/// The structure check of an AVIF this build wrote (the decode half needs libheif): the container
+/// parses, the primary picture has the size the encoder reported, the profile is byte-exact, no
+/// rotation or mirror property is there (the pixels were turned once), the AV1 data starts with a
+/// well-formed OBU header, and an embedded EXIF says Orientation 1.
+fn verify_avif_structure(bytes: &[u8], e: &Expect) -> Result<()> {
+    use auto_crop_codecs::encoders::avif_box::read_info;
+    let info = read_info(bytes).ok_or(ErrKind::VerifyFailed)?;
+    if (info.width, info.height) != e.dims
+        || info.has_irot_or_imir
+        || !info.av1_header_ok
+        || info.av1_len < 8
+    {
+        return Err(ErrKind::VerifyFailed);
+    }
+    if let Some(want) = &e.icc
+        && info.icc.as_ref() != Some(want)
+    {
+        return Err(ErrKind::VerifyFailed);
+    }
+    if let Some(exif) = &info.exif
+        && auto_crop_codecs::exif_orientation(exif).is_some_and(|o| o != 1)
+    {
+        return Err(ErrKind::VerifyFailed);
+    }
+    Ok(())
 }
 
 fn check_content(raster: &Raster, e: &Expect) -> Result<()> {

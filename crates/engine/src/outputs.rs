@@ -101,7 +101,7 @@ fn render_inner(
     }
     let decoded = decode_with(source, &opts.limits()).map_err(codec_err)?;
     let fmt = want.unwrap_or_else(|| default_output_format(decoded.format, &decoded.notices));
-    if !fmt.is_encodable() {
+    if !fmt.is_writable() {
         return Err(ErrKind::UnsupportedOutput);
     }
     let meta = SourceMeta::read(decoded.format, source, decoded.icc.map(Arc::new));

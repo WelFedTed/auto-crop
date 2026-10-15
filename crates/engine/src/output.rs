@@ -79,6 +79,35 @@ impl QualitySetting {
     }
 }
 
+/// The chroma layout of an AVIF the engine writes (a grey page is always one plane).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum AvifChromaSetting {
+    /// 4:2:0 (the smaller files).
+    #[default]
+    #[serde(rename = "auto")]
+    Auto,
+    #[serde(rename = "420")]
+    Yuv420,
+    /// 4:4:4: no colour fringes on thin coloured text, about 40% larger.
+    #[serde(rename = "444")]
+    Yuv444,
+}
+
+impl QualitySetting {
+    /// The AVIF quality (1 to 100): Small 60, Balanced 75, Best 88 (PROVISIONAL, PLAN 3.9), or the
+    /// fixed number. Unlike JPEG it does not follow the source's own quality.
+    pub fn avif_quality(self) -> u8 {
+        match self {
+            QualitySetting::Fixed { value } => value.clamp(1, 100),
+            QualitySetting::Preset { preset } => match preset {
+                QualityPreset::Small => 60,
+                QualityPreset::Balanced => 75,
+                QualityPreset::Best => 88,
+            },
+        }
+    }
+}
+
 /// How a TIFF is compressed (PLAN 3.3; 1-bit pages are Group 4 whatever this says).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -103,6 +132,7 @@ pub enum SaveFormat {
     Tiff,
     Webp,
     Pdf,
+    Avif,
 }
 
 impl SaveFormat {
@@ -115,6 +145,7 @@ impl SaveFormat {
             SaveFormat::Tiff => Some(Format::Tiff),
             SaveFormat::Webp => Some(Format::Webp),
             SaveFormat::Pdf => Some(Format::Pdf),
+            SaveFormat::Avif => Some(Format::Avif),
         }
     }
 }
@@ -129,6 +160,9 @@ pub fn copy_format(source: Format, notices: &[&str], choice: SaveFormat) -> Form
     }
     let lossy_webp = source == Format::Webp && notices.contains(&"webp.lossy");
     let bilevel_tiff = source == Format::Tiff && notices.contains(&"tiff.low_depth");
+    // An AVIF source is not copied as AVIF by default (`is_encodable` is false for it): its writer
+    // is lossy, so a copy would be another generation of loss. PNG is the copy format; choosing
+    // AVIF is explicit.
     if source.is_encodable() && source != Format::Pdf && !lossy_webp && !bilevel_tiff {
         source
     } else if source == Format::Heic {
@@ -165,6 +199,11 @@ pub struct EngineOptions {
     /// Write an enhanced grey page as 1 bit: CCITT Group 4 in a TIFF or a PDF, thresholded at
     /// 128 with no dithering. Any other output is `UnsupportedOutput`, never a silent 8-bit file.
     pub one_bit: bool,
+    /// The AVIF encoder speed, rav1e's 0 (slowest, smallest) to 10; `None` is 8 (about 7 s for
+    /// 12 MP on a 12-thread desktop, `docs/dev/output-formats.md`).
+    pub avif_speed: Option<u8>,
+    /// The AVIF chroma layout of a colour page.
+    pub avif_chroma: AvifChromaSetting,
 }
 
 impl Default for EngineOptions {
@@ -180,6 +219,8 @@ impl Default for EngineOptions {
             backup_method: crate::store::MethodPref::Auto,
             tiff_compression: None,
             one_bit: false,
+            avif_speed: None,
+            avif_chroma: AvifChromaSetting::Auto,
         }
     }
 }
@@ -347,10 +388,10 @@ pub fn encode_raster(
             png_with_exif(raw, meta, o, dims)
         }
         // TIFF, lossless WebP and PDF (M11): their own module decides the metadata and the check.
-        Format::Tiff | Format::Webp | Format::Pdf => {
+        Format::Tiff | Format::Webp | Format::Pdf | Format::Avif => {
             return crate::formats_out::encode_rgb(raster, format, meta, o);
         }
-        // The writers that do not exist yet (AVIF, JPEG XL): never reached for a replace (the
+        // The writers that do not exist yet (JPEG XL): never reached for a replace (the
         // replaceability gate stops these formats) and refused for a copy.
         _ => return Err(ErrKind::UnsupportedOutput),
     };
@@ -434,6 +475,8 @@ pub(crate) fn png_insert_exif(png: &[u8], exif: &[u8]) -> Vec<u8> {
 /// Notice codes of an enhanced save (the UI looks the text up by them).
 pub const NOTICE_ICC_DROPPED: &str = "enhance.icc_dropped";
 pub const NOTICE_PNG_RECOMMENDED: &str = "enhance.png_recommended";
+/// An AVIF output is lossy: every save from pixels adds a generation of loss.
+pub const NOTICE_AVIF_LOSSY: &str = "avif.lossy";
 
 /// A grey JPEG is never written below this quality (PLAN 5.9: low quality rings around text).
 pub const GRAY_JPEG_MIN_QUALITY: u8 = 90;
@@ -466,7 +509,11 @@ pub fn encode_enhanced(
     match page {
         Enhanced::Rgb(r) => Ok(EncodedPage {
             encoded: encode_raster(r, format, meta, o)?,
-            notices: Vec::new(),
+            notices: if format == Format::Avif {
+                vec![NOTICE_AVIF_LOSSY]
+            } else {
+                Vec::new()
+            },
         }),
         Enhanced::Gray(g) => {
             let mut notices = Vec::new();
@@ -512,7 +559,10 @@ pub fn encode_enhanced(
                         .map_err(|_| ErrKind::EncodeFailed)?;
                     png_with_exif(raw, meta, o, dims)
                 }
-                Format::Tiff | Format::Webp | Format::Pdf => {
+                Format::Tiff | Format::Webp | Format::Pdf | Format::Avif => {
+                    if format == Format::Avif {
+                        notices.push(NOTICE_AVIF_LOSSY);
+                    }
                     return Ok(EncodedPage {
                         encoded: crate::formats_out::encode_gray(g, format, meta, o)?,
                         notices,
@@ -673,7 +723,7 @@ mod tests {
     #[test]
     fn formats_with_no_writer_are_refused() {
         let r = gradient(16, 16);
-        for f in [Format::Avif, Format::Heic, Format::Jxl] {
+        for f in [Format::Heic, Format::Jxl] {
             assert_eq!(
                 encode_raster(&r, f, &SourceMeta::default(), &EngineOptions::default()).err(),
                 Some(ErrKind::UnsupportedOutput)

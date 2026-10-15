@@ -15,6 +15,9 @@ publish.workspace = true
 # libraries of `cargo xtask build-native`). Off by default; sources in these formats are never
 # replaced in place (no writer yet), only copied as PNG or JPEG.
 heif = ["auto-crop-codecs/heif"]
+# The AVIF writer (rav1e, pure Rust, no nasm): Convert and Save as can write AVIF. AVIF sources are
+# still never replaced in place (lossy).
+avif = ["auto-crop-codecs/avif"]
 # libjpeg-turbo (>= 3.1.4, `cargo xtask build-native`): the lossless JPEG path uses its transform
 # (which also reads progressive files) and the JPEG encoder is libjpeg-turbo's. Off by default; the
 # default build uses the safe-Rust transform and `jpeg-encoder`.

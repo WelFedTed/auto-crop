@@ -17,6 +17,9 @@
 //!   (DCTDecode, EXIF and the rest dropped), a grey enhanced page as lossless Flate. With
 //!   [`EngineOptions::one_bit`] an enhanced grey page becomes a CCITT Group 4 page (TIFF Group 4 for
 //!   a TIFF). The page size follows the density, 300 dpi when it is unknown.
+//! * **AVIF** (feature `avif`, lossy): rav1e, 8-bit, 4:2:0 (or 4:4:4 by option); a grey page, or a
+//!   colour raster whose channels are equal and that has no profile, is one plane. ICC byte-exact in
+//!   a `prof` box, the patched EXIF as an `Exif` item, Orientation 1, no rotation box.
 //! * **Checks** ([`Expect`]): lossless pages must decode to the exact pixels (blake3); a JPEG page
 //!   to the same luma fingerprint as any JPEG output.
 
@@ -161,7 +164,41 @@ fn bilevel_hash(g: &GrayImage) -> Result<String> {
     Ok(hasher.finalize().to_hex().to_string())
 }
 
-/// An RGB raster as `format` (TIFF, WebP or PDF).
+/// The AVIF writer of an engine save: the quality of the options, their speed and chroma, the
+/// patched EXIF. Without the `avif` feature there is none.
+#[cfg(feature = "avif")]
+fn avif_bytes(
+    src: &RasterView<'_>,
+    dims: (u32, u32),
+    icc: Option<&Arc<[u8]>>,
+    meta: &SourceMeta,
+    o: &EngineOptions,
+) -> Result<Vec<u8>> {
+    use auto_crop_codecs::encoders::avif::DEFAULT_AVIF_SPEED;
+    use auto_crop_codecs::encoders::{AvifChroma, AvifEncoder};
+    let enc = AvifEncoder {
+        chroma: match o.avif_chroma {
+            crate::output::AvifChromaSetting::Yuv444 => AvifChroma::Yuv444,
+            _ => AvifChroma::Yuv420,
+        },
+        speed: o.avif_speed.unwrap_or(DEFAULT_AVIF_SPEED).min(10),
+        exif: patched_exif(meta, o, dims),
+        ..AvifEncoder::default()
+    };
+    let enc_meta = EncodeMeta {
+        icc: icc.cloned(),
+        dpi: None,
+    };
+    enc.encode(
+        src,
+        &jpeg_spec(o.quality.avif_quality()),
+        &enc_meta,
+        &CancelToken::never(),
+    )
+    .map_err(|_| ErrKind::EncodeFailed)
+}
+
+/// An RGB raster as `format` (TIFF, WebP, PDF or AVIF).
 pub(crate) fn encode_rgb(
     raster: &Raster,
     format: Format,
@@ -247,6 +284,29 @@ pub(crate) fn encode_rgb(
                 },
             })
         }
+        #[cfg(feature = "avif")]
+        Format::Avif => {
+            // A raster that is grey in all three channels and has no profile is one plane.
+            let grey = icc.is_none().then(|| gray_plane(raster)).flatten();
+            let bytes = match &grey {
+                Some(g) => {
+                    let v = RasterView::new(
+                        raster.width,
+                        raster.height,
+                        PixelFormat::Gray8,
+                        raster.width as usize,
+                        SampleSlice::U8(g),
+                    )
+                    .ok_or(ErrKind::Internal)?;
+                    avif_bytes(&v, dims, None, meta, o)?
+                }
+                None => avif_bytes(&src, dims, icc.as_ref(), meta, o)?,
+            };
+            Ok(Encoded {
+                bytes,
+                expect: Expect::for_raster(raster, Format::Avif, icc.as_deref()),
+            })
+        }
         _ => Err(ErrKind::UnsupportedOutput),
     }
 }
@@ -308,7 +368,15 @@ pub(crate) fn encode_gray(
                 .map_err(|_| ErrKind::EncodeFailed)?;
             w.finish().map_err(|_| ErrKind::EncodeFailed)?
         }
+        #[cfg(feature = "avif")]
+        Format::Avif => avif_bytes(&src, dims, None, meta, o)?,
         _ => return Err(ErrKind::UnsupportedOutput),
+    };
+    // A lossy format is checked by luma, not by exact pixels.
+    let content = if format == Format::Avif {
+        Content::Luma(crate::commit::luma_fingerprint_gray(g))
+    } else {
+        content
     };
     Ok(Encoded {
         bytes,

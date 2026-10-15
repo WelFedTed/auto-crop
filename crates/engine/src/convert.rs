@@ -98,6 +98,8 @@ pub enum ConvertTarget {
     Tiff,
     Webp,
     Pdf,
+    /// Lossy (rav1e); a build without the `avif` feature refuses it.
+    Avif,
 }
 
 impl ConvertTarget {
@@ -108,6 +110,7 @@ impl ConvertTarget {
             ConvertTarget::Tiff => Format::Tiff,
             ConvertTarget::Webp => Format::Webp,
             ConvertTarget::Pdf => Format::Pdf,
+            ConvertTarget::Avif => Format::Avif,
         }
     }
 
@@ -118,16 +121,18 @@ impl ConvertTarget {
             ConvertTarget::Tiff => "tiff",
             ConvertTarget::Webp => "webp",
             ConvertTarget::Pdf => "pdf",
+            ConvertTarget::Avif => "avif",
         }
     }
 
     /// Every target, in the order a front end lists them.
-    pub const ALL: [ConvertTarget; 5] = [
+    pub const ALL: [ConvertTarget; 6] = [
         ConvertTarget::Jpg,
         ConvertTarget::Png,
         ConvertTarget::Tiff,
         ConvertTarget::Webp,
         ConvertTarget::Pdf,
+        ConvertTarget::Avif,
     ];
 }
 
@@ -369,6 +374,13 @@ impl Engine {
         if cancelled() {
             return Err(fail(ErrKind::Cancelled));
         }
+        // A target this build has no writer for (AVIF without the `avif` feature): nothing is read.
+        if !target.is_writable() {
+            return Err(ConvertError::Failed(
+                ErrKind::UnsupportedOutput,
+                vec!["format.write_unavailable".to_owned()],
+            ));
+        }
 
         // The file's state, before anything is read for the conversion or written.
         if replace && !req.dry_run {
@@ -429,6 +441,9 @@ impl Engine {
             ));
         }
         let mut notices: Vec<String> = Vec::new();
+        if target == Format::Avif {
+            notices.push(crate::output::NOTICE_AVIF_LOSSY.to_owned());
+        }
         if probe.frames > 1 {
             // One rule for what may be replaced (D3): a source with several frames never is.
             let n = crate::fsplan::replace_refusal(src_format, probe.frames, &[])
