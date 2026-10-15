@@ -179,6 +179,8 @@ pub struct PoolStatus {
     /// Why the stronger confinement attempts before the one in use failed (empty when the first
     /// one worked).
     pub attempt_failures: Vec<String>,
+    /// Why the last worker that was replaced had to go (crash text, protocol violation, ...).
+    pub last_replaced: Option<String>,
 }
 
 /// Why a pool decode did not produce an answer about the file.
@@ -713,6 +715,7 @@ impl WorkerPool {
                 if reusable {
                     self.give_back(worker);
                 } else {
+                    self.with_status(|s| s.last_replaced = Some(e.to_string()));
                     self.discard(worker);
                 }
                 Err(PoolFailure::Codec(e))

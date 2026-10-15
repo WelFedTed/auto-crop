@@ -61,7 +61,7 @@ Not done here; this is the list for whoever owns packaging (ADR-0004, ADR-0005, 
 5. Linux and macOS: give the executable an rpath to the library directory (`$ORIGIN/lib`, `@executable_path/../Frameworks`); libheif's own dependencies (dav1d) are resolved from libheif's directory, so install them together or set the rpath of libheif itself.
 6. Decode threads: `heif::set_codec_threads(n)` bounds the threads dav1d and libde265 use per decode (default 0 = every core); lower it while the engine decodes several files at once.
 7. dav1d and libheif print diagnostics (`Error parsing OBU data`) on stderr for damaged files; they are not errors of the app and cannot be silenced through the libheif API.
-8. The decode must run in the sandboxed worker pool (ADR-0006): this crate decodes in-process; libheif and its plugins are loaded before the sandbox is entered.
+8. The decode runs in the sandboxed worker (ADR-0006, ADR-0013): `codecs` itself still decodes in-process (the worker and the in-process fallback use it), the application installs the pool as the remote decoder (`packaged::configure_decode_from_exe`), and `auto-crop-worker --features heif` loads libheif and its plugins before it enters the sandbox. Ship `auto-crop-worker` beside the executable with the same DLLs, RUNPATH or rpath as the executables; see [sandbox-worker.md](sandbox-worker.md).
 
 ## A Windows package for the owner's own use (`package-windows.yml`)
 
@@ -69,7 +69,7 @@ Not done here; this is the list for whoever owns packaging (ADR-0004, ADR-0005, 
 
 Start-up wiring: the shell and the CLI call `auto_crop_engine::packaged::configure_heif_from_exe()` first, which runs `heif::configure(Some(dir))` with the first existing folder of `<exe dir>/libheif` (Windows), `<exe dir>/../Frameworks/libheif` (macOS app bundle) and `<exe dir>/../lib/libheif` (Linux tarball, AppImage, deb); a development build has none and keeps libheif's built-in directory and `LIBHEIF_PLUGIN_PATH`.
 
-What CI proves: the zip is unzipped into a clean folder, the build prefix is moved away, `PATH` is reduced to System32 and `LIBHEIF_PLUGIN_PATH` is cleared; then `auto-crop.exe dev-pipeline` decodes a committed AVIF (48x32) and the HEIC of the pinned libheif archive (`rainbow-451x461.heic`). With the `libheif/` folder renamed the HEIC fails with `HevcDecoderMissing` and the AVIF still decodes; with `heif.dll` renamed the tool does not start. What it does not prove: the GUI window (a start-and-stay-alive check is informational only), the sandboxed worker pool (it does not exist: HEIC and AVIF are parsed in-process, acceptable for the owner's own use, not for a public release), code signing.
+What CI proves: the zip is unzipped into a clean folder, the build prefix is moved away, `PATH` is reduced to System32 and `LIBHEIF_PLUGIN_PATH` is cleared; then `auto-crop.exe dev-pipeline` decodes a committed AVIF (48x32) and the HEIC of the pinned libheif archive (`rainbow-451x461.heic`). With the `libheif/` folder renamed the HEIC fails with `HevcDecoderMissing` and the AVIF still decodes; with `heif.dll` renamed the tool does not start. What it does not prove: the GUI window (a start-and-stay-alive check is informational only), real Windows 10 or Surface hardware for the worker's sandbox level, code signing. HEIC and AVIF are decoded by `auto-crop-worker.exe` beside the executable; the smoke test runs every decode with `AUTOCROP_DECODE=worker` and prints the sandbox level the worker reports.
 
 ## macOS and Linux packages
 

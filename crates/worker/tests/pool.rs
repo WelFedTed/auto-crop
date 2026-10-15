@@ -59,7 +59,10 @@ fn files() -> Vec<(&'static str, Vec<u8>)> {
 
 #[test]
 fn decodes_through_the_worker_equal_the_in_process_decodes() {
-    let pool = WorkerPool::new(test_config());
+    let mut cfg = test_config();
+    // 22 files x 3 modes is more than the default recycle count
+    cfg.recycle_after = 1000;
+    let pool = WorkerPool::new(cfg);
     let limits = DecodeLimits::default();
     for (name, bytes) in files() {
         for (orient, flatten) in [(true, false), (false, false), (true, true)] {
@@ -73,7 +76,11 @@ fn decodes_through_the_worker_equal_the_in_process_decodes() {
         }
     }
     let st = pool.status();
-    assert_eq!(st.spawned, 1, "one worker was reused for every file");
+    assert_eq!(
+        st.spawned, 1,
+        "one worker was reused for every file (replaced because: {:?})",
+        st.last_replaced
+    );
     assert_eq!(st.crashes, 0);
 }
 

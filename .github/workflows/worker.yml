@@ -175,6 +175,7 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Real HEIC and AVIF through the CLI and the worker (doctor prints the level)
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           cargo build --release -p auto-crop-cli -p auto-crop-worker --features auto-crop-cli/heif,auto-crop-worker/heif
@@ -196,7 +197,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Seccomp allow-list audit under strace (Linux)
-        if: runner.os == 'Linux'
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
         shell: bash
         run: |
           cargo build --release -p auto-crop-worker --features heif --bins --examples
@@ -218,6 +219,7 @@ jobs:
           fi
           echo "the allow-list covers every system call libheif, dav1d and libde265 made"
       - name: Added latency per image through the worker (12 MP, informational, shared runner, NOISY)
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           cargo build --release -p auto-crop-worker --features heif --bins --examples

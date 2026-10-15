@@ -6,7 +6,7 @@ Status: pre-release test builds for the owner's own use. Nothing here is publish
 
 | OS | Workflow | Runner | Package (artifact name) | Contents |
 |---|---|---|---|---|
-| Windows x64 | `package-windows.yml` | `windows-2025` | `auto-crop-windows-x64-<ver>` : `.zip` | `AutoCrop.exe`, `auto-crop.exe`, `heif.dll`, `dav1d.dll`, `libde265.dll`, `libheif/` plugin folder, licences |
+| Windows x64 | `package-windows.yml` | `windows-2025` | `auto-crop-windows-x64-<ver>` : `.zip` | `AutoCrop.exe`, `auto-crop.exe`, `auto-crop-worker.exe`, `heif.dll`, `dav1d.dll`, `libde265.dll`, `libheif/` plugin folder, licences |
 | macOS Apple silicon | `package-macos.yml` | `macos-latest` (arm64) | `auto-crop-macos-arm64-<ver>` : `.zip`, `.dmg` | `AutoCrop.app` (ad-hoc signed, not notarised) with the CLI, dylibs and plugin folder inside, licences, README |
 | macOS Intel | `package-macos.yml` | `macos-26-intel` (best-effort) | `auto-crop-macos-x86_64-<ver>` : `.zip`, `.dmg` | the same, x86_64 |
 | Linux x86_64 | `package-linux.yml` | `ubuntu-22.04` (glibc 2.35) | `auto-crop-linux-x86_64-<ver>` : `.tar.gz`, `.AppImage`, `.deb` | `bin/AutoCrop`, `bin/auto-crop`, `lib/` with libheif, dav1d, libde265 and `lib/libheif/` plugin folder, desktop file, icon, licences |
@@ -70,7 +70,7 @@ Build it yourself on Ubuntu 22.04 (or the devcontainer): `sudo apt install nasm 
 
 ## What the smoke tests prove
 
-`packaging/smoke-cli.sh` (shared by the macOS and Linux workflows; the Windows workflow has the same steps in PowerShell) runs the packaged command-line tool from an unpacked copy, after the native build tree has been moved away and `LIBHEIF_PLUGIN_PATH`, `LD_LIBRARY_PATH` and the `DYLD_*` variables were cleared:
+`packaging/smoke-cli.sh` (shared by the macOS and Linux workflows; the Windows workflow has the same steps in PowerShell) runs the packaged command-line tool from an unpacked copy (every decode with `AUTOCROP_DECODE=worker`, which never falls back, so a pass means the sandboxed worker did it; doctor prints the level and the worker's own probes; with the worker renamed a forced-worker decode fails and the default mode says `sandbox: none`), after the native build tree has been moved away and `LIBHEIF_PLUGIN_PATH`, `LD_LIBRARY_PATH` and the `DYLD_*` variables were cleared:
 
 1. `--version` and `doctor` start, and doctor reports libheif with HEVC and AV1 found.
 2. A committed AVIF (`crates/codecs/tests/fixtures/heif/gradient-444-48x32.avif`) decodes (48x32) and writes a JPEG.
@@ -95,7 +95,7 @@ The artifacts were also downloaded with `gh run download` and the `.sha256` / `S
 
 - **No real Mac or Linux hardware has run these packages.** Everything above ran on GitHub-hosted runners. The owner will test on an Apple-silicon Mac, an Intel MacBook and a Linux machine. Expect first-run surprises (graphics stack on Linux, Gatekeeper wording on newer macOS).
 - Unsigned: no Developer ID, no notarisation, no Windows signature. macOS needs the Open Anyway steps; the Linux packages are not signed either.
-- HEIC and AVIF are parsed **in the app's own process** (no worker pool, no sandbox on any OS yet; ADR-0006, B12). Fine for the owner's own files, not for a public release.
+- HEIC and AVIF are decoded by the **sandboxed `auto-crop-worker`** that ships beside the executable in every package (ADR-0013); the level reached on the CI runners and what the worker saw from inside are in [testing/sandbox-worker.md](testing/sandbox-worker.md), and `auto-crop doctor` prints the level on the machine it runs on. Not verified: real Windows 10, Surface, Mac or Linux hardware, macOS 12, and any distribution kernel other than the runners'. With `AUTOCROP_DECODE=inproc`, or if the worker is missing, decoding happens in the app's own process (level `none`, said once on stderr).
 - Linux: WebKitGTK is a host dependency. The plan's WebKitGTK caveats apply (blank window with some NVIDIA/Wayland combinations, pinch zoom of the whole page, DMABUF renderer; `WEBKIT_DISABLE_DMABUF_RENDERER=1` or `GDK_BACKEND=x11` as workarounds). Touch input on Linux is best-effort (B8); mouse, touchpad and keyboard are the supported way. The `.desktop` file has no `MimeType` and no `%F` yet (opening files from the file manager is ROADMAP M9.31).
 - The icon is the 32 pixel placeholder from `crates/shell/icons/icon.ico`, scaled up for `.icns`.
 - The Intel macOS job is best-effort (`continue-on-error`); ONNX Runtime is not part of these builds (no inference runtime is linked yet).
