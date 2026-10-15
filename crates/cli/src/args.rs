@@ -216,6 +216,24 @@ pub fn process_flags() -> Vec<Flag> {
             "Name of a written file: {name}, {n} (item number of a split), {ext}",
         ),
         val(
+            "pdf",
+            None,
+            "FILE",
+            "Put every written crop in ONE multi-page PDF at FILE (originals untouched, an existing FILE is never replaced: the name gets (2)); cannot be combined with the output modes or --format",
+        ),
+        val(
+            "order",
+            None,
+            "name|given",
+            "Page order of --pdf: by file name, numbers in order (default) or as the inputs were given",
+        ),
+        val(
+            "dpi",
+            None,
+            "N",
+            "Pixel density that sizes the pages of --pdf (default: each picture's own, 300 when it has none)",
+        ),
+        val(
             "if-exists",
             None,
             "keep-both|skip",
@@ -1087,6 +1105,8 @@ pub enum OutputMode {
     Suffix(String),
     /// `--copy`: `<folder>/AutoCrop/`.
     Copy,
+    /// `--pdf FILE`: every written crop is a page of one PDF; nothing else is written.
+    Pdf(PathBuf),
 }
 
 impl OutputMode {
@@ -1096,6 +1116,7 @@ impl OutputMode {
             OutputMode::Dir(_) => "output",
             OutputMode::Suffix(_) => "suffix",
             OutputMode::Copy => "copy",
+            OutputMode::Pdf(_) => "pdf",
         }
     }
 
@@ -1117,6 +1138,32 @@ pub enum Progress {
     Never,
 }
 
+/// The page order of `--pdf`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PdfOrder {
+    /// By file name, with numbers in numeric order (`scan2` before `scan10`).
+    Name,
+    /// The order of the inputs on the command line (a folder's files by name).
+    Given,
+}
+
+impl PdfOrder {
+    pub fn name(self) -> &'static str {
+        match self {
+            PdfOrder::Name => "name",
+            PdfOrder::Given => "given",
+        }
+    }
+}
+
+/// `--pdf FILE` with its `--order` and `--dpi`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PdfArgs {
+    pub file: PathBuf,
+    pub order: PdfOrder,
+    pub dpi: Option<u32>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ProcessArgs {
     pub input: InputArgs,
@@ -1126,6 +1173,8 @@ pub struct ProcessArgs {
     pub if_exists: IfExists,
     pub format: FormatArg,
     pub knobs: Knobs,
+    /// `--pdf`: one document instead of files (then `mode` is `OutputMode::Pdf`).
+    pub pdf: Option<PdfArgs>,
     /// `--enhance` and `--enhance-strength` (percent). Off by default.
     pub enhance: EnhanceArg,
     pub enhance_strength: u8,
@@ -1155,15 +1204,56 @@ fn pool(p: &Parsed) -> Res<(Option<usize>, Option<u64>)> {
     ))
 }
 
+fn pdf_args(p: &Parsed) -> Res<Option<PdfArgs>> {
+    let order = match p.value("order") {
+        None | Some("name") => PdfOrder::Name,
+        Some("given") => PdfOrder::Given,
+        Some(o) => return usage(format!("unknown --order `{o}` (name or given)")),
+    };
+    let dpi = number(p, "dpi", 36u32, 1200)?;
+    let Some(file) = p.value("pdf") else {
+        if p.has("order") || p.has("dpi") {
+            return usage("`--order` and `--dpi` belong to `--pdf FILE`");
+        }
+        return Ok(None);
+    };
+    if file.is_empty() {
+        return usage("`--pdf` needs a file name");
+    }
+    let file = PathBuf::from(file);
+    if !file
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
+    {
+        return usage("`--pdf` needs a file name ending in .pdf");
+    }
+    Ok(Some(PdfArgs { file, order, dpi }))
+}
+
 fn process(p: &Parsed) -> Res<ProcessArgs> {
-    let modes = ["in-place", "output", "suffix", "copy"]
+    let modes = ["in-place", "output", "suffix", "copy", "pdf"]
         .iter()
         .filter(|m| p.has(m))
         .count();
     if modes > 1 {
-        return usage("give at most one of --in-place, --output, --suffix and --copy");
+        return usage(
+            "give at most one of --in-place, --output, --suffix, --copy and --pdf: --pdf writes one \
+             new document and leaves the originals alone",
+        );
     }
-    let mode = if let Some(d) = p.value("output") {
+    let pdf = pdf_args(p)?;
+    if pdf.is_some() {
+        for flag in ["format", "name-template", "if-exists", "one-bit"] {
+            if flag != "one-bit" && p.has(flag) {
+                return usage(format!(
+                    "`--{flag}` does not apply to `--pdf` (the pages are one document)"
+                ));
+            }
+        }
+    }
+    let mode = if let Some(a) = &pdf {
+        OutputMode::Pdf(a.file.clone())
+    } else if let Some(d) = p.value("output") {
         if d.is_empty() {
             return usage("`--output` needs a folder");
         }
@@ -1220,6 +1310,7 @@ fn process(p: &Parsed) -> Res<ProcessArgs> {
         if_exists,
         format,
         knobs: knobs(p)?,
+        pdf,
         enhance,
         enhance_strength,
         accept_splits: p.has("accept-splits"),

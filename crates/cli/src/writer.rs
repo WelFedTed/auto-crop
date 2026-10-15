@@ -102,7 +102,8 @@ fn destination(
             Some(template.map_or_else(|| format!("{{name}}{s}"), str::to_owned)),
         ),
         OutputMode::Copy => (parent.join("AutoCrop"), template.map(str::to_owned)),
-        OutputMode::InPlace { .. } => (parent, None),
+        // Never asked: a `--pdf` run keeps the crops for its one document (`process::run_item`).
+        OutputMode::InPlace { .. } | OutputMode::Pdf(_) => (parent, None),
     }
 }
 

@@ -314,6 +314,28 @@ pub struct Manifest {
     pub items: Vec<ItemRecord>,
     /// Notes about the run itself (the walk stopped early, a link was skipped...), codes first.
     pub warnings: Vec<String>,
+    /// The document of a `process --pdf` run (added to schema version 1 additively).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pdf: Option<PdfRec>,
+}
+
+/// The one PDF a `process --pdf` run made (or, in a dry run, would make).
+#[derive(Debug, Clone, Serialize)]
+pub struct PdfRec {
+    /// Absolute path of the document (the planned name when it was not written).
+    pub path: String,
+    /// Pages written; in a dry run, `null`.
+    pub pages: Option<usize>,
+    pub bytes: Option<u64>,
+    /// The named file existed, so the document got the next free name.
+    pub renamed: bool,
+    /// `name` or `given`.
+    pub order: &'static str,
+    pub dpi: Option<u32>,
+    /// Pages that are the original JPEG data (no new generation).
+    pub pass_through_pages: usize,
+    /// Notice codes (`pdf.dpi_assumed`, `pdf.renamed`, ...).
+    pub notices: Vec<String>,
 }
 
 pub fn tool() -> Tool {

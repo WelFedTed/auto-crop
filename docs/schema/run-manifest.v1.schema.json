@@ -55,14 +55,29 @@
       }
     },
     "items": { "type": "array", "items": { "$ref": "#/$defs/item" } },
-    "warnings": { "type": "array", "items": { "type": "string" } }
+    "warnings": { "type": "array", "items": { "type": "string" } },
+    "pdf": {
+      "type": "object",
+      "description": "Present for `process --pdf FILE`: the one document. Added to version 1 additively.",
+      "required": ["path", "renamed", "order", "pass_through_pages", "notices"],
+      "properties": {
+        "path": { "type": "string", "description": "Absolute path (the planned name in a dry run)." },
+        "pages": { "type": ["integer", "null"], "description": "Pages written; null in a dry run." },
+        "bytes": { "type": ["integer", "null"] },
+        "renamed": { "type": "boolean", "description": "The named file existed, so the document got the next free name; an existing file is never replaced." },
+        "order": { "enum": ["name", "given"] },
+        "dpi": { "type": ["integer", "null"], "description": "`--dpi` when given." },
+        "pass_through_pages": { "type": "integer", "description": "Pages that are the original JPEG data, cut without re-encoding." },
+        "notices": { "type": "array", "items": { "type": "string" } }
+      }
+    }
   },
   "$defs": {
     "processOptions": {
       "type": "object",
       "required": ["mode", "triage", "cutoff", "split", "profile", "margin_percent", "format", "quality", "accept_splits", "reprocess", "recursive", "jobs"],
       "properties": {
-        "mode": { "enum": ["in_place", "output", "suffix", "copy"] },
+        "mode": { "enum": ["in_place", "output", "suffix", "copy", "pdf"], "description": "`pdf`: `process --pdf FILE`, every written crop is a page of one document (the manifest has `pdf`)." },
         "triage": { "enum": ["strict", "balanced", "aggressive"] },
         "cutoff": { "type": "number", "description": "The effective cut-off on the uncalibrated score." },
         "split": { "enum": ["auto", "always", "never"] },

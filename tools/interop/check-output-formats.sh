@@ -165,6 +165,40 @@ if need pdftoppm; then
   fi
 fi
 
+# Documents made by `process --pdf` (the CLI test `pdf_run` keeps them when AUTO_CROP_KEEP_PDF_SAMPLES is set):
+# a three-page document of JPEG pages, and an enhanced page that must equal the PNG of the same crop.
+if [ -f "$DIR/pdf_run_three.pdf" ]; then
+  if need qpdf; then
+    for f in pdf_run_two pdf_run_three pdf_run_enhanced; do
+      if qpdf --check "$DIR/$f.pdf" >/dev/null 2>&1; then ok "qpdf --check $f.pdf"; else bad "qpdf --check $f.pdf"; fi
+    done
+  fi
+  if need pdfinfo; then
+    out=$(pdfinfo "$DIR/pdf_run_three.pdf" 2>&1)
+    echo "$out" | grep -q "^Pages: *3" && ok "pdfinfo: the process --pdf document has 3 pages" || bad "pdfinfo pages of pdf_run_three: $out"
+    echo "$out" | grep -q "^Producer: *Auto Crop" && ok "pdfinfo: producer" || bad "pdfinfo producer of pdf_run_three"
+    echo "$out" | grep -qiE "^(Author|Creator|Keywords|Subject):" && bad "pdfinfo shows unexpected metadata" || ok "pdfinfo: no author, creator, keywords or subject"
+    # Nominal 300 dpi (the photos carry no density): every page is pixels x 72 / 300 points.
+    sizes=$(pdfinfo -f 1 -l 3 "$DIR/pdf_run_three.pdf" 2>&1 | grep "^Page *[0-9] size:")
+    [ "$(echo "$sizes" | wc -l)" -eq 3 ] && ok "pdfinfo reads three page sizes" || bad "pdfinfo page sizes: $sizes"
+  fi
+  if need pdfimages; then
+    lines=$(pdfimages -list "$DIR/pdf_run_three.pdf" 2>&1 | awk 'NR>2')
+    [ "$(echo "$lines" | grep -c jpeg)" -eq 3 ] && ok "pdfimages: three jpeg pages" || bad "pdfimages -list of pdf_run_three: $lines"
+    # Page k of the listing is page k: the image sizes are all different (the crops differ) and in the order asked for.
+    [ "$(echo "$lines" | awk '{print $4"x"$5}' | sort -u | wc -l)" -eq 3 ] && ok "pdfimages: three different page images" || bad "pdfimages: pages are not three different pictures"
+    pdfimages -png "$DIR/pdf_run_enhanced.pdf" "$DIR/run_enh" >/dev/null 2>&1
+    if [ ${#IM_COMPARE[@]} -gt 0 ] && [ -f "$DIR/run_enh-000.png" ]; then
+      d=$(im_diff "$DIR/pdf_run_enhanced_ref.png" "$DIR/run_enh-000.png")
+      [ "$d" = "0" ] && ok "pdfimages extracts the enhanced page exactly as the PNG of the same crop" || bad "enhanced page vs PNG: $d pixels differ"
+    fi
+  fi
+  if need pdftoppm; then
+    pdftoppm -r 36 -png "$DIR/pdf_run_three.pdf" "$DIR/run_three" >/dev/null 2>&1
+    [ "$(ls "$DIR"/run_three-*.png 2>/dev/null | wc -l)" -eq 3 ] && ok "pdftoppm renders all three pages" || bad "pdftoppm did not render three pages"
+  fi
+fi
+
 echo "---"
 echo "$CHECKS checks, $FAILS failed"
 [ "$FAILS" -eq 0 ]

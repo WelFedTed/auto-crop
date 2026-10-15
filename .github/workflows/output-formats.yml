@@ -51,6 +51,8 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Write one sample per writer (TIFF in every compression, 1-bit G4, WebP, PDF in every page type, AVIF)
         run: cargo run -q -p auto-crop-codecs --features fixtures,avif --example write_samples -- target/interop
+      - name: Documents of `process --pdf` (a three-page PDF in name order, an enhanced page that must equal its PNG)
+        run: AUTO_CROP_KEEP_PDF_SAMPLES="$PWD/target/interop" cargo test -q -p auto-crop-cli --test pdf_run
       - name: Read them back with libtiff, ImageMagick, dwebp, qpdf and Poppler
         run: bash tools/interop/check-output-formats.sh target/interop --require-all
       - name: Read the AVIF files with Pillow (libavif, dav1d), avifdec and ImageMagick (PSNR bars, ICC and EXIF byte-exact, no rotation)

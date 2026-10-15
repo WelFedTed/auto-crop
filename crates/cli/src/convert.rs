@@ -437,6 +437,7 @@ pub fn run(args: ConvertArgs, env: &Env) -> u8 {
         summary: summary.clone(),
         items: records,
         warnings,
+        pdf: None,
     };
     rep.summary(&summary, t0.elapsed().as_secs_f64(), cancelled);
     let mut final_code = exit_code;

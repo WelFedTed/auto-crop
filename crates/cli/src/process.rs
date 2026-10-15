@@ -9,12 +9,13 @@
 //! and the name planning and then stops: no temp file, backup, journal, purge, settings or notice
 //! record is written (the manifest file is written if asked for, it is the answer).
 
-use crate::args::{EnhanceArg, Global, OutputMode, ProcessArgs};
+use crate::args::{EnhanceArg, Global, OutputMode, PdfArgs, PdfOrder, ProcessArgs};
 use crate::env::{Env, base_settings, cpu_floor, test_hook};
 use crate::exit;
 use crate::inputs::{self, Candidate, Problem};
 use crate::manifest::{
-    self, ItemRecord, Manifest, Options, OutputRec, Run, RunOpts, Status, Summary, Timing, code,
+    self, ItemRecord, Manifest, Options, OutputRec, PdfRec, Run, RunOpts, Status, Summary, Timing,
+    code,
 };
 use crate::pipeline::{
     self, Decision, Prepared, Ready, Shared, analysed_record, decide, err_code, split_reasons,
@@ -27,14 +28,15 @@ use auto_crop_core::{EnhanceMode, ErrKind, QuadWarp, ScanTriage};
 use auto_crop_engine::enhance::quad_enhances;
 use auto_crop_engine::fsplan::ReservedKeys;
 use auto_crop_engine::memory::{MIB, MemoryBudget, system_cap};
+use auto_crop_engine::run_pdf::{PdfRun, PdfRunOptions, PdfRunSaved, PdfSelect};
 use auto_crop_engine::store::{BackupState, Store};
 use auto_crop_engine::util::{new_id, now_secs, rfc3339};
-use auto_crop_engine::{Engine, Housekeeping, RunOptions, SaveOutcome, SaveTarget};
+use auto_crop_engine::{CancelToken, Engine, Housekeeping, RunOptions, SaveOutcome, SaveTarget};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -44,6 +46,8 @@ struct Work<'a> {
     run_id: String,
     run_name: String,
     reserved: Mutex<ReservedKeys>,
+    /// `--pdf`: candidate index -> the engine item that keeps its crops until their page turn.
+    kept: Mutex<HashMap<usize, u32>>,
 }
 
 pub fn default_jobs() -> usize {
@@ -189,6 +193,30 @@ pub(crate) fn planned_output(path: &Path, format: Format) -> OutputRec {
         width: None,
         height: None,
         format: Some(format_name(format)),
+    }
+}
+
+/// The manifest's record of the document: what was written, or in a dry run the planned name.
+fn pdf_record(args: &ProcessArgs, saved: Option<&PdfRunSaved>) -> PdfRec {
+    let pdf = args.pdf.as_ref();
+    let file = saved.map_or_else(
+        || pdf.map(|p| p.file.clone()).unwrap_or_default(),
+        |s| s.path.clone(),
+    );
+    let abs = std::path::absolute(&file).unwrap_or(file);
+    PdfRec {
+        path: abs.to_string_lossy().into_owned(),
+        pages: saved.map(|s| s.pages as usize),
+        bytes: saved.map(|s| s.bytes),
+        renamed: saved.is_some_and(|s| {
+            s.notices
+                .iter()
+                .any(|n| n == auto_crop_engine::run_pdf::NOTICE_PDF_RENAMED)
+        }),
+        order: pdf.map_or("name", |p| p.order.name()),
+        dpi: pdf.and_then(|p| p.dpi),
+        pass_through_pages: saved.map_or(0, |s| s.pass_through_pages as usize),
+        notices: saved.map(|s| s.notices.clone()).unwrap_or_default(),
     }
 }
 
@@ -368,6 +396,165 @@ fn save_copies(
     rec.written = true;
 }
 
+/// The document of a `--pdf` run, filled in page order while the workers analyse (the pages of
+/// image `k` are added only when every image before it in the order has arrived or is known not to
+/// come), so the PDF is written one image at a time in the order asked for.
+struct Assembly<'e> {
+    engine: &'e Engine,
+    file: PathBuf,
+    opts: PdfRunOptions,
+    cancel: CancelToken,
+    run: Option<PdfRun<'e>>,
+    /// Why there is no document (`Cancelled` is not a failure of the pages).
+    failed: Option<ErrKind>,
+    /// Candidate indices in page order.
+    order: Vec<usize>,
+    next: usize,
+    /// Candidate index -> the engine item that holds its crops (`None`: nothing to add).
+    arrived: HashMap<usize, Option<u32>>,
+    /// Candidates whose crops were offered to the document (all of them, written or not).
+    kept: Vec<usize>,
+    /// The candidate whose pages could not be added.
+    broke: Option<usize>,
+}
+
+impl<'e> Assembly<'e> {
+    fn new(
+        engine: &'e Engine,
+        pdf: &PdfArgs,
+        opts: PdfRunOptions,
+        cancel: CancelToken,
+        order: Vec<usize>,
+    ) -> Self {
+        Self {
+            engine,
+            file: pdf.file.clone(),
+            opts,
+            cancel,
+            run: None,
+            failed: None,
+            order,
+            next: 0,
+            arrived: HashMap::new(),
+            kept: Vec::new(),
+            broke: None,
+        }
+    }
+
+    fn arrive(&mut self, i: usize, id: Option<u32>) {
+        self.arrived.insert(i, id);
+        self.drain(false);
+    }
+
+    /// Adds every image whose turn has come. `last`: nothing more will arrive, so the images that
+    /// never did (a cancel) are passed over.
+    fn drain(&mut self, last: bool) {
+        while let Some(&k) = self.order.get(self.next) {
+            match self.arrived.remove(&k) {
+                Some(id) => {
+                    self.consume(k, id);
+                    self.next += 1;
+                }
+                None if last => self.next += 1,
+                None => break,
+            }
+        }
+    }
+
+    fn consume(&mut self, k: usize, id: Option<u32>) {
+        let Some(id) = id else { return };
+        self.kept.push(k);
+        if self.failed.is_none() {
+            let r = (|| -> Result<(), ErrKind> {
+                if self.run.is_none() {
+                    self.run =
+                        Some(
+                            self.engine
+                                .begin_run_pdf(&self.file, &self.opts, &self.cancel, 0)?,
+                        );
+                }
+                let run = self.run.as_mut().ok_or(ErrKind::Internal)?;
+                run.add(
+                    PdfSelect {
+                        item: id,
+                        crop: None,
+                    },
+                    &|_| {},
+                )?;
+                Ok(())
+            })();
+            if let Err(e) = r {
+                self.failed = Some(e);
+                self.broke = Some(k);
+                self.run = None; // drops the temp file
+            }
+        }
+        self.engine.remove_items(&[id]);
+    }
+
+    /// Completes the document. `Ok(None)`: no image had a page.
+    fn finish(&mut self) -> Result<Option<PdfRunSaved>, ErrKind> {
+        if let Some(e) = self.failed {
+            return Err(e);
+        }
+        match self.run.take() {
+            None => Ok(None),
+            Some(run) => run.finish(&|_| {}).map(Some),
+        }
+    }
+}
+
+/// File names compare with their digit runs as numbers (`scan2` before `scan10`), ignoring case.
+fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    let (mut x, mut y) = (a.chars().peekable(), b.chars().peekable());
+    loop {
+        match (x.peek().copied(), y.peek().copied()) {
+            (None, None) => return a.cmp(b),
+            (None, Some(_)) => return std::cmp::Ordering::Less,
+            (Some(_), None) => return std::cmp::Ordering::Greater,
+            (Some(p), Some(q)) if p.is_ascii_digit() && q.is_ascii_digit() => {
+                let take = |it: &mut std::iter::Peekable<std::str::Chars<'_>>| {
+                    let mut s = String::new();
+                    while let Some(c) = it.peek().copied().filter(char::is_ascii_digit) {
+                        s.push(c);
+                        it.next();
+                    }
+                    s.trim_start_matches('0').to_owned()
+                };
+                let (m, n) = (take(&mut x), take(&mut y));
+                let o = m.len().cmp(&n.len()).then_with(|| m.cmp(&n));
+                if o != std::cmp::Ordering::Equal {
+                    return o;
+                }
+            }
+            (Some(p), Some(q)) => {
+                let o = p.to_lowercase().cmp(q.to_lowercase());
+                if o != std::cmp::Ordering::Equal {
+                    return o;
+                }
+                x.next();
+                y.next();
+            }
+        }
+    }
+}
+
+/// The candidates in page order.
+fn page_order(candidates: &[crate::inputs::Candidate], order: PdfOrder) -> Vec<usize> {
+    let mut idx: Vec<usize> = (0..candidates.len()).collect();
+    if order == PdfOrder::Name {
+        let name = |i: usize| {
+            candidates[i]
+                .path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        };
+        idx.sort_by(|&a, &b| natural_cmp(&name(a), &name(b)).then(a.cmp(&b)));
+    }
+    idx
+}
+
 fn run_item(sh: &Shared, w: &Work<'_>, idx: usize, cand: &Candidate) -> ItemRecord {
     let t_total = Instant::now();
     let ready = match pipeline::prepare(sh, idx, cand) {
@@ -375,13 +562,26 @@ fn run_item(sh: &Shared, w: &Work<'_>, idx: usize, cand: &Candidate) -> ItemReco
         Prepared::Ready(r) => r,
     };
     let mut rec = analysed_record(idx, cand, &ready, sh.cutoff, Status::Saved);
+    let mut keep = false;
     match decide(&ready.view, sh.cutoff) {
         Decision::Hold { code, reasons } => hold(&mut rec, code, reasons),
         Decision::Write { crops, split } => {
             let t_write = Instant::now();
             // Only an image that would be written is enhanced (a held one is not touched).
             apply_enhance(sh, w.args, &ready, &mut rec);
-            if w.args.mode.replaces_originals() {
+            if let OutputMode::Pdf(file) = &w.args.mode {
+                if w.args.dry_run {
+                    rec.outputs = vec![planned_output(file, Format::Pdf)];
+                    rec.detail = Some("would be pages of the PDF".to_owned());
+                } else {
+                    // The crops stay in the engine until this image's turn in the page order.
+                    w.kept
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(idx, ready.id);
+                    keep = true;
+                }
+            } else if w.args.mode.replaces_originals() {
                 save_in_place(sh, w, cand, &ready, split, &mut rec);
             } else {
                 save_copies(sh, w, cand, &ready, crops, &mut rec);
@@ -392,7 +592,9 @@ fn run_item(sh: &Shared, w: &Work<'_>, idx: usize, cand: &Candidate) -> ItemReco
             });
         }
     }
-    sh.engine.remove_items(&[ready.id]);
+    if !keep {
+        sh.engine.remove_items(&[ready.id]);
+    }
     let t = rec.ms.get_or_insert_with(Timing::default);
     t.read = ready.read_ms;
     t.analyse = ready.analyse_ms;
@@ -554,6 +756,22 @@ pub fn run(args: ProcessArgs, env: &Env) -> u8 {
         run_id: run_id.clone(),
         run_name,
         reserved: Mutex::new(ReservedKeys::default()),
+        kept: Mutex::new(HashMap::new()),
+    };
+    let mut assembly: Option<Assembly<'_>> = match (&args.pdf, args.dry_run) {
+        (Some(pdf), false) => Some(Assembly::new(
+            &sh.engine,
+            pdf,
+            PdfRunOptions {
+                dpi: pdf.dpi,
+                one_bit: args.knobs.one_bit,
+                quality: args.knobs.quality.unwrap_or_default(),
+                ..PdfRunOptions::default()
+            },
+            env.cancel.clone(),
+            page_order(&candidates, pdf.order),
+        )),
+        _ => None,
     };
 
     if replacing && !args.dry_run && !candidates.is_empty() {
@@ -633,8 +851,66 @@ pub fn run(args: ProcessArgs, env: &Env) -> u8 {
             }
             rep.item(&rec);
             results[i] = Some(rec);
+            if let Some(asm) = assembly.as_mut() {
+                let id = work
+                    .kept
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(&(problem_count + i));
+                asm.arrive(i, id);
+            }
         },
     );
+    // The document: the pages of the images that are left, then the parse-back and the name.
+    let mut pdf_rec: Option<PdfRec> = None;
+    let mut pdf_written = false;
+    if let Some(asm) = assembly.as_mut() {
+        asm.drain(true);
+        let kept = asm.kept.clone();
+        let broke = asm.broke;
+        let outcome = asm.finish();
+        let slot = |k: usize| problem_count + k;
+        match outcome {
+            Ok(Some(saved)) => {
+                pdf_written = true;
+                for k in &kept {
+                    if let Some(Some(rec)) = results.get_mut(*k) {
+                        rec.outputs = vec![out_record(&saved.path, None, Some("pdf"))];
+                        rec.written = true;
+                        rec.reasons.extend(saved.notices.iter().cloned());
+                        let _ = slot;
+                    }
+                }
+                rep.info(&format!(
+                    "wrote {} ({} pages)",
+                    saved.path.display(),
+                    saved.pages
+                ));
+                pdf_rec = Some(pdf_record(&args, Some(&saved)));
+            }
+            Ok(None) => rep.info("nothing was written: no image has a crop for the PDF"),
+            Err(e) => {
+                let cancelled_run = e == ErrKind::Cancelled;
+                for k in &kept {
+                    if let Some(Some(rec)) = results.get_mut(*k) {
+                        if cancelled_run {
+                            rec.status = Status::Skipped;
+                            rec.code = Some(code::CANCELLED.to_owned());
+                        } else {
+                            rec.status = Status::Failed;
+                            rec.code = Some(err_code(e));
+                            if broke != Some(*k) {
+                                rec.detail = Some("the PDF was not written".to_owned());
+                            }
+                        }
+                    }
+                }
+                rep.info(&format!("no PDF was written: {}", err_code(e)));
+            }
+        }
+    } else if args.pdf.is_some() && args.dry_run {
+        pdf_rec = Some(pdf_record(&args, None));
+    }
     let cancelled = env.cancel.is_cancelled();
     // Items no worker reached (a cancel) are skipped, with a record each.
     for (i, slot) in results.iter_mut().enumerate() {
@@ -651,6 +927,10 @@ pub fn run(args: ProcessArgs, env: &Env) -> u8 {
     records.sort_by_key(|r| r.index);
 
     let mut summary = Summary::tally(&records);
+    if args.pdf.is_some() {
+        // One document, however many images are its pages.
+        summary.files_written = usize::from(pdf_written || (args.dry_run && summary.saved > 0));
+    }
     summary.ignored_non_image = exp.ignored_non_image;
     summary.links_skipped = exp.links_skipped;
     summary.hidden_skipped = exp.hidden_skipped;
@@ -709,6 +989,7 @@ pub fn run(args: ProcessArgs, env: &Env) -> u8 {
         summary: summary.clone(),
         items: records,
         warnings,
+        pdf: pdf_rec,
     };
     rep.summary(&summary, t0.elapsed().as_secs_f64(), cancelled);
     if summary.held > 0 && !g.quiet {
@@ -741,4 +1022,26 @@ pub fn run(args: ProcessArgs, env: &Env) -> u8 {
         );
     }
     final_code
+}
+
+#[cfg(test)]
+mod tests {
+    use super::natural_cmp;
+    use std::cmp::Ordering::{Equal, Greater, Less};
+
+    #[test]
+    fn digit_runs_compare_as_numbers_and_case_does_not_matter() {
+        assert_eq!(natural_cmp("scan2.jpg", "scan10.jpg"), Less);
+        assert_eq!(natural_cmp("scan10.jpg", "scan2.jpg"), Greater);
+        assert_eq!(natural_cmp("IMG_0009.jpg", "img_0010.jpg"), Less);
+        assert_eq!(natural_cmp("a1b2", "a1b10"), Less);
+        assert_eq!(natural_cmp("a01", "a1"), Less, "ties break on the raw text");
+        assert_eq!(natural_cmp("x", "x"), Equal);
+        assert_eq!(natural_cmp("a", "a1"), Less);
+        // Numbers longer than any integer type are still compared by length then digits.
+        assert_eq!(
+            natural_cmp("p99999999999999999999999", "p100000000000000000000000"),
+            Less
+        );
+    }
 }
