@@ -465,6 +465,8 @@ export interface LaunchInfo {
   backupsLocation: string;
   /** File extensions (lower case, no dot) this build can open. Optional for an older shell. */
   inputExtensions?: string[];
+  /** This build writes AVIF (Convert and Save as offer it). Absent in an older shell: not offered. */
+  avif?: boolean;
 }
 
 /**
@@ -488,10 +490,10 @@ export type QuadPts = [Pt, Pt, Pt, Pt];
 
 // ---- Convert (crates/engine/src/convert.rs and convert_batch.rs; the front end of ROADMAP M6.49) ----
 
-/** What a Convert run writes. WebP is lossless; a PDF holds one picture per file (one page). */
-export type ConvertTarget = 'jpg' | 'png' | 'tiff' | 'webp' | 'pdf';
+/** What a Convert run writes. WebP is lossless; a PDF holds one picture per file (one page); AVIF is lossy and only offered by a build that has the writer (`LaunchInfo.avif`). */
+export type ConvertTarget = 'jpg' | 'png' | 'tiff' | 'webp' | 'pdf' | 'avif';
 /** The format of the files a save writes: `auto` keeps the source's own when it can be written back. */
-export type SaveFormat = 'auto' | 'jpeg' | 'png' | 'tiff' | 'webp' | 'pdf';
+export type SaveFormat = 'auto' | 'jpeg' | 'png' | 'tiff' | 'webp' | 'pdf' | 'avif';
 export type ConvertColour = 'srgb' | 'preserve';
 export type ConvertPlacement = 'replace' | 'keep' | 'folder';
 export type QualityPreset = 'balanced' | 'small' | 'best';

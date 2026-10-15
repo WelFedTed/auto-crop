@@ -21,11 +21,16 @@ export const CUSTOM_QUALITY_START = 85;
 export const PRESETS: readonly QualityPreset[] = ['small', 'balanced', 'best'];
 
 /** The targets, in the order the screen lists them. */
-export const TARGETS: readonly ConvertTarget[] = ['jpg', 'png', 'tiff', 'webp', 'pdf'];
+export const TARGETS: readonly ConvertTarget[] = ['jpg', 'png', 'tiff', 'webp', 'pdf', 'avif'];
 
-/** Whether the quality setting does anything for this target: the JPG, and the JPG inside a PDF page. */
+/** The targets this build can write: AVIF only when the shell says it has the writer. */
+export function availableTargets(avif: boolean): ConvertTarget[] {
+  return TARGETS.filter((t) => t !== 'avif' || avif);
+}
+
+/** Whether the quality setting does anything for this target: the JPG, the JPG inside a PDF page, and AVIF (its own scale). */
 export function usesQuality(target: ConvertTarget): boolean {
-  return target === 'jpg' || target === 'pdf';
+  return target === 'jpg' || target === 'pdf' || target === 'avif';
 }
 
 export function clampQuality(n: number): number {

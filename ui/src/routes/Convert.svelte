@@ -9,7 +9,8 @@
   import RestoreDialog from '../lib/components/RestoreDialog.svelte';
   import Switch from '../lib/components/Switch.svelte';
   import { convert } from '../lib/convert.svelte.ts';
-  import { chipNotices, CUSTOM_QUALITY_START, TARGETS, usesQuality } from '../lib/convert.ts';
+  import { availableTargets, chipNotices, CUSTOM_QUALITY_START, usesQuality } from '../lib/convert.ts';
+  import { launchInfoSnapshot } from '../lib/backend.ts';
   import { formatBytes } from '../lib/format.ts';
   import { href } from '../lib/router.svelte.ts';
   import { store } from '../lib/store.svelte.ts';
@@ -56,7 +57,8 @@
 
   const o = $derived(convert.options);
   const days = $derived(store.settings.retentionDays);
-  const targetNames = { jpg: S.convert.targetJpg, png: S.convert.targetPng, tiff: S.convert.targetTiff, webp: S.convert.targetWebp, pdf: S.convert.targetPdf } as const;
+  const targetNames = { jpg: S.convert.targetJpg, png: S.convert.targetPng, tiff: S.convert.targetTiff, webp: S.convert.targetWebp, pdf: S.convert.targetPdf, avif: S.convert.targetAvif } as const;
+  const targets = availableTargets(launchInfoSnapshot()?.avif === true);
   const target = $derived(targetNames[o.target]);
   const qualityOn = $derived(usesQuality(o.target));
   const fixed = $derived(o.quality.kind === 'fixed' ? o.quality.value : null);
@@ -278,11 +280,12 @@
             <fieldset class="group">
               <legend>{S.convert.targetLabel}</legend>
               <div class="seg wrap">
-                {#each TARGETS as t (t)}
+                {#each targets as t (t)}
                   <button type="button" aria-pressed={o.target === t} onclick={() => convert.setOptions({ target: t })} data-target={t}>{targetNames[t]}</button>
                 {/each}
               </div>
               {#if o.target === 'tiff'}<p class="caption">{S.convert.tiffNote}</p>{/if}
+              {#if o.target === 'avif'}<p class="caption">{S.convert.avifNote}</p>{/if}
             </fieldset>
 
             <fieldset class="group" disabled={!qualityOn}>

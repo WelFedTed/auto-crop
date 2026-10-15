@@ -2,7 +2,7 @@
 <!-- SPDX-FileCopyrightText: 2026 Auto Crop contributors -->
 <script lang="ts">
   import { onMount, tick, untrack } from 'svelte';
-  import { api, cropImageUrl, curvePreviewUrl, imageUrl } from '../lib/backend.ts';
+  import { api, cropImageUrl, curvePreviewUrl, imageUrl, launchInfoSnapshot } from '../lib/backend.ts';
   import ChipBar from '../lib/components/ChipBar.svelte';
   import CropStage from '../lib/components/CropStage.svelte';
   import CurveBar from '../lib/components/CurveBar.svelte';
@@ -75,7 +75,7 @@
     nextIncluded,
     pickSelection,
     plannedNames,
-    SAVE_FORMATS,
+    availableSaveFormats,
     saveGate,
     slotToIndex,
   } from '../lib/items.ts';
@@ -1149,7 +1149,9 @@
     tiff: S.save.formatTiff,
     webp: S.save.formatWebp,
     pdf: S.save.formatPdf,
+    avif: S.save.formatAvif,
   };
+  const saveFormats = availableSaveFormats(launchInfoSnapshot()?.avif === true);
   let lastSave = $state.raw<ScanSave | null>(null);
   let sheetOpen = $state(false);
   let splitSheetOpen = $state(false);
@@ -1796,7 +1798,7 @@
             <label class="field">
               {S.save.formatLabel}
               <select class="select" value={store.settings.saveFormat} onchange={(e) => void store.updateSettings({ saveFormat: e.currentTarget.value as SaveFormat })} data-save-format>
-                {#each SAVE_FORMATS as f (f)}
+                {#each saveFormats as f (f)}
                   <option value={f}>{saveFormatNames[f]}</option>
                 {/each}
               </select>

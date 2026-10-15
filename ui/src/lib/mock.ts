@@ -166,7 +166,7 @@ const items = new Map<number, MockItem>();
 let nextId = 1;
 let settings: Settings = defaultSettings();
 /** The extension each Save format writes. */
-const SAVE_EXT: Record<Exclude<Settings['saveFormat'], 'auto'>, string> = { jpeg: 'jpg', png: 'png', tiff: 'tif', webp: 'webp', pdf: 'pdf' };
+const SAVE_EXT: Record<Exclude<Settings['saveFormat'], 'auto'>, string> = { jpeg: 'jpg', png: 'png', tiff: 'tif', webp: 'webp', pdf: 'pdf', avif: 'avif' };
 let saveCount = 0;
 let failedOnce = false;
 let forcedFailure: ErrorCode | null = null;
@@ -767,6 +767,8 @@ const api: Api = {
       platform: navigator.userAgent.includes('Windows') ? 'windows' : navigator.userAgent.includes('Mac') ? 'macos' : 'linux',
       backupsLocation: '%LOCALAPPDATA%\\AutoCrop\\backups',
       inputExtensions: [...INPUT],
+      // `?noavif=1` is a build without the AVIF writer.
+      avif: typeof location === 'undefined' || !new URLSearchParams(location.search).has('noavif'),
     };
   },
   async pickFiles() {

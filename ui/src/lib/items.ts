@@ -108,9 +108,14 @@ export function slotToIndex(item: ItemView, cropId: number, slot: number): numbe
 }
 
 /** The Save formats the editor offers, in order. */
-export const SAVE_FORMATS: readonly SaveFormat[] = ['auto', 'jpeg', 'png', 'tiff', 'webp', 'pdf'];
+export const SAVE_FORMATS: readonly SaveFormat[] = ['auto', 'jpeg', 'png', 'tiff', 'webp', 'pdf', 'avif'];
 
-const SAVE_EXT: Record<SaveFormat, string | null> = { auto: null, jpeg: 'jpg', png: 'png', tiff: 'tif', webp: 'webp', pdf: 'pdf' };
+/** The Save formats this build can write: AVIF only when the shell says it has the writer. */
+export function availableSaveFormats(avif: boolean): SaveFormat[] {
+  return SAVE_FORMATS.filter((f) => f !== 'avif' || avif);
+}
+
+const SAVE_EXT: Record<SaveFormat, string | null> = { auto: null, jpeg: 'jpg', png: 'png', tiff: 'tif', webp: 'webp', pdf: 'pdf', avif: 'avif' };
 const OWN_FORMAT: Record<string, SaveFormat> = { jpg: 'jpeg', jpeg: 'jpeg', png: 'png', tif: 'tiff', tiff: 'tiff', webp: 'webp' };
 
 /** Whether saving this image in the chosen format changes its format (a copy is then the only way to save it). */

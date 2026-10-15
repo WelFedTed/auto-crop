@@ -8,8 +8,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { DEFAULT_OPTIONS, TARGETS, parseOptions, sanitiseOptions, serialiseOptions, usesQuality } from './convert.ts';
-import { SAVE_FORMATS, changesFormat, plannedNames, saveGate } from './items.ts';
+import { DEFAULT_OPTIONS, TARGETS, availableTargets, parseOptions, sanitiseOptions, serialiseOptions, usesQuality } from './convert.ts';
+import { SAVE_FORMATS, availableSaveFormats, changesFormat, plannedNames, saveGate } from './items.ts';
 import { NOTICES, S, formatName, noticeText, openOnlyShort } from './strings.ts';
 import { defaultSettings } from './settings-defaults.ts';
 import { defaultSettings as kitSettings } from './testkit.ts';
@@ -29,11 +29,30 @@ function lowerVariants(file: string, name: string): string[] {
 test('the Convert targets are the engine ConvertTarget variants, in the order the screen lists them', () => {
   const engine = lowerVariants('crates/engine/src/convert.rs', 'ConvertTarget');
   assert.deepEqual([...TARGETS].sort(), engine.sort());
-  assert.deepEqual([...TARGETS], ['jpg', 'png', 'tiff', 'webp', 'pdf']);
+  assert.deepEqual([...TARGETS], ['jpg', 'png', 'tiff', 'webp', 'pdf', 'avif']);
 });
 
-test('only the JPG, and the JPG inside a PDF page, have a quality to choose', () => {
-  assert.deepEqual(TARGETS.filter(usesQuality), ['jpg', 'pdf']);
+test('AVIF is offered only by a build that has the writer', () => {
+  assert.deepEqual(availableTargets(false), ['jpg', 'png', 'tiff', 'webp', 'pdf']);
+  assert.deepEqual(availableTargets(true), [...TARGETS]);
+  assert.ok(!availableSaveFormats(false).includes('avif'));
+  assert.ok(availableSaveFormats(true).includes('avif'));
+  assert.match(S.convert.targetAvif, /lossy/i, 'the AVIF target says it is lossy');
+  assert.match(S.save.formatAvif, /lossy/i);
+  assert.match(S.convert.avifNote, /60, 75 and 88/, 'the note states the quality scale the engine uses');
+});
+
+test('the engine AVIF notice and quality presets are the ones the copy describes (read from crates/engine)', () => {
+  const out = rust('crates/engine/src/output.rs');
+  const code = /NOTICE_AVIF_LOSSY: &str = "([a-z_.]+)"/.exec(out)?.[1];
+  assert.equal(code, 'avif.lossy');
+  assert.ok(code in NOTICES);
+  assert.match(NOTICES[code], /lossy/i);
+  assert.match(out, /QualityPreset::Small => 60,\s*QualityPreset::Balanced => 75,\s*QualityPreset::Best => 88/);
+});
+
+test('only the JPG, the JPG inside a PDF page and AVIF have a quality to choose', () => {
+  assert.deepEqual(TARGETS.filter(usesQuality), ['jpg', 'pdf', 'avif']);
   for (const t of ['png', 'tiff', 'webp'] as const) {
     assert.match(S.convert.losslessNoQuality(S.convert.targetPng), /lossless/);
     assert.ok(!usesQuality(t), t);
@@ -43,7 +62,7 @@ test('only the JPG, and the JPG inside a PDF page, have a quality to choose', ()
 
 test('stored Convert options keep a new target and fall back from an unknown one', () => {
   for (const t of TARGETS) assert.equal(parseOptions(serialiseOptions({ ...DEFAULT_OPTIONS, target: t })).target, t);
-  assert.equal(sanitiseOptions({ target: 'avif' }).target, DEFAULT_OPTIONS.target);
+  assert.equal(sanitiseOptions({ target: 'avif' }).target, 'avif');
   assert.equal(sanitiseOptions({ target: 'jxl' }).target, 'jpg');
 });
 
@@ -53,7 +72,7 @@ test('the Save formats are the engine SaveFormat variants and the default is the
   assert.equal(defaultSettings().saveFormat, 'auto');
   assert.equal(kitSettings().saveFormat, 'auto');
   for (const f of SAVE_FORMATS) {
-    const label = { auto: S.save.formatAuto, jpeg: S.save.formatJpeg, png: S.save.formatPng, tiff: S.save.formatTiff, webp: S.save.formatWebp, pdf: S.save.formatPdf }[f];
+    const label = { auto: S.save.formatAuto, jpeg: S.save.formatJpeg, png: S.save.formatPng, tiff: S.save.formatTiff, webp: S.save.formatWebp, pdf: S.save.formatPdf, avif: S.save.formatAvif }[f];
     assert.ok(label.length > 1, f);
   }
   assert.match(S.save.formatWebp, /lossless/i);
@@ -80,6 +99,7 @@ test('the planned names take the extension of the chosen format, and an unchange
   assert.deepEqual(plannedNames(it, 'webp'), ['scan.webp']);
   assert.deepEqual(plannedNames(it, 'pdf'), ['scan.pdf']);
   assert.deepEqual(plannedNames(it, 'jpeg'), ['scan.jpg']);
+  assert.deepEqual(plannedNames(it, 'avif'), ['scan.avif']);
   // a stem with dots keeps them
   assert.deepEqual(plannedNames(item('a.b.c.png'), 'tiff'), ['a.b.c.tif']);
 });

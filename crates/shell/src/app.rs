@@ -73,6 +73,8 @@ struct LaunchInfo {
     input_extensions: Vec<String>,
     /// HEIC, HEIF and AVIF input is compiled in.
     heif: bool,
+    /// AVIF output is compiled in (Convert and Save as offer AVIF).
+    avif: bool,
 }
 
 #[tauri::command]
@@ -98,6 +100,7 @@ fn launch_info(shared: State<'_, Shared>) -> LaunchInfo {
             .map(|e| (*e).to_owned())
             .collect(),
         heif: cfg!(feature = "heif"),
+        avif: cfg!(feature = "avif"),
     }
 }
 

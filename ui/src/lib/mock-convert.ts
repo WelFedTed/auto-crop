@@ -49,8 +49,8 @@ const EXT_FORMAT: Record<string, string> = {
 export const CONVERT_ACCEPT = '.jpg,.jpeg,.png,.tif,.tiff,.webp,.heic,.heif,.avif,.gif,.bmp,image/*';
 
 /** The format name the engine reports for each Convert target, and the extension its files get. */
-const TARGET_FORMAT: Record<ConvertOptions['target'], string> = { jpg: 'jpeg', png: 'png', tiff: 'tiff', webp: 'webp', pdf: 'pdf' };
-const TARGET_EXT: Record<ConvertOptions['target'], string> = { jpg: 'jpg', png: 'png', tiff: 'tif', webp: 'webp', pdf: 'pdf' };
+const TARGET_FORMAT: Record<ConvertOptions['target'], string> = { jpg: 'jpeg', png: 'png', tiff: 'tiff', webp: 'webp', pdf: 'pdf', avif: 'avif' };
+const TARGET_EXT: Record<ConvertOptions['target'], string> = { jpg: 'jpg', png: 'png', tiff: 'tif', webp: 'webp', pdf: 'pdf', avif: 'avif' };
 
 const extOf = (name: string) => name.slice(name.lastIndexOf('.') + 1).toLowerCase();
 const stemOf = (name: string) => (name.lastIndexOf('.') > 0 ? name.slice(0, name.lastIndexOf('.')) : name);
@@ -89,7 +89,8 @@ function bytesOutOf(from: string, to: string, bytes: number, o: ConvertOptions):
   // JPG and a PDF page (a JPG inside) follow the quality; the lossless targets do not: a TIFF is a little larger
   // than the PNG, a lossless WebP a little smaller.
   const lossless = (png[from] ?? 1) * (to === 'tiff' ? 1.25 : to === 'webp' ? 0.8 : 1);
-  const r = to === 'jpeg' || to === 'pdf' ? (jpg[from] ?? 1) * q : lossless;
+  // AVIF: about half of a JPG of the same picture.
+  const r = to === 'jpeg' || to === 'pdf' ? (jpg[from] ?? 1) * q : to === 'avif' ? (jpg[from] ?? 1) * q * 0.5 : lossless;
   return Math.max(2_000, Math.round(bytes * r));
 }
 
@@ -242,6 +243,7 @@ export function createConvertMock(deps: ConvertMockDeps) {
             const notices: string[] = [];
             if (multi) notices.push(multi);
             if (e.format === 'heic' && /live/i.test(name)) notices.push('livephoto.video_untouched');
+            if (o.target === 'avif') notices.push('avif.lossy');
             if (e.format === 'png' && (o.target === 'jpg' || o.target === 'pdf') && (/alpha/i.test(name) || e.id % 2 === 1)) notices.push('alpha.flattened');
             if (e.format === 'heic' && o.colour === 'srgb') notices.push('colour.converted_to_srgb');
             if (e.format === 'heic' && e.id % 5 === 3) notices.push('colour.nclx_not_srgb');

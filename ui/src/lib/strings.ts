@@ -235,6 +235,8 @@ export const NOTICES: Record<string, string> = {
     'This TIFF has more than one page, so it is never replaced. Save as copy writes the first page as a PNG and leaves the file as it is.',
   'format.write_unavailable':
     "Auto Crop can open this kind of file but can't write it back, so it is never replaced. Save as copy writes a PNG (a JPG for HEIC) and leaves the file as it is.",
+  'avif.lossy':
+    'AVIF is a lossy format: this file is a new generation of the picture, so it is a little different from the pixels you saw. Keep the original if it matters; Restore brings it back.',
   'webp.lossy':
     'This WebP is lossy, and Auto Crop can only write WebP without any loss, so it is never replaced. Save as copy writes a PNG and leaves the file as it is.',
   'tiff.low_depth':
@@ -1094,7 +1096,8 @@ export const S = {
     formatTiff: 'TIFF',
     formatWebp: 'WebP (lossless)',
     formatPdf: 'PDF (one page)',
-    formatNote: 'Another format is always saved as a copy. WebP is saved without any loss; a PDF page holds the picture at its own size (300 dpi when the file does not say).',
+    formatAvif: 'AVIF (lossy)',
+    formatNote: 'Another format is always saved as a copy. WebP is saved without any loss; AVIF is lossy and slower to write (a few seconds for a 12 megapixel photo); a PDF page holds the picture at its own size (300 dpi when the file does not say).',
     formatChange: 'A different format is saved as a copy, so Replace original is off. Set “Save as” back to Same as the original to replace.',
     copyNote: 'A copy goes to the AutoCrop folder next to the scan. The scan is not touched.',
     replaceNote: 'The original is backed up first and can be restored.',
@@ -1240,6 +1243,8 @@ export const S = {
     targetTiff: 'TIFF',
     targetWebp: 'WebP (lossless)',
     targetPdf: 'PDF',
+    targetAvif: 'AVIF (lossy)',
+    avifNote: 'AVIF makes small files but is lossy and slow to write: a few seconds for a 12 megapixel photo. Its quality has its own scale (Small, Balanced and Best are 60, 75 and 88). Some older programs cannot open AVIF.',
     pdfQualityNote: 'A PDF page holds the picture as a JPG, so the quality applies. One picture makes one single-page PDF.',
     losslessNoQuality: (target: string) => `${target} is lossless, so there is no quality to choose.`,
     tiffNote: 'TIFF keeps every pixel (LZW compression) and the colour profile. It is the usual format for scans.',
