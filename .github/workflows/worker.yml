@@ -1,0 +1,271 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+# The sandboxed decode worker (ADR-0013, ROADMAP S.15, M6.05-M6.10, M8.30-M8.33, M9.50-M9.56):
+#
+#   escape  - the REAL `auto-crop-worker`, built with the test-only `escape-tests` feature, attempts a
+#             file open, a TCP connect, a process spawn and a 1 GiB allocation AFTER its sandbox is
+#             applied, per level and per OS (the expectations of ADR-0006), plus fault injection
+#             (crash, hang, out of memory, garbage on the control channel, cancel), the hostile-file
+#             corpus through the worker and the guard that a shipped worker has none of the hooks.
+#             Pure-Rust formats only: no native library is needed.
+#   heif    - the same worker with libheif, dav1d and libde265 (`cargo xtask build-native`, cached):
+#             real HEIC and AVIF decodes through the sandbox at the level the worker reports, the
+#             mutated and truncated HEIF files, the seccomp allow-list audit on Linux (strace: no
+#             denied system call besides the escape probes), and the added latency per image.
+#
+# The level in every log line is printed by the worker itself (`SANDBOX level=...`).
+name: Decode worker (sandbox, escape tests, HEIC and AVIF through the worker)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "crates/sandbox/**"
+      - "crates/worker/**"
+      - "crates/codecs/src/remote.rs"
+      - ".github/workflows/worker.yml"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  escape:
+    name: escape tests ${{ matrix.os }}${{ matrix.best-effort && ' (best-effort)' || '' }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.best-effort }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-2025, best-effort: false }
+          - { os: ubuntu-22.04, best-effort: false }
+          - { os: macos-latest, best-effort: false }
+          - { os: ubuntu-24.04, best-effort: true }
+          - { os: ubuntu-22.04-arm, best-effort: true }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Kernel / OS
+        shell: bash
+        run: |
+          uname -a
+          cat /sys/kernel/security/lsm 2>/dev/null || true; echo
+          cat /proc/sys/kernel/unprivileged_userns_clone 2>/dev/null || true
+          sw_vers 2>/dev/null || true
+      - name: Tests of the protocol and the pool client
+        run: cargo test -p auto-crop-sandbox
+      - name: Escape, fault-injection and hostile-corpus tests against the real worker
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test -p auto-crop-worker --features escape-tests -- --nocapture --test-threads=2 2>&1 | tee worker-tests.log
+      - name: The level and what the worker saw from inside (printed by the worker)
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Worker sandbox on ${{ matrix.os }}"
+            echo '```'
+            grep -E "^(SANDBOX|ESCAPE|HOSTILE-WORKER)" worker-tests.log || true
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: A shipped (release) worker has none of the test hooks
+        shell: bash
+        run: |
+          cargo build --release -p auto-crop-worker
+          exe=target/release/auto-crop-worker; [ -f "$exe" ] || exe=target/release/auto-crop-worker.exe
+          "$exe" --version | tee worker-version.txt
+          grep -q "escape-tests=off" worker-version.txt
+          for s in AUTOCROP_ESCAPE AUTOCROP-FAULT: --no-landlock; do
+            if grep -a -q -- "$s" "$exe"; then echo "the release worker contains $s"; exit 1; fi
+          done
+          echo "release worker: no escape hooks"
+      - name: Clean up the AppContainer profile and staging folder (Windows)
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: Remove-Item -Recurse -Force "$env:LOCALAPPDATA\AutoCrop\worker-stage" -ErrorAction SilentlyContinue
+
+  fedora:
+    # Landlock and seccomp on another distribution kernel/userland (best-effort, like the spike).
+    name: escape tests fedora (best-effort)
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    container:
+      image: fedora@sha256:43b29f65a41eb9c35e1cd5323e3bdf3b655c2357a9f4f1ff2f9c2798e5045d80 # fedora:latest on 2026-10-01
+    steps:
+      - name: Toolchain
+        run: dnf install -y --setopt=install_weak_deps=False rust cargo gcc git
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Escape tests
+        run: cargo test -p auto-crop-worker --features escape-tests -- --nocapture --test-threads=2 2>&1 | tee worker-tests.log
+
+  heif:
+    name: HEIC and AVIF through the worker ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, ubuntu-22.04, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install NASM (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command nasm -ErrorAction SilentlyContinue)) { choco install nasm -y --no-progress }
+          $dir = "C:\Program Files\NASM"
+          if (Test-Path $dir) { $dir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8 }
+      - name: Install Meson and Ninja (Windows; they build dav1d)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: python -m pip install --quiet meson ninja
+      - name: Install NASM, Meson, Ninja and strace (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y nasm meson ninja-build strace
+      - name: Install Meson and Ninja (macOS)
+        if: runner.os == 'macOS'
+        run: brew install meson ninja
+      - name: Native libraries cache (libheif, dav1d, libde265 build tree)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/native
+          key: native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('native-deps.toml', 'xtask/src/native.rs') }}
+      - name: Build the pinned libheif, dav1d, libde265 and libjpeg-turbo
+        run: cargo xtask build-native
+      - name: Check the built libraries
+        run: cargo xtask check-native
+      - name: Environment
+        shell: bash
+        run: |
+          prefix="${GITHUB_WORKSPACE}/target/native/prefix"
+          {
+            echo "AUTOCROP_NATIVE_PREFIX=$prefix"
+            echo "LD_LIBRARY_PATH=$prefix/lib:${LD_LIBRARY_PATH:-}"
+            echo "DYLD_LIBRARY_PATH=$prefix/lib:${DYLD_LIBRARY_PATH:-}"
+            echo "LIBHEIF_PLUGIN_PATH=$prefix/lib/libheif"
+            echo "AUTOCROP_REQUIRE_HEIF_SAMPLES=1"
+          } >> "$GITHUB_ENV"
+          if command -v cygpath >/dev/null 2>&1; then
+            cygpath -w "$prefix/bin" >> "$GITHUB_PATH"
+          fi
+      - name: Escape, fault-injection, hostile and HEIF tests with libheif in the worker
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test -p auto-crop-worker --features heif,escape-tests -- --nocapture --test-threads=2 2>&1 | tee worker-heif-tests.log
+      - name: The level and what the worker saw from inside (printed by the worker)
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Worker with libheif on ${{ matrix.os }}"
+            echo '```'
+            grep -E "^(SANDBOX|ESCAPE|HOSTILE-WORKER|HEIF-MUTATIONS)" worker-heif-tests.log || true
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Real HEIC and AVIF through the CLI and the worker (doctor prints the level)
+        shell: bash
+        run: |
+          cargo build --release -p auto-crop-cli -p auto-crop-worker --features auto-crop-cli/heif,auto-crop-worker/heif
+          bin=target/release/auto-crop; [ -f "$bin" ] || bin=target/release/auto-crop.exe
+          src=$(find target/native -maxdepth 4 -type d -name 'libheif-*' -path '*/src/*' | head -1)
+          heic="$src/tests/data/rainbow-451x461.heic"
+          avif=crates/codecs/tests/fixtures/heif/gradient-444-48x32.avif
+          "$bin" doctor | tee doctor.txt
+          grep -E "^worker: " doctor.txt
+          grep -q "^sandbox:   " doctor.txt
+          out=$("$bin" dev-pipeline "$avif" --json --out target/avif.jpg); echo "$out"; echo "$out" | grep -q '"source":\[48,32\]'
+          out=$("$bin" dev-pipeline "$heic" --json --out target/heic.jpg); echo "$out"; echo "$out" | grep -q '"source":\[451,461\]'
+          echo "forced in-process for comparison:"
+          AUTOCROP_DECODE=inproc "$bin" doctor | grep -E "^(sandbox|worker):"
+          {
+            echo "### CLI doctor with the worker (${{ matrix.os }})"
+            echo '```'
+            grep -E "^(sandbox|worker|heif):|checked from inside|attempt that worked|note:" doctor.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Seccomp allow-list audit under strace (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cargo build --release -p auto-crop-worker --features heif --bins --examples
+          python3 -m venv target/bench-venv
+          target/bench-venv/bin/python -m pip install --quiet pillow==12.3.0 "numpy>=1.26,<2.3"
+          target/bench-venv/bin/python crates/codecs/tests/fixtures/heif/make_big_avif.py target/heif-12mp.avif
+          src=$(find target/native -maxdepth 4 -type d -name 'libheif-*' -path '*/src/*' | head -1)
+          # every denied system call inside the worker is `= -1 EPERM` in the trace; the escape probes
+          # (open /etc/passwd, connect, spawn) are the only ones expected
+          for f in target/heif-12mp.avif "$src/tests/data/rainbow-451x461.heic" crates/codecs/tests/fixtures/heif/alpha-32x24.avif; do
+            strace -f -o "target/trace.txt" -s 64 target/release/examples/latency "$f" 3 > /dev/null || true
+            grep -E "= -1 (EPERM|ENOSYS)" target/trace.txt >> target/denied.txt || true
+          done
+          echo "denied system calls:"; sort target/denied.txt | sed -E 's/^[0-9]+ +//; s/\(.*//' | sort | uniq -c | sort -rn
+          # expected: openat of /etc/passwd, socket/connect, clone/execve for the probe, clone3 (ENOSYS)
+          unexpected=$(grep -v -E "etc/passwd|socket\(|connect\(|execve|clone3|/bin/true|fork|vfork|clone\(.*SIGCHLD" target/denied.txt | sort -u || true)
+          if [ -n "$unexpected" ]; then
+            echo "UNEXPECTED denied system calls (widen the allow-list in crates/sandbox/src/os/linux.rs):"; echo "$unexpected"; exit 1
+          fi
+          echo "the allow-list covers every system call libheif, dav1d and libde265 made"
+      - name: Added latency per image through the worker (12 MP, informational, shared runner, NOISY)
+        shell: bash
+        run: |
+          cargo build --release -p auto-crop-worker --features heif --bins --examples
+          python3 -m venv target/bench-venv || python -m venv target/bench-venv
+          if [ -x target/bench-venv/bin/python ]; then py=target/bench-venv/bin/python; else py=target/bench-venv/Scripts/python; fi
+          "$py" -m pip install --quiet pillow==12.3.0 "numpy>=1.26,<2.3"
+          [ -f target/heif-12mp.avif ] || "$py" crates/codecs/tests/fixtures/heif/make_big_avif.py target/heif-12mp.avif
+          lat=target/release/examples/latency; [ -f "$lat" ] || lat=target/release/examples/latency.exe
+          : > target/latency.txt
+          "$lat" target/heif-12mp.avif 10 | tee -a target/latency.txt
+          # a 12 MP HEIC needs an encoder, which the pinned build deliberately lacks (no x265): macOS
+          # has one in ImageIO (sips), Linux has heif-enc in the Ubuntu package (a CI-only tool that
+          # makes the test file; nothing GPL is linked into or shipped with the app)
+          "$py" - <<'PY'
+          from PIL import Image
+          import numpy as np
+          rng = np.random.default_rng(7)
+          y, x = np.mgrid[0:3000, 0:4000]
+          a = np.stack([(x * 255 // 4000), (y * 255 // 3000), ((x + y) * 255 // 7000)], -1).astype(np.uint8)
+          a = (a.astype(np.int16) + rng.integers(-6, 7, a.shape)).clip(0, 255).astype(np.uint8)
+          Image.fromarray(a).save("target/heif-12mp.png")
+          PY
+          if [ "$RUNNER_OS" = macOS ]; then
+            sips -s format heic -s formatOptions 60 target/heif-12mp.png --out target/heif-12mp.heic >/dev/null
+          elif [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get install -y libheif-examples >/dev/null
+            heif-enc -q 60 target/heif-12mp.png -o target/heif-12mp.heic >/dev/null
+          fi
+          if [ -f target/heif-12mp.heic ]; then "$lat" target/heif-12mp.heic 10 | tee -a target/latency.txt; else echo "no HEIC encoder on this runner"; fi
+          {
+            echo "### Added latency of the sandboxed worker (${{ matrix.os }}, release, NOISY)"
+            echo '```'
+            cat target/latency.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: worker-logs-${{ matrix.os }}
+          path: |
+            worker-heif-tests.log
+            doctor.txt
+            target/latency.txt
+            target/denied.txt
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Clean up the staging folder (Windows)
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: Remove-Item -Recurse -Force "$env:LOCALAPPDATA\AutoCrop\worker-stage" -ErrorAction SilentlyContinue

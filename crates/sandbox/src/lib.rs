@@ -145,6 +145,13 @@ impl RemoteDecoder for PoolDecoder {
             )
         };
         let Some(pool) = &self.pool else {
+            if self.mode == Mode::Worker {
+                // Forced worker mode never falls back: a decode that cannot be sandboxed fails.
+                return Err(CodecError::WorkerCrashed(
+                    "AUTOCROP_DECODE=worker but no decode worker was found beside the executable"
+                        .into(),
+                ));
+            }
             self.note_in_process(
                 self.reason()
                     .as_deref()

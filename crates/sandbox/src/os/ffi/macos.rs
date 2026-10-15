@@ -8,6 +8,8 @@
 
 use std::ffi::{CStr, CString, c_char, c_int};
 
+// SAFETY: the two declarations match the signatures in <sandbox.h> (`sandbox_init` and
+// `sandbox_free_error`, both in libSystem); they are only called from `enter` below.
 unsafe extern "C" {
     fn sandbox_init(profile: *const c_char, flags: u64, errorbuf: *mut *mut c_char) -> c_int;
     fn sandbox_free_error(errorbuf: *mut c_char);
