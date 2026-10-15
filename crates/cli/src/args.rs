@@ -10,7 +10,7 @@
 //! unknown flag is a usage error with a suggestion. Parsing never touches the file system.
 
 use auto_crop_core::{SplitPolicy, SplitProfile};
-use auto_crop_engine::output::TiffCompressionSetting;
+use auto_crop_engine::output::{AvifChromaSetting, TiffCompressionSetting};
 use auto_crop_engine::{EngineOptions, QualityPreset, QualitySetting};
 use std::path::PathBuf;
 
@@ -224,8 +224,8 @@ pub fn process_flags() -> Vec<Flag> {
         val(
             "format",
             None,
-            "jpg|png|tiff|webp|pdf|keep",
-            "Output format (default keep; a change needs --output, --suffix or --copy). WebP is lossless; a PDF page holds one picture",
+            "jpg|png|tiff|webp|pdf|avif|keep",
+            "Output format (default keep; a change needs --output, --suffix or --copy). WebP is lossless; AVIF is lossy; a PDF page holds one picture",
         ),
         val(
             "quality",
@@ -243,6 +243,18 @@ pub fn process_flags() -> Vec<Flag> {
             "one-bit",
             None,
             "Write enhanced black-and-white pages (document, receipt) as 1-bit CCITT Group 4 in a TIFF or PDF; any other output is refused",
+        ),
+        val(
+            "avif-speed",
+            None,
+            "0-10",
+            "AVIF encoder speed (default 8; lower is smaller and slower: 12 MP takes about 7 s at 8, 13 s at 6). Needs a build with AVIF output",
+        ),
+        val(
+            "avif-chroma",
+            None,
+            "420|444",
+            "AVIF chroma layout of colour pages (default 420; 444 keeps thin coloured text clean, about 40% larger)",
         ),
         sw(
             "strip-location",
@@ -317,7 +329,7 @@ pub fn convert_flags() -> Vec<Flag> {
             "to",
             None,
             "jpg|png|tiff|webp|pdf",
-            "The format to convert to (required). WebP is lossless; a PDF page holds one picture",
+            "The format to convert to (required). WebP is lossless; AVIF is lossy; a PDF page holds one picture",
         ),
         val(
             "quality",
@@ -362,6 +374,18 @@ pub fn convert_flags() -> Vec<Flag> {
             "one-bit",
             None,
             "Write enhanced black-and-white pages (document, receipt) as 1-bit CCITT Group 4 in a TIFF or PDF; any other output is refused",
+        ),
+        val(
+            "avif-speed",
+            None,
+            "0-10",
+            "AVIF encoder speed (default 8; lower is smaller and slower: 12 MP takes about 7 s at 8, 13 s at 6). Needs a build with AVIF output",
+        ),
+        val(
+            "avif-chroma",
+            None,
+            "420|444",
+            "AVIF chroma layout of colour pages (default 420; 444 keeps thin coloured text clean, about 40% larger)",
         ),
         sw(
             "strip-location",
@@ -439,8 +463,8 @@ pub fn render_flags() -> Vec<Flag> {
         val(
             "format",
             None,
-            "jpg|png|tiff|webp|pdf|keep",
-            "Output format (default keep; or the extension of --output). WebP is lossless; a PDF page holds one picture",
+            "jpg|png|tiff|webp|pdf|avif|keep",
+            "Output format (default keep; or the extension of --output). WebP is lossless; AVIF is lossy; a PDF page holds one picture",
         ),
         val(
             "quality",
@@ -458,6 +482,18 @@ pub fn render_flags() -> Vec<Flag> {
             "one-bit",
             None,
             "Write enhanced black-and-white pages (document, receipt) as 1-bit CCITT Group 4 in a TIFF or PDF; any other output is refused",
+        ),
+        val(
+            "avif-speed",
+            None,
+            "0-10",
+            "AVIF encoder speed (default 8; lower is smaller and slower: 12 MP takes about 7 s at 8, 13 s at 6). Needs a build with AVIF output",
+        ),
+        val(
+            "avif-chroma",
+            None,
+            "420|444",
+            "AVIF chroma layout of colour pages (default 420; 444 keeps thin coloured text clean, about 40% larger)",
         ),
         sw(
             "strip-location",
@@ -880,6 +916,7 @@ pub enum FormatArg {
     Tiff,
     Webp,
     Pdf,
+    Avif,
 }
 
 impl FormatArg {
@@ -891,6 +928,7 @@ impl FormatArg {
             FormatArg::Tiff => "tiff",
             FormatArg::Webp => "webp",
             FormatArg::Pdf => "pdf",
+            FormatArg::Avif => "avif",
         }
     }
 }
@@ -905,6 +943,10 @@ pub struct Knobs {
     pub tiff_compression: Option<TiffCompressionSetting>,
     /// `--one-bit`: enhanced grey pages as 1-bit CCITT Group 4 (TIFF, PDF).
     pub one_bit: bool,
+    /// `--avif-speed`.
+    pub avif_speed: Option<u8>,
+    /// `--avif-chroma`.
+    pub avif_chroma: Option<AvifChromaSetting>,
 }
 
 impl Knobs {
@@ -922,7 +964,19 @@ impl Knobs {
             o.tiff_compression = Some(c);
         }
         o.one_bit = self.one_bit;
+        o.avif_speed = self.avif_speed;
+        if let Some(c) = self.avif_chroma {
+            o.avif_chroma = c;
+        }
         o
+    }
+
+    /// The chroma as written in the manifest, when one was given.
+    pub fn avif_chroma_name(&self) -> Option<&'static str> {
+        self.avif_chroma.map(|c| match c {
+            AvifChromaSetting::Yuv444 => "444",
+            _ => "420",
+        })
     }
 
     /// The compression as written in the manifest, when one was given.
@@ -987,7 +1041,24 @@ fn knobs(p: &Parsed) -> Res<Knobs> {
         max_pixels: number(p, "max-pixels", 1_000_000u64, 500_000_000)?,
         tiff_compression,
         one_bit: p.has("one-bit"),
+        avif_speed: number(p, "avif-speed", 0u8, 10)?,
+        avif_chroma: match p.value("avif-chroma") {
+            None => None,
+            Some("420") => Some(AvifChromaSetting::Yuv420),
+            Some("444") => Some(AvifChromaSetting::Yuv444),
+            Some(o) => return usage(format!("unknown --avif-chroma `{o}` (420 or 444)")),
+        },
     })
+}
+
+/// AVIF output needs the `avif` feature (rav1e); without it the choice is a usage error that says so
+/// before any file is touched.
+fn avif_or_usage() -> Res<()> {
+    if auto_crop_codecs::Format::Avif.is_writable() {
+        Ok(())
+    } else {
+        usage("this build cannot write AVIF (it was built without the `avif` feature)")
+    }
 }
 
 fn format_arg(p: &Parsed) -> Res<FormatArg> {
@@ -998,8 +1069,9 @@ fn format_arg(p: &Parsed) -> Res<FormatArg> {
         Some("tif" | "tiff") => Ok(FormatArg::Tiff),
         Some("webp") => Ok(FormatArg::Webp),
         Some("pdf") => Ok(FormatArg::Pdf),
+        Some("avif") => avif_or_usage().map(|()| FormatArg::Avif),
         Some(o) => usage(format!(
-            "unknown --format `{o}` (jpg, png, tiff, webp, pdf or keep)"
+            "unknown --format `{o}` (jpg, png, tiff, webp, pdf, avif or keep)"
         )),
     }
 }
@@ -1225,10 +1297,16 @@ fn convert(p: &Parsed) -> Res<ConvertArgs> {
         Some("tif" | "tiff") => ConvertTarget::Tiff,
         Some("webp") => ConvertTarget::Webp,
         Some("pdf") => ConvertTarget::Pdf,
-        Some(o) => {
-            return usage(format!("unknown --to `{o}` (jpg, png, tiff, webp or pdf)"));
+        Some("avif") => {
+            avif_or_usage()?;
+            ConvertTarget::Avif
         }
-        None => return usage("convert: `--to jpg|png|tiff|webp|pdf` is required"),
+        Some(o) => {
+            return usage(format!(
+                "unknown --to `{o}` (jpg, png, tiff, webp, pdf or avif)"
+            ));
+        }
+        None => return usage("convert: `--to jpg|png|tiff|webp|pdf|avif` is required"),
     };
     let colour = match p.value("colour").or_else(|| p.value("color")) {
         None | Some("srgb") => ColourMode::Srgb,

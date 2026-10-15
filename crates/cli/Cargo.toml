@@ -12,8 +12,13 @@ publish.workspace = true
 build = "build.rs"
 
 [features]
+# AVIF output is on by default (pure Rust, no nasm: +1.3 MB on the CLI, measured in docs/dev/output-formats.md).
+# `--no-default-features` builds without it.
+default = ["avif"]
 # HEIC, HEIF and AVIF input (libheif, dav1d and the libde265 plugin; see docs/testing/heif-native.md).
 heif = ["auto-crop-engine/heif", "auto-crop-codecs/heif"]
+# AVIF output (`convert --to avif`, `process --format avif`): rav1e, pure Rust, no nasm needed.
+avif = ["auto-crop-engine/avif", "auto-crop-codecs/avif"]
 # The analysis STAND-INs of M1.55 (`--analyse standin-net|standin-canny`); off by default so the
 # default binary has no ONNX Runtime, rten or imageproc code.
 standin-ort = ["auto-crop-engine/standin-ort"]

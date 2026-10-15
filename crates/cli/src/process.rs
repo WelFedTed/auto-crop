@@ -702,6 +702,8 @@ pub fn run(args: ProcessArgs, env: &Env) -> u8 {
                     .then(|| format!("{}:{}", args.enhance.name(), args.enhance_strength)),
                 tiff_compression: args.knobs.tiff_compression_name(),
                 one_bit: args.knobs.one_bit,
+                avif_speed: args.knobs.avif_speed,
+                avif_chroma: args.knobs.avif_chroma_name(),
             }),
         },
         summary: summary.clone(),

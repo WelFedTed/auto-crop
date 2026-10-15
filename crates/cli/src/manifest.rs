@@ -243,6 +243,12 @@ pub struct Options {
     /// `--one-bit`; absent when off.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub one_bit: bool,
+    /// `--avif-speed` when given.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avif_speed: Option<u8>,
+    /// `--avif-chroma` when given.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avif_chroma: Option<&'static str>,
 }
 
 /// The options of a `convert` run.
@@ -250,7 +256,7 @@ pub struct Options {
 pub struct ConvertOpts {
     /// `in_place`, `copy` (beside the original) or `output`.
     pub mode: &'static str,
-    /// `jpg`, `png`, `tiff`, `webp` or `pdf`.
+    /// `jpg`, `png`, `tiff`, `webp`, `pdf` or `avif`.
     pub to: &'static str,
     /// `srgb` or `preserve`.
     pub colour: &'static str,
@@ -266,6 +272,12 @@ pub struct ConvertOpts {
     /// `--one-bit`; absent when off.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub one_bit: bool,
+    /// `--avif-speed` when given.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avif_speed: Option<u8>,
+    /// `--avif-chroma` when given.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avif_chroma: Option<&'static str>,
 }
 
 /// The options of the run, by command (`run.command` says which).

@@ -17,6 +17,7 @@ use std::io::Write;
 pub fn version_text() -> String {
     let feats: Vec<String> = [
         ("heif", cfg!(feature = "heif")),
+        ("avif", cfg!(feature = "avif")),
         ("standin-ort", cfg!(feature = "standin-ort")),
         ("standin-rten", cfg!(feature = "standin-rten")),
         ("standin-canny", cfg!(feature = "standin-canny")),

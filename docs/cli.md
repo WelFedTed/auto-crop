@@ -187,8 +187,9 @@ At most one of:
 
 For the three copy modes: `--name-template T` sets the file name (`{name}`, `{n}`, `{ext}`; the extension is
 added if the template has no `{ext}`), `--if-exists keep-both|skip` says what to do when a name is taken
-(default `keep-both`: the stem gets `(2)`), `--format jpg|png|tiff|webp|pdf|keep` sets the format (default: the source's
-when this build can write it back as itself, else PNG, JPEG for HEIC). WebP is lossless; a PDF holds one
+(default `keep-both`: the stem gets `(2)`), `--format jpg|png|tiff|webp|pdf|avif|keep` sets the format (default: the source's
+when this build can write it back as itself, else PNG, JPEG for HEIC). WebP is lossless; AVIF is lossy (a build with the `avif` feature; `--avif-speed 0-10`, default 8, and
+`--avif-chroma 420|444`, default 420, tune it; the quality is the AVIF scale, presets 60/75/88); a PDF holds one
 page (a JPEG for a colour picture, a lossless page for an enhanced grey one, a CCITT Group 4 page with
 `--one-bit`), sized from the pixel density (300 dpi when the source has none). `--tiff-compression
 none|lzw|deflate|packbits` picks the compression of TIFF output (default: the source TIFF's own, else `lzw`); `--one-bit` writes an
@@ -297,16 +298,18 @@ preset never turns it on, and `analyze` only reports what it would suggest. The 
 ### `convert`
 
 ```text
-auto-crop convert --to jpg|png|tiff|webp|pdf [options] <file|folder|pattern>...
+auto-crop convert --to jpg|png|tiff|webp|pdf|avif [options] <file|folder|pattern>...
 ```
 
-Converts images to JPEG, PNG, TIFF, WebP (lossless) or PDF (one page per file): HEIC, HEIF and AVIF (a build with the `heif` feature, the HEIC package),
+Converts images to JPEG, PNG, TIFF, WebP (lossless), PDF (one page per file) or AVIF (lossy, a build with the `avif` feature): HEIC, HEIF and AVIF (a build with the `heif` feature, the HEIC package),
 TIFF, WebP, BMP, PNG and JPEG. No crop, no detection, no enhancement. Options: the [input](#inputs) options
 above, and
 
 | Option | Meaning |
 |---|---|
-| `--to jpg\|png\|tiff\|webp\|pdf` | The format to convert to. Required. TIFF is 8-bit grey or RGB with the source's profile and density; WebP is lossless (VP8L); PDF holds the picture as a JPEG page. |
+| `--to jpg\|png\|tiff\|webp\|pdf\|avif` | The format to convert to. Required. TIFF is 8-bit grey or RGB with the source's profile and density; WebP is lossless (VP8L); PDF holds the picture as a JPEG page; AVIF is lossy, 8-bit, 4:2:0 (grey pages 4:0:0) with the profile byte-exact and the EXIF carried (Orientation 1), and adds the notice `avif.lossy`. A build without the `avif` feature refuses it as a usage error (exit 2). |
+| `--avif-speed 0-10` | AVIF encoder speed (default 8; about 7 s for 12 MP on a 12-thread desktop, 13 s at 6). |
+| `--avif-chroma 420\|444` | AVIF chroma layout of colour pages (default 420; 444 keeps thin coloured text clean, about 40% larger). |
 | `--tiff-compression none\|lzw\|deflate\|packbits` | Compression of a TIFF output (default: the source TIFF's own, else `lzw`). |
 | `--one-bit` | Write enhanced black-and-white pages as 1-bit CCITT Group 4 (TIFF, PDF); see `process`. |
 | `--quality small\|balanced\|best\|1-100` | JPEG quality: a preset taken from the source's own quality when it is a JPEG (default balanced), or a fixed number. PNG is lossless. |
@@ -494,7 +497,7 @@ breaking change would be version 2 with a different `schema` value or `v`.
   "srgb|preserve", "quality", "strip_location", "reencode", "max_pixels", "recursive", "jobs" }`, every item has
   `crops: 1` for a converted file, `confidence: null` and `split: false`, `reasons` hold the notices
   (`alpha.flattened`, `colour.converted_to_srgb`, `depth.reduced_to_8`, `heic.multi_image`,
-  `livephoto.video_untouched`...), `outputs[0]` is the converted file (`format` `jpeg`, `png`, `tiff`, `webp` or `pdf`, its pixel
+  `livephoto.video_untouched`...), `outputs[0]` is the converted file (`format` `jpeg`, `png`, `tiff`, `webp`, `pdf` or `avif`, its pixel
   size) and a `convert` object says `{ "from", "to", "bytes_in", "bytes_out", "icc": "none|srgb|other" }`
   (`icc` is what the output embeds). `backup_id` is set for a replaced original. Added to version 1 with `convert`,
   additively: a `process` manifest only gains `run.command`.

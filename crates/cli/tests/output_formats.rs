@@ -137,7 +137,6 @@ fn unknown_targets_and_options_are_usage_errors_and_touch_nothing() {
     let p = write(&sb.work(), "a.png", &png_rgb(20, 20));
     let before = tree(&sb.work());
     for bad in [
-        vec!["convert", "--to", "avif", s(&p)],
         vec!["convert", "--to", "jxl", s(&p)],
         vec![
             "convert",

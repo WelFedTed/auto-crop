@@ -70,6 +70,7 @@ fn format_for(args: &RenderArgs, source: Format, notices: &[&str]) -> Format {
         Some("tif" | "tiff") => Format::Tiff,
         Some("webp") => Format::Webp,
         Some("pdf") => Format::Pdf,
+        Some("avif") => Format::Avif,
         _ => out_format(source, notices, FormatArg::Keep),
     }
 }

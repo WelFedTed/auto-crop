@@ -43,6 +43,7 @@ pub fn out_format(source: Format, notices: &[&str], want: FormatArg) -> Format {
         FormatArg::Tiff => Format::Tiff,
         FormatArg::Webp => Format::Webp,
         FormatArg::Pdf => Format::Pdf,
+        FormatArg::Avif => Format::Avif,
         FormatArg::Keep => default_output_format(source, notices),
     }
 }
@@ -224,6 +225,21 @@ fn verify(t: &Temp, r: &Rendered) -> Result<(), ErrKind> {
         } else {
             Err(ErrKind::VerifyFailed)
         };
+    }
+    // An AVIF is read back through its container (size, no rotation box); a build with the libheif
+    // decoder goes on to decode it like any other format.
+    if r.format == Format::Avif {
+        let info = auto_crop_codecs::encoders::avif_box::read_info(&back)
+            .ok_or(ErrKind::VerifyFailed)?;
+        if (info.width, info.height) != (r.width, r.height)
+            || info.has_irot_or_imir
+            || !info.av1_header_ok
+        {
+            return Err(ErrKind::VerifyFailed);
+        }
+        if !Format::Avif.is_decodable() {
+            return Ok(());
+        }
     }
     let d = decode(&back).map_err(|_| ErrKind::VerifyFailed)?;
     if d.format != r.format || (d.raster.width, d.raster.height) != (r.width, r.height) {

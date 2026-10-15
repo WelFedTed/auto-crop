@@ -430,6 +430,8 @@ pub fn run(args: ConvertArgs, env: &Env) -> u8 {
                 jobs,
                 tiff_compression: args.knobs.tiff_compression_name(),
                 one_bit: args.knobs.one_bit,
+                avif_speed: args.knobs.avif_speed,
+                avif_chroma: args.knobs.avif_chroma_name(),
             }),
         },
         summary: summary.clone(),
