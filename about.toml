@@ -17,3 +17,10 @@ accepted = [
 ignore-dev-dependencies = true
 ignore-build-dependencies = true
 workarounds = []
+
+# rav1e lists libfuzzer-sys as a `cfg(fuzzing)` dependency: it is compiled only when someone builds
+# rav1e's own fuzz targets with `--cfg fuzzing`, never in this workspace. Its licence is
+# "(MIT OR Apache-2.0) AND NCSA"; NCSA is the permissive University of Illinois licence (BSD-style).
+# Same exception as deny.toml; without it `cargo about` (the package workflows) fails.
+[libfuzzer-sys]
+accepted = ["NCSA"]
