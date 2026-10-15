@@ -9,6 +9,8 @@ members = [
     "crates/codecs",
     "crates/imgproc",
     "crates/imgproc-bench",
+    "crates/sandbox",
+    "crates/worker",
     "crates/engine",
     "crates/infer",
     "crates/eval",

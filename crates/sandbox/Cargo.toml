@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+[package]
+name = "auto-crop-sandbox"
+description = "Sandboxed decode worker pool: wire protocol, per-OS confinement, pool client (ADR-0013)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+# Test-only hooks of the worker side (escape attempts after the sandbox is applied, a forced
+# "Landlock absent"). NEVER enabled in a shipped build: a test of `auto-crop-worker` and the CI
+# guard check that the shipped binary has neither the feature nor the strings.
+escape-tests = []
+
+[dependencies]
+auto-crop-codecs = { path = "../codecs" }
+auto-crop-core = { path = "../core" }
+auto-crop-imgproc = { path = "../imgproc" }
+thiserror.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# Safe wrappers for memfd_create and friends; already in the tree through the engine.
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix = { version = "1", default-features = false, features = ["std", "fs"] }
+# Landlock (filesystem + TCP) and the seccomp allow-list: MIT OR Apache-2.0 and Apache-2.0 OR
+# BSD-3-Clause. `birdcage` (GPL-3.0) is banned (ADR-0006, deny.toml).
+landlock = "0.4"
+seccompiler = { version = "0.5", default-features = false }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Security_Isolation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Pipes",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+    "Win32_System_Memory",
+    "Win32_System_SystemServices",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Console",
+] }
+
+[dev-dependencies]
+tempfile = "3"
+auto-crop-codecs = { path = "../codecs", features = ["fixtures"] }
+
+# `deny`, not `forbid`: the only `unsafe` is the SAFETY-commented OS glue of `src/os/ffi/`
+# (process creation with handle whitelists, shared memory, rlimit, Landlock, seccomp, Seatbelt),
+# which `#![allow(unsafe_code)]` itself; `cargo xtask ci-guards` allows that nowhere else.
+[lints.rust]
+unsafe_code = "deny"

@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Auto Crop contributors
+
+[package]
+name = "auto-crop-worker"
+description = "Sandboxed decode worker process (binary: auto-crop-worker)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+# HEIC, HEIF and AVIF (libheif, dav1d, the libde265 plugin); the same native build as the app's.
+heif = ["auto-crop-codecs/heif"]
+# Test-only escape hooks, compiled in by the CI escape tests and nowhere else. A shipped worker
+# is built without it; `tests/guard.rs` fails when the strings are in a build that lacks the
+# feature and when any other manifest enables it.
+escape-tests = ["auto-crop-sandbox/escape-tests"]
+
+[dependencies]
+auto-crop-codecs = { path = "../codecs" }
+auto-crop-sandbox = { path = "../sandbox" }
+
+[dev-dependencies]
+auto-crop-codecs = { path = "../codecs", features = ["fixtures"] }
+auto-crop-core = { path = "../core" }
+tempfile = "3"
+
+[[bin]]
+name = "auto-crop-worker"
+path = "src/main.rs"
+
+# No `unsafe` here: the OS glue is in `auto-crop-sandbox` (src/os/ffi).
+[lints]
+workspace = true
