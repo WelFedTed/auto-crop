@@ -235,6 +235,10 @@ export const NOTICES: Record<string, string> = {
     'This TIFF has more than one page, so it is never replaced. Save as copy writes the first page as a PNG and leaves the file as it is.',
   'format.write_unavailable':
     "Auto Crop can open this kind of file but can't write it back, so it is never replaced. Save as copy writes a PNG (a JPG for HEIC) and leaves the file as it is.",
+  'pdf.renamed': 'A file with that name was already there, so the PDF was saved under the next free name. Nothing was replaced.',
+  'pdf.dpi_assumed': 'Some pictures did not say how large they are, so their pages are sized at 300 dpi.',
+  'pdf.page_scaled': 'A page was larger or smaller than a PDF page can be, so it was scaled to fit.',
+  'pdf.jpeg_pass_through': 'Pages cut from a JPG without changing its pixels hold the original picture data, so they lost nothing.',
   'avif.lossy':
     'AVIF is a lossy format: this file is a new generation of the picture, so it is a little different from the pixels you saw. Keep the original if it matters; Restore brings it back.',
   'webp.lossy':
@@ -1393,6 +1397,19 @@ export const S = {
     saved: 'Saved.',
     saveFailed: "Couldn't save the setting.",
     loading: 'Loading settings…',
+  },
+  pdf: {
+    /** The bulk action on the selected images in the review grid. */
+    action: 'Save as one PDF',
+    hint: 'One PDF with a page for every crop of the selected images, in the order they are shown. The originals are not touched.',
+    cancel: 'Cancel PDF',
+    progress: (stage: 'rendering' | 'verifying' | 'saving', done: number, total: number) =>
+      stage === 'saving' ? 'Saving the PDF…' : `${stage === 'rendering' ? 'Writing' : 'Checking'} page ${Math.min(done + 1, Math.max(total, 1))} of ${total || '…'}`,
+    saved: (pages: number, name: string) => `Saved ${pages} ${pages === 1 ? 'page' : 'pages'} as ${name}.`,
+    renamed: (name: string) => `A file with that name was already there, so the PDF is called ${name}. Nothing was replaced.`,
+    openFolder: 'Show in folder',
+    cancelled: 'PDF cancelled. Nothing was written.',
+    nothing: 'Select images with a crop to put in a PDF.',
   },
   toasts: {
     added: (n: number) => `Added ${n} ${n === 1 ? 'image' : 'images'}.`,

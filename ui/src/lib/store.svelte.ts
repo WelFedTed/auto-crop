@@ -4,7 +4,7 @@
 // Shared UI state: the live item list, settings, review decisions (UI-only), toasts and the saved summary.
 // One instance, imported by the screens. Pure rules live in review.ts, items.ts, decisions.ts and quad.ts.
 
-import { api, initBackend, isMock, onItemUpdated, onItemsAdded } from './backend.ts';
+import { api, initBackend, isMock, onItemUpdated, onItemsAdded, onPdfProgress } from './backend.ts';
 import {
   applyDecision,
   emptyDecisions,
@@ -31,7 +31,7 @@ import {
 import { navigate, router } from './router.svelte.ts';
 import { defaultSettings, patchedSettings } from './settings-defaults.ts';
 import { ERRORS, errorMessage, noticeText, S } from './strings.ts';
-import type { ErrorCode, ItemView, LaunchInfo, OpenSummary, SaveOutcome, SaveTarget, Settings, SplitPatch } from './types.ts';
+import type { ErrorCode, ItemView, LaunchInfo, OpenSummary, PdfProgress, SaveOutcome, SaveTarget, Settings, SplitPatch } from './types.ts';
 
 export type ThemeChoice = 'system' | 'light' | 'dark';
 
@@ -167,6 +167,8 @@ class Store {
   gridHistory = $state.raw<GridHistory>(emptyGridHistory());
   /** "Enhance all suggested" is running. */
   enhancing = $state(false);
+  /** "Save as one PDF" is running (or waiting for its dialog): where it is. */
+  pdfRun = $state<PdfProgress | null>(null);
   /** Crops whose enhancement suggestion the person put away with "Not now" (`item:crop`), for this session only. */
   enhanceDismissed = $state.raw<ReadonlySet<string>>(new Set());
 
@@ -530,6 +532,37 @@ class Store {
 
   dismissSummary(): void {
     this.summary = null;
+  }
+
+  // ------------------------------------------------------------------------------------------ scan to PDF
+  /**
+   * The crops of `ids`, in this order, as ONE PDF: a Rust-side dialog asks for the name, `pdf-progress` events
+   * move the bar, a toast with "Show in folder" ends it. Never replaces a file (a taken name is numbered).
+   */
+  async savePdf(ids: number[]): Promise<void> {
+    if (this.pdfRun || ids.length === 0) return;
+    this.pdfRun = { stage: 'rendering', done: 0, total: 0 };
+    const un = await onPdfProgress((p) => (this.pdfRun = p));
+    try {
+      const r = await api.savePdf(ids, { dpi: null, oneBit: false });
+      if (!r) return; // the dialog was cancelled
+      const line = S.pdf.saved(r.pages, r.name);
+      this.announce(line);
+      this.toast(r.renamed ? `${line} ${S.pdf.renamed(r.name)}` : line, 'success', {
+        label: S.pdf.openFolder,
+        run: () => void api.openPdfFolder().catch((e: unknown) => this.fail(e)),
+      });
+    } catch (e) {
+      if (codeOf(e) === 'CANCELLED') this.toast(S.pdf.cancelled, 'info');
+      else this.fail(e);
+    } finally {
+      un();
+      this.pdfRun = null;
+    }
+  }
+
+  cancelPdf(): void {
+    void api.cancelPdf().catch((e: unknown) => this.fail(e));
   }
 
   // ------------------------------------------------------------------------------------------ messages

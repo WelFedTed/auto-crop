@@ -179,6 +179,7 @@ const listeners: { [K in keyof Events]: Set<(p: Events[K]) => void> } = {
   'item-updated': new Set(),
   'convert-added': new Set(),
   'convert-progress': new Set(),
+  'pdf-progress': new Set(),
 };
 
 function emit<K extends keyof Events>(event: K, payload: Events[K]): void {
@@ -758,8 +759,56 @@ const convertMock = createConvertMock({
 
 const firstCrop = (s: ScanState): ModelCrop | undefined => included(s)[0] ?? s.crops[0];
 
+// ---- scan to PDF (the mock keeps names only: there are no files) -------------------------------------------------
+const pdfNames = new Set<string>();
+let pdfCancelled = false;
+let pdfRunning = false;
+let lastPdf: string | null = null;
+/** Pages the mock writes per second of "work" (a few ms each, so a test can watch the bar). */
+const PDF_PAGE_MS = 60;
+
 const api: Api = {
   ...convertMock.api,
+  async savePdf(ids, options) {
+    if (pdfRunning) throw 'INTERNAL';
+    const ms = ids.map((id) => items.get(id)).filter((m): m is MockItem => !!m && m.status === 'ready');
+    const pages = ms.flatMap((m) => included(current(m)));
+    if (ms.length === 0 || pages.length === 0) throw 'NO_CROP';
+    // `?pdfcancel=1` is the person closing the Save dialog.
+    if (typeof location !== 'undefined' && new URLSearchParams(location.search).has('pdfcancel')) return null;
+    pdfRunning = true;
+    pdfCancelled = false;
+    try {
+      const total = pages.length;
+      for (let i = 0; i < total; i++) {
+        emit('pdf-progress', { stage: 'rendering', done: i, total });
+        await sleep(PDF_PAGE_MS);
+        if (pdfCancelled) throw 'CANCELLED';
+      }
+      for (let i = 0; i < total; i++) emit('pdf-progress', { stage: 'verifying', done: i, total });
+      emit('pdf-progress', { stage: 'saving', done: total, total });
+      await sleep(PDF_PAGE_MS);
+      if (pdfCancelled) throw 'CANCELLED';
+      // The Save dialog's default name, and the next free one when it is taken (a file is never replaced).
+      const stem = ids.length === 1 && ms[0] ? ms[0].name.replace(/\.[^.]+$/, '') : 'Scans';
+      let name = `${stem}.pdf`;
+      let n = 2;
+      while (pdfNames.has(name.toLowerCase())) name = `${stem} (${n++}).pdf`;
+      pdfNames.add(name.toLowerCase());
+      lastPdf = name;
+      void options;
+      const notices = name === `${stem}.pdf` ? [] : ['pdf.renamed'];
+      return { name, pages: total, bytes: total * 180_000, passThroughPages: 0, notices, renamed: notices.length > 0 };
+    } finally {
+      pdfRunning = false;
+    }
+  },
+  async cancelPdf() {
+    pdfCancelled = true;
+  },
+  async openPdfFolder() {
+    if (!lastPdf) throw 'UNREADABLE';
+  },
   async launchInfo(): Promise<LaunchInfo> {
     return {
       token: 'mock',

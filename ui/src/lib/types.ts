@@ -596,6 +596,34 @@ export interface ConvertSummary {
   results: ConvertFileResult[];
 }
 
+/** What a "Save as one PDF" run may be told. Both are optional: the defaults are each scan's own density (300 dpi when it has none) and colour pages. */
+export interface PdfOptions {
+  /** Pixel density of every page; `null` = each scan's own. */
+  dpi: number | null;
+  /** Enhanced black-and-white pages as 1-bit Group 4 (an unenhanced page then refuses). */
+  oneBit: boolean;
+}
+
+/** Where a "Save as one PDF" run is (`pdf-progress`). */
+export interface PdfProgress {
+  stage: 'rendering' | 'verifying' | 'saving';
+  done: number;
+  total: number;
+}
+
+/** A finished PDF. The folder stays on the Rust side; only the file's name is shown. */
+export interface PdfSaved {
+  name: string;
+  pages: number;
+  bytes: number;
+  /** Pages that are the original JPEG data, not re-encoded. */
+  passThroughPages: number;
+  /** Notice codes (`pdf.dpi_assumed`, `pdf.renamed`, ...). */
+  notices: string[];
+  /** The name was taken, so the file got the next free one. */
+  renamed: boolean;
+}
+
 /** The commands the shell exposes (Tauri `invoke` names, snake_case). */
 export interface Api {
   launchInfo(): Promise<LaunchInfo>;
@@ -709,6 +737,18 @@ export interface Api {
   convertCancel(): Promise<void>;
   /** Opens the folder a converted file went to; `null` opens the first one of the run. */
   convertOpenFolder(id: number | null): Promise<void>;
+
+  // ---- scan to PDF: the crops of the selected images, in the order given, as ONE multi-page PDF. ----
+  /**
+   * Opens a Rust-side "Save as" dialog (starting in the first image's folder), then writes the PDF; `pdf-progress` events
+   * arrive meanwhile. `null` when the dialog was cancelled. Never replaces an existing file: a taken name becomes
+   * "Name (2).pdf" (`renamed`). The originals are only read.
+   */
+  savePdf(ids: number[], options: PdfOptions): Promise<PdfSaved | null>;
+  /** Stops after the page in progress; nothing is written and the save rejects with `CANCELLED`. */
+  cancelPdf(): Promise<void>;
+  /** Opens the folder of the last PDF with the file selected. */
+  openPdfFolder(): Promise<void>;
 }
 
 /** Events the shell emits (`@tauri-apps/api/event`). */
@@ -721,4 +761,6 @@ export interface Events {
   'convert-added': ConvertAdded;
   /** One file of a Convert run finished. */
   'convert-progress': ConvertProgress;
+  /** A page of a "Save as one PDF" run was written or checked. */
+  'pdf-progress': PdfProgress;
 }

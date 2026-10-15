@@ -180,6 +180,22 @@
     clearSelection();
   }
 
+  // ---- one PDF of the selection -----------------------------------------------------------------
+  /** The selected images that have a crop to write, in the order the grid shows them (page order = grid order). */
+  const pdfIds = $derived(
+    sortClassified(selectedList, sort)
+      .filter((x) => x.item.status === 'ready' && x.decision !== 'skipped' && x.item.crops.some((c) => c.include && c.edit))
+      .map((x) => x.item.id),
+  );
+
+  function doPdf(): void {
+    if (pdfIds.length === 0) {
+      store.toast(S.pdf.nothing);
+      return;
+    }
+    void store.savePdf(pdfIds);
+  }
+
   async function doRemove(): Promise<void> {
     const ids = [...selected];
     clearSelection();
@@ -381,6 +397,18 @@
       </div>
     {/if}
 
+    {#if store.pdfRun}
+      <div class="pdfrun" role="status" data-pdf-progress>
+        <span>{S.pdf.progress(store.pdfRun.stage, store.pdfRun.done, store.pdfRun.total)}</span>
+        <progress
+          max={Math.max(store.pdfRun.total, 1)}
+          value={store.pdfRun.stage === 'saving' ? Math.max(store.pdfRun.total, 1) : store.pdfRun.done}
+          aria-label={S.pdf.progress(store.pdfRun.stage, store.pdfRun.done, store.pdfRun.total)}
+        ></progress>
+        <button type="button" class="btn btn-sm" onclick={() => store.cancelPdf()} data-pdf-cancel>{S.pdf.cancel}</button>
+      </div>
+    {/if}
+
     <div class="toolbar">
       <div class="filters" role="group" aria-label={S.grid.filterLabel}>
         {#each FILTERS as f (f)}
@@ -435,6 +463,7 @@
           {#if hasSkippedSelected}
             <button type="button" class="bulk-btn" onclick={doPutBack}>{S.grid.unskip}</button>
           {/if}
+          <button type="button" class="bulk-btn" title={S.pdf.hint} disabled={store.pdfRun !== null} onclick={doPdf} data-bulk-pdf>{S.pdf.action}</button>
           <button type="button" class="bulk-btn" onclick={doRemove}>{S.grid.removeFromList}</button>
           <button type="button" class="bulk-btn link" onclick={clearSelection}>{S.grid.clear}</button>
         {/if}
@@ -701,6 +730,17 @@
     accent-color: var(--accent);
   }
 
+  .pdfrun {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 0;
+    font-size: 13px;
+  }
+  .pdfrun progress {
+    flex: 1;
+    max-width: 360px;
+  }
   .toolbar {
     display: flex;
     align-items: center;

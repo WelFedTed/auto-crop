@@ -36,6 +36,9 @@ import type {
   ItemView,
   LaunchInfo,
   OpenSummary,
+  PdfOptions,
+  PdfProgress,
+  PdfSaved,
   QuadPts,
   RedetectResult,
   RestoreMode,
@@ -129,6 +132,10 @@ const tauriApi: Api = {
   convertRun: (options: ConvertOptions, runName: string) => invoke<ConvertSummary>('convert_run', { options, runName }),
   convertCancel: () => invoke<void>('convert_cancel'),
   convertOpenFolder: (id: number | null) => invoke<void>('convert_open_folder', { id }),
+
+  savePdf: (ids: number[], options: PdfOptions) => invoke<PdfSaved | null>('save_pdf', { ids, options }),
+  cancelPdf: () => invoke<void>('cancel_pdf'),
+  openPdfFolder: () => invoke<void>('open_pdf_folder'),
 };
 
 export type Unlisten = () => void;
@@ -263,6 +270,10 @@ export const api: Api = {
   convertRun: (options, runName) => impl.api.convertRun(options, runName),
   convertCancel: () => impl.api.convertCancel(),
   convertOpenFolder: (id) => impl.api.convertOpenFolder(id),
+
+  savePdf: (ids, options) => impl.api.savePdf(ids, options),
+  cancelPdf: () => impl.api.cancelPdf(),
+  openPdfFolder: () => impl.api.openPdfFolder(),
 };
 
 /** URL of an image of an item. `gen` is part of the URL so a committed change always reloads. */
@@ -309,6 +320,10 @@ export function onConvertAdded(cb: (s: ConvertAdded) => void): Promise<Unlisten>
 
 export function onConvertProgress(cb: (p: ConvertProgress) => void): Promise<Unlisten> {
   return impl.on('convert-progress', cb);
+}
+
+export function onPdfProgress(cb: (p: PdfProgress) => void): Promise<Unlisten> {
+  return impl.on('pdf-progress', cb);
 }
 
 /** In a plain browser, files dropped on the Convert screen go to the mock's Convert list. */
