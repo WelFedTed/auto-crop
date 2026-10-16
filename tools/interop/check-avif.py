@@ -107,7 +107,10 @@ if avifdec:
     print(subprocess.run([avifdec, "--version"], capture_output=True, text=True).stdout.strip().splitlines()[0])
     for name, bar in BARS.items():
         out = os.path.join(tempfile.mkdtemp(), "out.png")
-        r = subprocess.run([avifdec, os.path.join(D, name), out], capture_output=True, text=True)
+        # The metadata sample carries a stand-in (not real) ICC profile that libpng refuses to write
+        # into avifdec's PNG ("tag count too large"): its profile is checked byte for byte above.
+        extra = ["--ignore-icc"] if name == "avif_meta.avif" else []
+        r = subprocess.run([avifdec, *extra, os.path.join(D, name), out], capture_output=True, text=True)
         if r.returncode != 0:
             bad(f"avifdec failed on {name}: {r.stderr.strip()[:200]}")
             continue

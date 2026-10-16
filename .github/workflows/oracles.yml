@@ -112,6 +112,10 @@ jobs:
         if: steps.download.outcome == 'success'
         shell: bash
         run: |
+          if [ ! -d oracle-dumps ] || [ -z "$(ls -A oracle-dumps 2>/dev/null)" ]; then
+            echo "No oracle dumps: the per-OS jobs skipped the oracle steps (nothing relevant changed in this commit)."
+            exit 0
+          fi
           dirs=(oracle-dumps/*/)
           echo "dumps: ${dirs[*]}"
           if [ "${#dirs[@]}" -lt 3 ]; then
