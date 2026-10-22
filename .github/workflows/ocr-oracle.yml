@@ -105,7 +105,7 @@ jobs:
           .venv/bin/python tools/ocr_oracle/ocr_oracle.py check --clean work/clean-t0.json --blurred work/blurred-t0.json --max-clean-cer 0.05 | tee check.txt || status=$?
           { echo '### Tesseract oracle (M1.66)'; echo '```'; cat check.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: ocr-oracle-reports
@@ -169,7 +169,7 @@ jobs:
             --slices-dir work/slices --variants tools/ocr_oracle/variants-sweep.json --out work/matrix-sweep \
             --thresholding 0 --jobs 4 | tee work/matrix-sweep.log
           { echo '### Enhancement matrix: parameter sweep'; cat work/matrix-sweep/matrix.md; } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: enhance-matrix
