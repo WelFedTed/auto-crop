@@ -45,7 +45,7 @@ jpeg-encoder = "0.7"
 png = "0.18"
 tiff = { version = "0.11", optional = true }
 # CCITT Group 4 (T.6) row encoder and decoder: the 1-bit TIFF and PDF writers (M7.29, M11.30, M11.35).
-fax = "0.2"
+fax = "0.3"
 # TIFF-flavoured LZW (already in the tree through `tiff`): the TIFF writer's compression.
 weezl = "0.1"
 # Lossless WebP (VP8L) encoder with ICC, EXIF and XMP chunks; the decoder side stays behind `image`.
