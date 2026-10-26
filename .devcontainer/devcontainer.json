@@ -3,7 +3,7 @@
   "build": { "dockerfile": "Dockerfile" },
   "features": {
     "ghcr.io/devcontainers/features/rust:1": { "profile": "minimal" },
-    "ghcr.io/devcontainers/features/node:1": { "version": "lts" },
+    "ghcr.io/devcontainers/features/node:2": { "version": "lts" },
     "ghcr.io/devcontainers/features/python:1": { "version": "3.12", "installTools": false }
   },
   "postCreateCommand": "cargo install cargo-nextest --locked && cargo xtask doctor --strict",
