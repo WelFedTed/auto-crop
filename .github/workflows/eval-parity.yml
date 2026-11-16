@@ -65,11 +65,11 @@ jobs:
             echo "relevant=false" >> "$GITHUB_OUTPUT"
             echo "Nothing the harness depends on changed: parity skipped." >> "$GITHUB_STEP_SUMMARY"
           fi
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         if: steps.changes.outputs.relevant == 'true'
         with:
           python-version: "3.12"
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         if: steps.changes.outputs.relevant == 'true'
       - name: Generate the Python smoke suite from its seed
         if: steps.changes.outputs.relevant == 'true'
@@ -77,7 +77,7 @@ jobs:
           cargo xtask synth-setup
           cargo xtask synth --suite smoke --out smoke-suite
           python3 tools/ci/suite_fingerprint.py hash smoke-suite smoke-suite-fingerprint.json
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: steps.changes.outputs.relevant == 'true'
         with:
           name: parity-suite
@@ -100,11 +100,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: parity-suite
           path: parity-suite
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Build the harness
         shell: bash
         run: cargo build --release -p auto-crop-eval
@@ -131,7 +131,7 @@ jobs:
             ./target/release/auto-crop-eval run --manifest parity-suite/smoke-suite/manifest.jsonl \
               --predictor "$p" --suite smoke-py --threads 2 --commit "$COMMIT" --out "out/$p.json" | sed -n '1,2p'
           done
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
       - name: Generate the suite on this OS too (informational, does the generator reproduce the Linux bytes)
@@ -156,7 +156,7 @@ jobs:
             sed -n '1,9p' out/own.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: parity-results-${{ runner.os }}
           path: out
@@ -172,7 +172,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: parity-results-*
           path: results

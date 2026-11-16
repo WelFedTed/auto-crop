@@ -48,7 +48,7 @@ jobs:
           avifdec --version | head -3
           python3 -m pip install --user "pillow==12.3.0"
           python3 -c "from PIL import Image, features; print('Pillow', Image.__version__, 'avif', features.version('avif')); assert features.check('avif')"
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Write one sample per writer (TIFF in every compression, 1-bit G4, WebP, PDF in every page type, AVIF)
         run: cargo run -q -p auto-crop-codecs --features fixtures,avif --example write_samples -- target/interop
       - name: Documents of `process --pdf` (a three-page PDF in name order, an enhanced page that must equal its PNG)
@@ -70,7 +70,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Lints with the feature (warnings are errors)
         run: cargo clippy -p auto-crop-codecs -p auto-crop-engine -p auto-crop-cli --all-targets --features auto-crop-codecs/fixtures,auto-crop-codecs/avif,auto-crop-engine/avif,auto-crop-cli/avif -- -D warnings
       - name: Writer, container, engine and CLI tests with the feature
