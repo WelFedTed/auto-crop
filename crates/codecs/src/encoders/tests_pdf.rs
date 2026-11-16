@@ -698,3 +698,55 @@ fn a_thousand_page_document_is_read_back_with_one_page_in_memory() {
         "a page stream is a few hundred bytes: {largest}"
     );
 }
+
+fn structure(bytes: &[u8]) -> Option<usize> {
+    verify_structure(&mut std::io::Cursor::new(bytes))
+}
+
+#[test]
+fn the_structure_check_says_what_the_streaming_reader_says_without_reading_the_streams() {
+    let pdf = three_page_doc();
+    assert_eq!(structure(&pdf), Some(3));
+    // Truncation at every 7th byte, a flipped byte at every 5th, junk, nonsense: the same verdict as
+    // the reader that copies the streams (flips inside a picture's data are not structure).
+    for cut in (0..pdf.len()).step_by(7) {
+        assert!(structure(&pdf[..cut]).is_none(), "cut at {cut}");
+    }
+    for i in (0..pdf.len()).step_by(5) {
+        let mut bad = pdf.clone();
+        bad[i] ^= 0x55;
+        assert_eq!(
+            structure(&bad).is_some(),
+            streaming(&bad).is_some(),
+            "flip at {i}"
+        );
+    }
+    let mut junk = pdf.clone();
+    junk.extend_from_slice(b"junk");
+    assert!(structure(&junk).is_none());
+    assert!(structure(b"hello").is_none() && structure(&[]).is_none());
+    // A wrong /Length (the stream framing) and a wrong cross-reference offset are refused.
+    let find = |pat: &[u8]| pdf.windows(pat.len()).position(|w| w == pat);
+    let rfind = |pat: &[u8]| pdf.windows(pat.len()).rposition(|w| w == pat);
+    let key = b"/Filter /DCTDecode /Length ";
+    let at = find(key).expect("a JPEG page");
+    let mut bad = pdf.clone();
+    let digit = at + key.len();
+    bad[digit] = if bad[digit] == b'9' {
+        b'8'
+    } else {
+        bad[digit] + 1
+    };
+    assert!(structure(&bad).is_none(), "a stream /Length that is off");
+    let xref = rfind(b"xref\n0 ").unwrap();
+    let after_count = xref + 5 + pdf[xref + 5..].iter().position(|&c| c == b'\n').unwrap() + 1;
+    let mut bad = pdf.clone();
+    // The offset of object 5: move it by one byte (the last of its ten digits).
+    let digit = after_count + 20 * 5 + 9;
+    bad[digit] = if bad[digit] == b'9' {
+        b'8'
+    } else {
+        bad[digit] + 1
+    };
+    assert!(structure(&bad).is_none(), "an xref offset that is off");
+}

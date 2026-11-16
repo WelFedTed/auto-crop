@@ -1062,9 +1062,21 @@ impl<R: Read + Seek> Windows<'_, R> {
         if off > self.len {
             return None;
         }
+        // One seek and (usually) one read: the buffer is sized to what the file can give, so a
+        // wild `/Length` cannot ask for more memory than the file has bytes.
+        let want = usize::try_from((self.len - off).min(max as u64)).ok()?;
         self.r.seek(SeekFrom::Start(off)).ok()?;
-        let mut v = Vec::new();
-        (&mut *self.r).take(max as u64).read_to_end(&mut v).ok()?;
+        let mut v = vec![0u8; want];
+        let mut got = 0;
+        while got < want {
+            match self.r.read(&mut v[got..]) {
+                Ok(0) => break,
+                Ok(n) => got += n,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(_) => return None,
+            }
+        }
+        v.truncate(got);
         Some(v)
     }
 
@@ -1100,6 +1112,19 @@ impl<R: Read + Seek> Windows<'_, R> {
         }
         Some(w[PRE.len()..PRE.len() + len].to_vec())
     }
+
+    /// The same framing check as [`Windows::stream`] without reading the `len` bytes between: the
+    /// bytes before and after the stream are read, and the stream must lie inside the file.
+    fn framed(&mut self, dict_end: u64, len: usize) -> Option<()> {
+        const PRE: &[u8] = b"\nstream\n";
+        const POST: &[u8] = b"\nendstream\nendobj\n";
+        let start = dict_end.checked_add(PRE.len() as u64)?;
+        let end = start.checked_add(len as u64)?;
+        if end.checked_add(POST.len() as u64)? > self.len || self.at(dict_end, PRE.len())? != PRE {
+            return None;
+        }
+        (self.at(end, POST.len())? == POST).then_some(())
+    }
 }
 
 /// [`read_pages`] for a document on disk: the same checks, but only one page's stream is in memory
@@ -1108,6 +1133,25 @@ impl<R: Read + Seek> Windows<'_, R> {
 /// count when the whole structure holds and `each` accepted every page.
 pub fn read_pages_streaming<R: Read + Seek>(
     r: &mut R,
+    each: &mut dyn FnMut(usize, PdfPageRead) -> bool,
+) -> Option<usize> {
+    walk_pages(r, true, each)
+}
+
+/// The structure check alone (ROADMAP M11.38): everything [`read_pages_streaming`] checks (header,
+/// trailer, every cross-reference offset, the page tree and its count, each page's boxes, the stream
+/// `/Length` framing and the filters), but the image streams are **not read**: only the bytes before
+/// and after each are, so the cost does not grow with the size of the pictures. The page count when
+/// the structure holds.
+pub fn verify_structure<R: Read + Seek>(r: &mut R) -> Option<usize> {
+    walk_pages(r, false, &mut |_, _| true)
+}
+
+/// The walk behind [`read_pages_streaming`] and [`verify_structure`]. With `copy_streams` off the
+/// image stream of each page handed to `each` is empty (its framing is still checked).
+fn walk_pages<R: Read + Seek>(
+    r: &mut R,
+    copy_streams: bool,
     each: &mut dyn FnMut(usize, PdfPageRead) -> bool,
 ) -> Option<usize> {
     let len = r.seek(SeekFrom::End(0)).ok()?;
@@ -1226,7 +1270,12 @@ pub fn read_pages_streaming<R: Read + Seek>(
             return None;
         }
         let ilen = usize::try_from(key_int(&id_s, "Length")?).ok()?;
-        let stream = w.stream(iend, ilen)?;
+        let stream = if copy_streams {
+            w.stream(iend, ilen)?
+        } else {
+            w.framed(iend, ilen)?;
+            Vec::new()
+        };
         let width_px = u32::try_from(key_int(&id_s, "Width")?).ok()?;
         let height_px = u32::try_from(key_int(&id_s, "Height")?).ok()?;
         let codec = if id_s.contains("/DCTDecode") {
