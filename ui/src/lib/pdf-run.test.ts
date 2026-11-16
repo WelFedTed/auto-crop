@@ -69,7 +69,10 @@ test('the grid has the action on the selection, in grid order, with progress and
   assert.match(grid, /data-bulk-pdf/);
   assert.match(grid, /sortClassified\(selectedList, sort\)/, 'page order = the order the grid shows');
   assert.match(grid, /x\.item\.crops\.some\(\(c\) => c\.include && c\.edit\)/, 'only images with a crop to write');
-  assert.match(grid, /store\.savePdf\(pdfIds\)/);
+  assert.match(grid, /store\.savePdf\(pdfIds, choice\)/, 'the options sheet hands its choice to the store');
+  assert.doesNotMatch(grid, /store\.savePdf\(pdfIds\)/, 'no run starts without the sheet');
+  assert.match(grid, /pdfSheetOpen = true;/, 'the bulk action opens the sheet');
+  assert.match(grid, /<PdfSheet[^>]*open=\{pdfSheetOpen\}/s);
   assert.match(grid, /data-pdf-progress/);
   assert.match(grid, /role="status"/);
   assert.match(grid, /data-pdf-cancel/);

@@ -17,6 +17,7 @@ import {
 import { batchLine, dismissKey } from './enhance.ts';
 import { afterRedo, afterUndo, emptyGridHistory, nextRedo, nextUndo, pushAction, reconcile, type GridHistory } from './grid-history.ts';
 import { collisionNotice, plannedNames } from './items.ts';
+import { clampMargin, cleanTitle, parsePdfPrefs, type PdfPrefs } from './pdf-options.ts';
 import {
   classify,
   countsOf,
@@ -84,6 +85,7 @@ const LS = {
   tileSize: 'ac.tileSize',
   sort: 'ac.sort',
   firstSplitAck: 'ac.firstSplitAck',
+  pdfPrefs: 'ac.pdfPrefs',
 } as const;
 
 const SS_DECISIONS = 'ac.decisions';
@@ -169,6 +171,8 @@ class Store {
   enhancing = $state(false);
   /** "Save as one PDF" is running (or waiting for its dialog): where it is. */
   pdfRun = $state<PdfProgress | null>(null);
+  /** The page size and margin of the last PDF (remembered); the title is per document. */
+  pdfPrefs = $state<PdfPrefs>(parsePdfPrefs(lsGet(LS.pdfPrefs)));
   /** Crops whose enhancement suggestion the person put away with "Not now" (`item:crop`), for this session only. */
   enhanceDismissed = $state.raw<ReadonlySet<string>>(new Set());
 
@@ -539,12 +543,15 @@ class Store {
    * The crops of `ids`, in this order, as ONE PDF: a Rust-side dialog asks for the name, `pdf-progress` events
    * move the bar, a toast with "Show in folder" ends it. Never replaces a file (a taken name is numbered).
    */
-  async savePdf(ids: number[]): Promise<void> {
+  async savePdf(ids: number[], choice: PdfPrefs & { title: string }): Promise<void> {
     if (this.pdfRun || ids.length === 0) return;
+    const prefs = { pageSize: choice.pageSize, marginMm: clampMargin(choice.marginMm) };
+    this.pdfPrefs = prefs;
+    lsSet(LS.pdfPrefs, JSON.stringify(prefs));
     this.pdfRun = { stage: 'rendering', done: 0, total: 0 };
     const un = await onPdfProgress((p) => (this.pdfRun = p));
     try {
-      const r = await api.savePdf(ids, { dpi: null, oneBit: false });
+      const r = await api.savePdf(ids, { dpi: null, oneBit: false, ...prefs, title: cleanTitle(choice.title) });
       if (!r) return; // the dialog was cancelled
       const line = S.pdf.saved(r.pages, r.name);
       this.announce(line);

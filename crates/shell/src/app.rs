@@ -8,7 +8,7 @@ use auto_crop_engine::convert_batch::{
     ConvertAdded, ConvertFileView, ConvertPreview, ConvertProgress, ConvertSummary,
 };
 use auto_crop_engine::curved::CurveSuggestion;
-use auto_crop_engine::run_pdf::{PdfRunOptions, PdfSelect};
+use auto_crop_engine::run_pdf::{PdfPageSize, PdfRunOptions, PdfSelect};
 use auto_crop_engine::{
     AppPaths, CancelToken, CurveWarp, Cut, DerivedAction, Edit, Engine, EnhanceBatch, EnhanceMode,
     EnhanceSuggestion, ErrKind, ItemView, Notify, OpenSummary, Pt, RestoreMode, RestoreOutcome,
@@ -803,6 +803,12 @@ struct PdfOptionsIn {
     /// Pixel density of every page; `None` = each scan's own, 300 when it says none.
     dpi: Option<u32>,
     one_bit: bool,
+    /// `fit` (each page is its picture's size), `a4` or `letter`.
+    page_size: PdfPageSize,
+    /// Blank border of an A4 or Letter page, in millimetres (the engine keeps it in 0 to 50).
+    margin_mm: f64,
+    /// The document title; `None` or blank = the file's name.
+    title: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -871,6 +877,9 @@ async fn save_pdf(
         let o = PdfRunOptions {
             dpi: options.dpi.filter(|d| (36..=1200).contains(d)),
             one_bit: options.one_bit,
+            page_size: options.page_size,
+            margin_mm: options.margin_mm,
+            title: options.title.filter(|t| !t.trim().is_empty()),
             ..PdfRunOptions::default()
         };
         engine.save_run_pdf(&select, &wanted, &o, &token, &|p| {

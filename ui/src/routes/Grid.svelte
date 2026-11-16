@@ -5,6 +5,7 @@
   import FirstSplitSheet from '../lib/components/FirstSplitSheet.svelte';
   import FirstWriteSheet from '../lib/components/FirstWriteSheet.svelte';
   import Icon from '../lib/components/Icon.svelte';
+  import PdfSheet from '../lib/components/PdfSheet.svelte';
   import Tile from '../lib/components/Tile.svelte';
   import { isHeldScan, isSplitScan, plannedNames } from '../lib/items.ts';
   import {
@@ -188,12 +189,15 @@
       .map((x) => x.item.id),
   );
 
+  /** The options sheet ("Save as one PDF") is open: page size, margin and title, then the Save dialog. */
+  let pdfSheetOpen = $state(false);
+
   function doPdf(): void {
     if (pdfIds.length === 0) {
       store.toast(S.pdf.nothing);
       return;
     }
-    void store.savePdf(pdfIds);
+    pdfSheetOpen = true;
   }
 
   async function doRemove(): Promise<void> {
@@ -539,6 +543,17 @@
   days={store.settings.retentionDays}
   onchoose={chooseMode}
   oncancel={() => (sheetOpen = false)}
+/>
+
+<PdfSheet
+  open={pdfSheetOpen}
+  images={pdfIds.length}
+  prefs={store.pdfPrefs}
+  onchoose={(choice) => {
+    pdfSheetOpen = false;
+    void store.savePdf(pdfIds, choice);
+  }}
+  oncancel={() => (pdfSheetOpen = false)}
 />
 
 <style>

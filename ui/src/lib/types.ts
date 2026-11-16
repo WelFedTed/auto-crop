@@ -597,12 +597,20 @@ export interface ConvertSummary {
   results: ConvertFileResult[];
 }
 
-/** What a "Save as one PDF" run may be told. Both are optional: the defaults are each scan's own density (300 dpi when it has none) and colour pages. */
+/** The page size of a PDF: each picture's own, or an A4 or US Letter sheet (turned to the picture's orientation). */
+export type PdfPageSize = 'fit' | 'a4' | 'letter';
+
+/** What a "Save as one PDF" run may be told. The defaults are each scan's own density (300 dpi when it has none), pages the size of their pictures and colour pages. */
 export interface PdfOptions {
   /** Pixel density of every page; `null` = each scan's own. */
   dpi: number | null;
   /** Enhanced black-and-white pages as 1-bit Group 4 (an unenhanced page then refuses). */
   oneBit: boolean;
+  pageSize: PdfPageSize;
+  /** Blank border of an A4 or Letter page, in millimetres (0 to 50; ignored for `fit`). */
+  marginMm: number;
+  /** The document's Title; `null` = the file's name. */
+  title: string | null;
 }
 
 /** Where a "Save as one PDF" run is (`pdf-progress`). */
