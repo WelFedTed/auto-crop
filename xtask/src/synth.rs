@@ -162,10 +162,15 @@ pub fn run_setup(_args: &[String]) -> Result<(), String> {
     }
     if !venv_python().exists() {
         let sys = system_python()?;
-        run(
-            Command::new(&sys).args(["-m", "venv", VENV]),
-            "python -m venv",
-        )?;
+        let mut venv = Command::new(&sys);
+        venv.args(["-m", "venv"]);
+        // A cached `target/` can hold a venv whose interpreter symlink dangles (the runner's
+        // toolcache Python moved to a new patch release): `venv` then fails on the old link, so
+        // rebuild it from scratch.
+        if Path::new(VENV).exists() {
+            venv.arg("--clear");
+        }
+        run(venv.arg(VENV), "python -m venv")?;
     }
     let py = venv_python();
     run(
