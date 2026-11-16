@@ -279,3 +279,5 @@ mod tests_formats;
 mod tests_notices;
 #[cfg(test)]
 mod tests_pdf;
+#[cfg(test)]
+mod tests_pdf_layout;

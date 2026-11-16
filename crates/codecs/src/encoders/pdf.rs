@@ -55,6 +55,45 @@ pub const MIN_PAGE_PT: f64 = 3.0;
 /// Pages one document may hold.
 pub const MAX_PAGES: usize = 10_000;
 pub const PRODUCER: &str = "Auto Crop";
+/// A4 (210 x 297 mm) in points, portrait, as written in a media box (two decimals).
+pub const A4_PT: (f64, f64) = (595.28, 841.89);
+/// US Letter (8.5 x 11 in) in points, portrait.
+pub const LETTER_PT: (f64, f64) = (612.0, 792.0);
+/// Points per millimetre.
+pub const PT_PER_MM: f64 = 72.0 / 25.4;
+
+/// How big a page is.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum PageSize {
+    /// The picture's own size (pixels over dpi times 72 points), the page being the picture.
+    #[default]
+    MatchImage,
+    /// A fixed sheet, given portrait; a landscape picture gets it turned on its side.
+    Fixed { width_pt: f64, height_pt: f64 },
+}
+
+impl PageSize {
+    pub const A4: PageSize = PageSize::Fixed {
+        width_pt: A4_PT.0,
+        height_pt: A4_PT.1,
+    };
+    pub const LETTER: PageSize = PageSize::Fixed {
+        width_pt: LETTER_PT.0,
+        height_pt: LETTER_PT.1,
+    };
+}
+
+/// Where the picture goes on the page. Only a fixed sheet is laid out (the margin and the
+/// upscaling mean nothing for a page that is the picture).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct PageLayout {
+    pub size: PageSize,
+    /// Blank border on every side of a fixed sheet, in points.
+    pub margin_pt: f64,
+    /// Let a picture grow past its own resolution (its dpi) to fill the sheet. Off: a picture
+    /// that fits is drawn at its natural size and centred, never enlarged.
+    pub upscale: bool,
+}
 
 /// What goes on a page.
 pub enum PageImage<'a> {
@@ -81,8 +120,12 @@ pub enum PageImage<'a> {
 pub struct PageInfo {
     pub width_px: u32,
     pub height_px: u32,
+    /// The page (the media box).
     pub width_pt: f64,
     pub height_pt: f64,
+    /// Where the picture is drawn: lower-left corner, width and height, in points. The whole page
+    /// for [`PageSize::MatchImage`].
+    pub image_pt: (f64, f64, f64, f64),
     /// The dpi was not known and 300 was used.
     pub dpi_assumed: bool,
     /// The page was scaled to stay within [`MIN_PAGE_PT`]..=[`MAX_PAGE_PT`].
@@ -141,6 +184,38 @@ fn pt(v: f64) -> String {
     // Two decimals, no exponent, trailing zeros trimmed.
     let s = format!("{v:.2}");
     s.trim_end_matches('0').trim_end_matches('.').to_owned()
+}
+
+fn round2(v: f64) -> f64 {
+    (v * 100.0).round() / 100.0
+}
+
+/// Lays a picture of natural size `nat` (points) on a fixed sheet given portrait: the sheet is
+/// turned to the picture's orientation (a square picture takes it portrait), the picture is scaled
+/// to fit inside the margins, never past its natural size unless `upscale`, and centred. Returns the
+/// page and the picture's (x, y, width, height).
+fn fixed_layout(
+    nat: (f64, f64),
+    sheet: (f64, f64),
+    margin_pt: f64,
+    upscale: bool,
+) -> ((f64, f64), (f64, f64, f64, f64)) {
+    let (a, b) = (sheet.0.min(sheet.1), sheet.0.max(sheet.1));
+    let (pw, ph) = if nat.0 > nat.1 { (b, a) } else { (a, b) };
+    // The margin leaves at least 1 pt of room on each axis.
+    let m = if margin_pt.is_finite() {
+        margin_pt.clamp(0.0, (pw.min(ph) - 1.0) / 2.0)
+    } else {
+        0.0
+    };
+    let (cw, ch) = (pw - 2.0 * m, ph - 2.0 * m);
+    let mut k = (cw / nat.0).min(ch / nat.1);
+    if !upscale {
+        k = k.min(1.0);
+    }
+    let (dw, dh) = (round2(nat.0 * k).min(cw), round2(nat.1 * k).min(ch));
+    let (x, y) = (round2(m + (cw - dw) / 2.0), round2(m + (ch - dh) / 2.0));
+    ((pw, ph), (x, y, dw, dh))
 }
 
 fn icc_fits(icc: &[u8], channels: u8) -> bool {
@@ -211,6 +286,16 @@ impl<W: Write> PdfWriter<W> {
         &mut self,
         image: PageImage<'_>,
         dpi: Option<(u32, u32)>,
+    ) -> Result<PageInfo, ErrKind> {
+        self.add_page_with(image, dpi, &PageLayout::default())
+    }
+
+    /// [`PdfWriter::add_page`] on a page of the given layout.
+    pub fn add_page_with(
+        &mut self,
+        image: PageImage<'_>,
+        dpi: Option<(u32, u32)>,
+        layout: &PageLayout,
     ) -> Result<PageInfo, ErrKind> {
         if self.pages.len() >= MAX_PAGES {
             return Err(ErrKind::UnsupportedOutput);
@@ -293,30 +378,54 @@ impl<W: Write> PdfWriter<W> {
         };
         let (mut wp, mut hp) = (f64::from(w) * 72.0 / dx, f64::from(h) * 72.0 / dy);
         let mut scaled = false;
-        let big = wp.max(hp);
-        if big > MAX_PAGE_PT {
-            let k = MAX_PAGE_PT / big;
-            wp *= k;
-            hp *= k;
-            scaled = true;
-        }
-        let small = wp.min(hp);
-        if small < MIN_PAGE_PT {
-            let k = MIN_PAGE_PT / small;
-            // Growing the small side may push the long one over the limit; the limit wins.
-            let k = k.min(MAX_PAGE_PT / wp.max(hp));
-            wp *= k;
-            hp *= k;
-            scaled = true;
-        }
-        let (wp, hp) = ((wp * 100.0).round() / 100.0, (hp * 100.0).round() / 100.0);
+        let (page, image_pt) = match layout.size {
+            PageSize::MatchImage => {
+                let big = wp.max(hp);
+                if big > MAX_PAGE_PT {
+                    let k = MAX_PAGE_PT / big;
+                    wp *= k;
+                    hp *= k;
+                    scaled = true;
+                }
+                let small = wp.min(hp);
+                if small < MIN_PAGE_PT {
+                    let k = MIN_PAGE_PT / small;
+                    // Growing the small side may push the long one over the limit; the limit wins.
+                    let k = k.min(MAX_PAGE_PT / wp.max(hp));
+                    wp *= k;
+                    hp *= k;
+                    scaled = true;
+                }
+                let (wp, hp) = ((wp * 100.0).round() / 100.0, (hp * 100.0).round() / 100.0);
+                ((wp, hp), (0.0, 0.0, wp, hp))
+            }
+            PageSize::Fixed {
+                width_pt,
+                height_pt,
+            } => fixed_layout(
+                (wp, hp),
+                (width_pt, height_pt),
+                layout.margin_pt,
+                layout.upscale,
+            ),
+        };
+        let (wp, hp) = page;
+        let (iw, ih, ix, iy) = (image_pt.2, image_pt.3, image_pt.0, image_pt.1);
 
-        let content = format!("q {} 0 0 {} 0 0 cm /Im0 Do Q", pt(wp), pt(hp));
+        let content = format!(
+            "q {} 0 0 {} {} {} cm /Im0 Do Q",
+            pt(iw),
+            pt(ih),
+            pt(ix),
+            pt(iy)
+        );
         let content_id = self.stream_obj("", content.as_bytes())?;
         let page_id = self.begin_obj()?;
         self.sink.put(
             format!(
-                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}] /Resources << /XObject << /Im0 {img_id} 0 R >> >> /Contents {content_id} 0 R >>\nendobj\n",
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}] /Resources << /XObject << /Im0 {img_id} 0 R >> >> /Contents {content_id} 0 R >>
+endobj
+",
                 pt(wp),
                 pt(hp)
             )
@@ -328,6 +437,7 @@ impl<W: Write> PdfWriter<W> {
             height_px: h,
             width_pt: wp,
             height_pt: hp,
+            image_pt,
             dpi_assumed: assumed,
             scaled,
             icc_dropped,
@@ -617,6 +727,8 @@ pub struct PdfPageRead {
     pub width_px: u32,
     pub height_px: u32,
     pub media_box: (f64, f64),
+    /// Where the content stream draws the picture: lower-left corner, width, height (points).
+    pub image_box: (f64, f64, f64, f64),
     pub codec: PageCodec,
     pub channels: u8,
     /// The embedded profile, inflated.
@@ -727,6 +839,30 @@ fn dict_at(b: &[u8], i: usize) -> Option<(&str, usize)> {
         }
     }
     None
+}
+
+/// The picture's box in a content stream `q W 0 0 H X Y cm /Im0 Do Q`, which must lie inside the
+/// page (0.01 pt of rounding allowed).
+fn image_box(content: &[u8], media: (f64, f64)) -> Option<(f64, f64, f64, f64)> {
+    let text = std::str::from_utf8(content).ok()?;
+    let inner = text.strip_prefix("q ")?.strip_suffix(" cm /Im0 Do Q")?;
+    let v: Vec<f64> = inner
+        .split(' ')
+        .map(|t| t.parse::<f64>().ok().filter(|f| f.is_finite()))
+        .collect::<Option<_>>()?;
+    let [w, zero1, zero2, h, x, y] = v[..] else {
+        return None;
+    };
+    let eps = 0.011;
+    (zero1 == 0.0
+        && zero2 == 0.0
+        && w > 0.0
+        && h > 0.0
+        && x >= -eps
+        && y >= -eps
+        && x + w <= media.0 + eps
+        && y + h <= media.1 + eps)
+        .then_some((x, y, w, h))
 }
 
 /// The integer after `/Key` in `d`.
@@ -856,6 +992,7 @@ pub fn read_pages(bytes: &[u8]) -> Option<Vec<PdfPageRead>> {
         {
             return None;
         }
+        let image_box = image_box(cdata, (v[2], v[3]))?;
         // The image.
         let (id_s, iend) = dict_at(bytes, obj(img_id)?)?;
         if !id_s.contains("/Subtype /Image") {
@@ -899,6 +1036,7 @@ pub fn read_pages(bytes: &[u8]) -> Option<Vec<PdfPageRead>> {
             width_px,
             height_px,
             media_box: (v[2], v[3]),
+            image_box,
             codec,
             channels,
             icc,
@@ -1082,6 +1220,7 @@ pub fn read_pages_streaming<R: Read + Seek>(
         {
             return None;
         }
+        let image_box = image_box(&cdata, (v[2], v[3]))?;
         let (id_s, iend) = w.dict(obj(img_id)?)?;
         if !id_s.contains("/Subtype /Image") {
             return None;
@@ -1124,6 +1263,7 @@ pub fn read_pages_streaming<R: Read + Seek>(
             width_px,
             height_px,
             media_box: (v[2], v[3]),
+            image_box,
             codec,
             channels,
             icc,

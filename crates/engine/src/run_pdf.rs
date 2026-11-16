@@ -14,7 +14,10 @@
 //! * **Page types**: an unedited JPEG crop that the lossless transform can cut exactly is embedded
 //!   **as it is** (no new JPEG generation: "pass-through"); any other colour crop is a JPEG page at
 //!   the save's quality; an enhanced grey page is a lossless Flate page, or Group 4 with `one_bit`.
-//!   The page size follows the density (`dpi` of the options, else the source's, else 300 dpi).
+//!   The page size follows the density (`dpi` of the options, else the source's, else 300 dpi), or
+//!   is a fixed sheet (`page_size` A4 or Letter, turned to each picture's orientation, with an
+//!   optional margin): the picture is centred, scaled down to fit and never enlarged past its own
+//!   resolution unless `upscale` is set (ROADMAP M11.36).
 //! * **Safe write** (copy semantics: the originals are only read, so there is no backup): the PDF is
 //!   written to a temp file beside the target, synced, then **verified by parse-back**: the file
 //!   holds exactly the bytes that were written (blake3), then `pdf::read_pages_streaming` reads the
@@ -42,8 +45,8 @@ use auto_crop_codecs::Format;
 use auto_crop_codecs::encoders::bilevel::{BilevelImage, DEFAULT_CUT};
 use auto_crop_codecs::encoders::default_jpeg_encoder;
 use auto_crop_codecs::encoders::pdf::{
-    MAX_PAGES, PageCodec, PageImage, PageInfo, PdfPageRead, PdfWriter, jpeg_info,
-    read_pages_streaming, strip_jpeg,
+    MAX_PAGES, PT_PER_MM, PageCodec, PageImage, PageInfo, PageLayout, PageSize, PdfPageRead,
+    PdfWriter, jpeg_info, read_pages_streaming, strip_jpeg,
 };
 use auto_crop_core::output::Quality;
 use auto_crop_core::ports::{EncodeMeta, PixelFormat, RasterView, SampleSlice};
@@ -76,18 +79,68 @@ pub struct PdfSelect {
     pub crop: Option<u32>,
 }
 
+/// How big the pages are (ROADMAP M11.36).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum PdfPageSize {
+    /// Each page is its picture's size: pixels over the density times 72 points.
+    #[default]
+    Fit,
+    /// A4 sheets (210 x 297 mm), turned to each picture's orientation.
+    A4,
+    /// US Letter sheets (8.5 x 11 in), turned to each picture's orientation.
+    Letter,
+}
+
+impl PdfPageSize {
+    fn size(self) -> PageSize {
+        match self {
+            PdfPageSize::Fit => PageSize::MatchImage,
+            PdfPageSize::A4 => PageSize::A4,
+            PdfPageSize::Letter => PageSize::LETTER,
+        }
+    }
+}
+
+/// The largest margin of a fixed sheet, in millimetres.
+pub const MAX_MARGIN_MM: f64 = 50.0;
+
 /// What the caller chooses about the document.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct PdfRunOptions {
     /// Pixel density of every page; `None` = each crop's own, 300 when its source says none.
     pub dpi: Option<u32>,
-    /// The document title; `None` = the file name without its extension.
+    /// The document title; `None` = the file name without its extension, `Some("")` = no title.
     pub title: Option<String>,
+    /// The page size: the picture's own (default), A4 or Letter.
+    pub page_size: PdfPageSize,
+    /// Blank border of an A4 or Letter page, in millimetres (0 to [`MAX_MARGIN_MM`]; ignored by
+    /// `Fit`, where the page is the picture).
+    pub margin_mm: f64,
+    /// Let a picture grow past its own resolution to fill an A4 or Letter page. Off: a picture that
+    /// fits is drawn at its natural size, centred.
+    pub upscale: bool,
     /// Enhanced black-and-white pages as 1-bit Group 4.
     pub one_bit: bool,
     /// The JPEG quality of colour pages (a pass-through page keeps its own).
     pub quality: QualitySetting,
+}
+
+impl PdfRunOptions {
+    /// The page layout these options ask for (the margin is kept to 0..=[`MAX_MARGIN_MM`]).
+    fn layout(&self) -> PageLayout {
+        let mm = if self.margin_mm.is_finite() {
+            self.margin_mm.clamp(0.0, MAX_MARGIN_MM)
+        } else {
+            0.0
+        };
+        PageLayout {
+            size: self.page_size.size(),
+            margin_pt: mm * PT_PER_MM,
+            upscale: self.upscale,
+        }
+    }
 }
 
 /// Where a run is, for a progress bar.
@@ -148,6 +201,8 @@ struct PageExpect {
     /// blake3 of the image stream (empty: checked by decoding only).
     stream_blake3: String,
     media_pt: (f64, f64),
+    /// Where the picture is drawn (x, y, width, height), in points.
+    image_pt: (f64, f64, f64, f64),
     codec: PageCodec,
 }
 
@@ -520,6 +575,7 @@ impl PdfRun<'_> {
             return Err(ErrKind::UnsupportedOutput);
         }
         let (o, opts, cancel) = (&self.o, &self.opts, &self.cancel);
+        let layout = o.layout();
         let doc = self.doc.as_mut().ok_or(ErrKind::Internal)?;
 
         // The exact path: an unedited JPEG crop that the lossless transform cuts as it is.
@@ -535,12 +591,13 @@ impl PdfRun<'_> {
             if let Some(l) = lossless {
                 let stripped = strip_jpeg(&l.bytes).map_err(|_| ErrKind::EncodeFailed)?;
                 let info = doc
-                    .add_page(
+                    .add_page_with(
                         PageImage::Jpeg {
                             bytes: &l.bytes,
                             icc: icc.as_deref(),
                         },
                         dpi,
+                        &layout,
                     )
                     .map_err(|_| ErrKind::EncodeFailed)?;
                 return Ok((
@@ -557,6 +614,7 @@ impl PdfRun<'_> {
                         },
                         stream_blake3: blake3_hex(&stripped),
                         media_pt: (info.width_pt, info.height_pt),
+                        image_pt: info.image_pt,
                         codec: PageCodec::Dct,
                     },
                     true,
@@ -688,6 +746,7 @@ fn pdf_page<W: Write>(
     o: &PdfRunOptions,
 ) -> Result<(PageInfo, PageExpect)> {
     let never = CancelToken::never();
+    let layout = o.layout();
     match page {
         Enhanced::Rgb(r) => {
             if o.one_bit {
@@ -709,7 +768,7 @@ fn pdf_page<W: Write>(
                 .map_err(|_| ErrKind::EncodeFailed)?;
             let stripped = strip_jpeg(&jpeg).map_err(|_| ErrKind::EncodeFailed)?;
             let info = doc
-                .add_page(PageImage::Jpeg { bytes: &jpeg, icc }, dpi)
+                .add_page_with(PageImage::Jpeg { bytes: &jpeg, icc }, dpi, &layout)
                 .map_err(|_| ErrKind::EncodeFailed)?;
             Ok((
                 info,
@@ -722,6 +781,7 @@ fn pdf_page<W: Write>(
                     },
                     stream_blake3: blake3_hex(&stripped),
                     media_pt: (info.width_pt, info.height_pt),
+                    image_pt: info.image_pt,
                     codec: PageCodec::Dct,
                 },
             ))
@@ -733,7 +793,7 @@ fn pdf_page<W: Write>(
                 let b = BilevelImage::from_view(&view, DEFAULT_CUT, &never)
                     .map_err(|_| ErrKind::EncodeFailed)?;
                 let info = doc
-                    .add_page(PageImage::G4(&b), dpi)
+                    .add_page_with(PageImage::G4(&b), dpi, &layout)
                     .map_err(|_| ErrKind::EncodeFailed)?;
                 return Ok((
                     info,
@@ -746,12 +806,13 @@ fn pdf_page<W: Write>(
                         },
                         stream_blake3: String::new(),
                         media_pt: (info.width_pt, info.height_pt),
+                        image_pt: info.image_pt,
                         codec: PageCodec::G4,
                     },
                 ));
             }
             let info = doc
-                .add_page(
+                .add_page_with(
                     PageImage::Flate {
                         width: g.width,
                         height: g.height,
@@ -760,6 +821,7 @@ fn pdf_page<W: Write>(
                         icc: None,
                     },
                     dpi,
+                    &layout,
                 )
                 .map_err(|_| ErrKind::EncodeFailed)?;
             Ok((
@@ -773,6 +835,7 @@ fn pdf_page<W: Write>(
                     },
                     stream_blake3: String::new(),
                     media_pt: (info.width_pt, info.height_pt),
+                    image_pt: info.image_pt,
                     codec: PageCodec::Flate,
                 },
             ))
@@ -842,6 +905,10 @@ fn page_matches(page: &PdfPageRead, e: &PageExpect, mode: VerifyMode) -> bool {
         || (page.width_px, page.height_px) != e.expect.dims
         || (page.media_box.0 - e.media_pt.0).abs() > 0.01
         || (page.media_box.1 - e.media_pt.1).abs() > 0.01
+        || (page.image_box.0 - e.image_pt.0).abs() > 0.01
+        || (page.image_box.1 - e.image_pt.1).abs() > 0.01
+        || (page.image_box.2 - e.image_pt.2).abs() > 0.01
+        || (page.image_box.3 - e.image_pt.3).abs() > 0.01
     {
         return false;
     }

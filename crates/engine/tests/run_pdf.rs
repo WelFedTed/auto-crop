@@ -14,7 +14,7 @@ use auto_crop_codecs::{Format, decode};
 use auto_crop_core::{CancelToken, Enhance, EnhanceMode, Pt};
 use auto_crop_engine::enhance::quad_enhances;
 use auto_crop_engine::group::stray_temps;
-use auto_crop_engine::run_pdf::{PdfRunOptions, PdfSelect, PdfStep};
+use auto_crop_engine::run_pdf::{PdfPageSize, PdfRunOptions, PdfSelect, PdfStep};
 use auto_crop_engine::{AppPaths, Edit, Engine, ErrKind, ItemView, NoSplit};
 use auto_crop_imgproc::Raster;
 use std::fs;
@@ -243,6 +243,168 @@ fn the_dpi_option_sizes_every_page() {
     );
     let doc = String::from_utf8_lossy(&fs::read(&saved.path).unwrap()).into_owned();
     assert!(doc.contains("/Title (My scans)") && doc.contains("/Producer (Auto Crop)"));
+}
+
+#[test]
+fn the_title_is_the_file_name_unless_given_and_an_empty_one_means_none() {
+    let e = env();
+    let (a, _, _) = three(&e);
+    let title_of = |name: &str, title: Option<&str>| {
+        let o = PdfRunOptions {
+            title: title.map(str::to_owned),
+            ..PdfRunOptions::default()
+        };
+        let saved = e
+            .engine
+            .save_run_pdf(&[sel(&a)], &e.dir.join(name), &o, &never(), &no_progress)
+            .unwrap();
+        String::from_utf8_lossy(&fs::read(saved.path).unwrap()).into_owned()
+    };
+    let doc = title_of("Receipts May.pdf", None);
+    assert!(doc.contains("/Title (Receipts May)") && doc.contains("/Producer (Auto Crop)"));
+    let doc = title_of("t2.pdf", Some("Tax (2026)"));
+    assert!(
+        doc.contains("/Title (Tax \\(2026\\))"),
+        "escaped literal string"
+    );
+    let doc = title_of("t3.pdf", Some(""));
+    assert!(!doc.contains("/Title") && doc.contains("/Producer (Auto Crop)"));
+    assert!(
+        !doc.contains("/CreationDate"),
+        "no date unless one is given"
+    );
+    // Not ASCII: a UTF-16BE string with a byte order mark.
+    let doc = title_of("t4.pdf", Some("Kvittot \u{00e4}r h\u{00e4}r"));
+    assert!(doc.contains("/Title <FEFF"), "{doc:.0}");
+}
+
+#[test]
+fn a4_and_letter_pages_centre_each_picture_with_a_margin_and_never_enlarge_it() {
+    let e = env();
+    let (a, b, c) = three(&e);
+    let mm = 72.0 / 25.4;
+    for (size, sheet) in [
+        (PdfPageSize::A4, (595.28, 841.89)),
+        (PdfPageSize::Letter, (612.0, 792.0)),
+    ] {
+        let o = PdfRunOptions {
+            page_size: size,
+            margin_mm: 10.0,
+            ..PdfRunOptions::default()
+        };
+        let out = e.dir.join(format!("{size:?}.pdf"));
+        let saved = e
+            .engine
+            .save_run_pdf(
+                &[sel(&a), sel(&b), sel(&c)],
+                &out,
+                &o,
+                &never(),
+                &no_progress,
+            )
+            .unwrap();
+        let bytes = fs::read(&saved.path).unwrap();
+        let pages = read_pages(&bytes).expect("the repo's verifier reads it back");
+        assert_eq!(pages.len(), 3);
+        for (p, s) in pages.iter().zip(&saved.page_sizes_pt) {
+            // Portrait or landscape sheet by the picture's aspect.
+            let want = if p.width_px > p.height_px {
+                (sheet.1, sheet.0)
+            } else {
+                sheet
+            };
+            assert_eq!(p.media_box, want, "{size:?}");
+            assert_eq!(*s, want);
+            let (x, y, w, h) = p.image_box;
+            // Inside the margins, centred, same aspect as the pixels.
+            assert!(x >= 10.0 * mm - 0.011 && y >= 10.0 * mm - 0.011, "{p:?}");
+            assert!(x + w <= want.0 - 10.0 * mm + 0.011 && y + h <= want.1 - 10.0 * mm + 0.011);
+            assert!((x - (want.0 - x - w)).abs() < 0.02 && (y - (want.1 - y - h)).abs() < 0.02);
+            assert!((w / h - f64::from(p.width_px) / f64::from(p.height_px)).abs() < 2e-3);
+            // At the nominal 300 dpi these small crops are smaller than the sheet: not enlarged.
+            assert!(w <= f64::from(p.width_px) * 72.0 / 300.0 + 0.011, "{p:?}");
+        }
+    }
+    // Upscale on: the picture fills the box inside the margins (one side touches it).
+    let o = PdfRunOptions {
+        page_size: PdfPageSize::A4,
+        margin_mm: 10.0,
+        upscale: true,
+        ..PdfRunOptions::default()
+    };
+    let saved = e
+        .engine
+        .save_run_pdf(
+            &[sel(&a)],
+            &e.dir.join("up.pdf"),
+            &o,
+            &never(),
+            &no_progress,
+        )
+        .unwrap();
+    let p = &read_pages(&fs::read(&saved.path).unwrap()).unwrap()[0];
+    let (x, y, w, h) = p.image_box;
+    let touches_x = (x - 10.0 * mm).abs() < 0.02;
+    let touches_y = (y - 10.0 * mm).abs() < 0.02;
+    assert!(touches_x || touches_y, "{p:?}");
+    assert!(
+        w > f64::from(p.width_px) * 72.0 / 300.0 + 1.0,
+        "enlarged: {p:?}"
+    );
+    assert!(h > 0.0);
+}
+
+#[test]
+fn a_page_size_changes_the_layout_only_and_equal_input_gives_equal_bytes() {
+    let e = env();
+    let (a, _, c) = three(&e);
+    let o = PdfRunOptions {
+        page_size: PdfPageSize::A4,
+        margin_mm: 5.0,
+        title: Some("Same".to_owned()),
+        ..PdfRunOptions::default()
+    };
+    let run = |name: &str, o: &PdfRunOptions| {
+        let s = e
+            .engine
+            .save_run_pdf(
+                &[sel(&a), sel(&c)],
+                &e.dir.join(name),
+                o,
+                &never(),
+                &no_progress,
+            )
+            .unwrap();
+        fs::read(s.path).unwrap()
+    };
+    let (one, two) = (run("one.pdf", &o), run("two.pdf", &o));
+    assert_eq!(one, two);
+    // The image streams are the same as with fit-to-image pages: only the boxes differ.
+    let fit = run("fit.pdf", &PdfRunOptions::default());
+    let (pa, pf) = (read_pages(&one).unwrap(), read_pages(&fit).unwrap());
+    for (x, y) in pa.iter().zip(&pf) {
+        assert_eq!(x.stream_bytes(), y.stream_bytes());
+        assert_eq!((x.width_px, x.height_px), (y.width_px, y.height_px));
+        assert_ne!(x.media_box, y.media_box);
+    }
+    // 1-bit pages go on a sheet too.
+    let o1 = PdfRunOptions {
+        page_size: PdfPageSize::Letter,
+        one_bit: true,
+        ..PdfRunOptions::default()
+    };
+    let s = e
+        .engine
+        .save_run_pdf(
+            &[sel(&c)],
+            &e.dir.join("g4.pdf"),
+            &o1,
+            &never(),
+            &no_progress,
+        )
+        .unwrap();
+    let p = &read_pages(&fs::read(s.path).unwrap()).unwrap()[0];
+    assert_eq!((p.codec, p.media_box), (PageCodec::G4, (612.0, 792.0)));
 }
 
 #[test]
