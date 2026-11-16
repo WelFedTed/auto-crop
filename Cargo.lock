@@ -330,6 +330,7 @@ version = "0.0.6"
 dependencies = [
  "auto-crop-codecs",
  "auto-crop-core",
+ "auto-crop-engine",
  "auto-crop-sandbox",
  "tempfile",
 ]

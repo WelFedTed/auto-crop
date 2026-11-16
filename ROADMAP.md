@@ -28,7 +28,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | M3 | GUI alpha: single-image editor | v0.2.0 | Windows 10/11 x64 | XL | 0 / 94 (0%) |
 | M4 | ML detection, orientation and calibrated confidence | v0.3.0 | Windows 10/11 x64 | XL | 1 / 91 (1%) |
 | M5 | Batch review workflow, backups panel and trust features | v0.4.0 | Windows 10/11 x64 | L | 0 / 94 (0%) |
-| M6 | HEIC/HEIF, sandboxed decoding and format read breadth | v0.5.0 | Windows 10/11 x64 | XL | 2 / 98 (2%) |
+| M6 | HEIC/HEIF, sandboxed decoding and format read breadth | v0.5.0 | Windows 10/11 x64 | XL | 3 / 98 (3%) |
 | M7 | Enhancement and bilevel output | v0.6.0 | Windows 10/11 x64 | XL | 3 / 90 (3%) |
 | M8 | macOS preview | v0.7.0 | macOS 12+ arm64 (Apple silicon) | L | 0 / 92 (0%) |
 | M9 | Linux preview | v0.8.0 | Linux x86_64 (Ubuntu 22.04+, Fedora; arm64 best-effort) | XL | 0 / 93 (0%) |
@@ -39,7 +39,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | X | Continuous and cross-cutting | - | - | - | 0 / 42 (0%) |
 | X | Post-1.0 backlog (1.x) | - | - | - | 0 / 43 (0%) |
 | X | Spikes and open decisions | - | - | - | 1 / 28 (3%) |
-| **Total** | | | | | **146 / 1414 (10%)** |
+| **Total** | | | | | **147 / 1414 (10%)** |
 <!-- progress:end -->
 
 ## Why this order
@@ -953,7 +953,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [ ] **M6.78 `docs/heic.md`** - Guide: engine, colour and wide gamut, HDR and gain maps, Live Photo, burst, multi-image, orientation, privacy. Says what "Strip location" removes (GPS IFD, XMP GPS, IPTC location) and what stays (Make, Model, serials, MakerNote, dates); full policy in M11.
 - [ ] **M6.79 `docs/replacing-libheif.md`** - Windows steps to swap `heif.dll`, the plugin and `libde265.dll`, rebuild from `native-sources` and verify with `doctor`; macOS, AppImage and Flatpak sections are added in M8 and M9.
 - [ ] **M6.80 SECURITY.md decoder section** - What the worker isolates and what the Windows level does not block (restricted token: network, user files); caps, reporting a bad file, patch SLA, stale-build banner; fixes for `HevcDecoderMissing`, "could not be decoded safely", antivirus quarantine.
-- [ ] **M6.86 Engine-level worker faults** - Extends M6.10: crash, hang and over-allocation through the engine fail only their items (`DecoderCrashed|DecodeTimeout|MemoryLimit`), sources byte-identical.
+- [x] **M6.86 Engine-level worker faults** - Extends M6.10: crash, hang and over-allocation through the engine fail only their items (`DecoderCrashed|DecodeTimeout|MemoryLimit`), sources byte-identical (`engine_faults`).
 - [ ] **M6.87 Worker boundary proofs** - Extends M6.41-M6.43: CI `cargo tree -i` shows who links libheif; a write-past-mapping test and `miri` for `Shm`; a real 1,000-crash soak (240 decodes today).
 
 ### Exit gate

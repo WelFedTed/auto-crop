@@ -26,6 +26,9 @@ auto-crop-sandbox = { path = "../sandbox" }
 [dev-dependencies]
 auto-crop-codecs = { path = "../codecs", features = ["fixtures"] }
 auto-crop-core = { path = "../core" }
+# Engine-level fault tests (M6.86): the engine on top of the real worker pool. Dev-only; the shipped
+# worker links neither the engine nor its dependencies.
+auto-crop-engine = { path = "../engine" }
 tempfile = "3"
 
 [[bin]]
