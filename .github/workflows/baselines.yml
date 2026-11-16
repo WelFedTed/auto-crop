@@ -75,7 +75,7 @@ jobs:
       - name: Python environment for the adapters (hash-locked)
         if: steps.changes.outputs.relevant == 'true'
         run: |
-          python -m venv target/baselines-venv
+          python -m venv --clear target/baselines-venv
           target/baselines-venv/bin/python -m pip install --require-hashes -r tools/baselines/requirements.lock
       - name: Build the harness and generate the Python smoke suite
         if: steps.changes.outputs.relevant == 'true'

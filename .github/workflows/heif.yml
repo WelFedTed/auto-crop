@@ -232,7 +232,7 @@ jobs:
       - name: Decode time of a 12 MP AVIF (informational, shared runner, NOISY)
         shell: bash
         run: |
-          python3 -m venv target/bench-venv || python -m venv target/bench-venv
+          python3 -m venv --clear target/bench-venv || python -m venv --clear target/bench-venv
           if [ -x target/bench-venv/bin/python ]; then py=target/bench-venv/bin/python; else py=target/bench-venv/Scripts/python; fi
           "$py" -m pip install --quiet pillow==12.3.0 "numpy>=1.26,<2.3"
           "$py" crates/codecs/tests/fixtures/heif/make_big_avif.py target/heif-12mp.avif

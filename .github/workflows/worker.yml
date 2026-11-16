@@ -201,7 +201,7 @@ jobs:
         shell: bash
         run: |
           cargo build --release -p auto-crop-worker --features heif --bins --examples
-          python3 -m venv target/bench-venv
+          python3 -m venv --clear target/bench-venv
           target/bench-venv/bin/python -m pip install --quiet pillow==12.3.0 "numpy>=1.26,<2.3"
           target/bench-venv/bin/python crates/codecs/tests/fixtures/heif/make_big_avif.py target/heif-12mp.avif
           src=$(find target/native -maxdepth 4 -type d -name 'libheif-*' -path '*/src/*' | head -1)
@@ -226,7 +226,7 @@ jobs:
         shell: bash
         run: |
           cargo build --release -p auto-crop-worker --features heif --bins --examples
-          python3 -m venv target/bench-venv || python -m venv target/bench-venv
+          python3 -m venv --clear target/bench-venv || python -m venv --clear target/bench-venv
           if [ -x target/bench-venv/bin/python ]; then py=target/bench-venv/bin/python; else py=target/bench-venv/Scripts/python; fi
           "$py" -m pip install --quiet pillow==12.3.0 "numpy>=1.26,<2.3"
           [ -f target/heif-12mp.avif ] || "$py" crates/codecs/tests/fixtures/heif/make_big_avif.py target/heif-12mp.avif
