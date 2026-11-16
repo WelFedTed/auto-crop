@@ -199,6 +199,55 @@ if [ -f "$DIR/pdf_run_three.pdf" ]; then
   fi
 fi
 
+# Page size presets of `process --pdf` (the CLI test `pdf_run` keeps them): `--page-size a4 --page-margin 10 --title
+# "Receipts (May)"` on two photos (no density: nominal 300 dpi), and `--page-size letter --upscale` on one. A sheet is
+# portrait or landscape by the picture, so either orientation is accepted; what matters is the size, the title, that
+# the picture is NOT enlarged without --upscale (effective ppi stays 300) and IS with it (fewer ppi), and that it is centred.
+centred() {
+  # Renders page 1 of $1 at 72 dpi and says whether the non-white box is centred on the page (+-4 px).
+  local pdf="$1" png box w h x y W H
+  pdftoppm -r 72 -f 1 -l 1 -png "$pdf" "$pdf.render" >/dev/null 2>&1 || return 1
+  png=$(ls "$pdf".render*.png 2>/dev/null | head -1)
+  [ -n "$png" ] && [ ${#IM_IDENTIFY[@]} -gt 0 ] || return 2
+  W=$("${IM_IDENTIFY[@]}" -format '%w' "$png"); H=$("${IM_IDENTIFY[@]}" -format '%h' "$png")
+  box=$("${IM_IDENTIFY[@]}" -fuzz 3% -format '%@' "$png" 2>/dev/null) || return 2
+  w=${box%%x*}; h=${box#*x}; h=${h%%+*}; x=${box#*+}; x=${x%%+*}; y=${box##*+}
+  [ $((2 * x + w - W)) -ge -4 ] && [ $((2 * x + w - W)) -le 4 ] && [ $((2 * y + h - H)) -ge -4 ] && [ $((2 * y + h - H)) -le 4 ]
+}
+if [ -f "$DIR/pdf_run_a4.pdf" ]; then
+  if need qpdf; then
+    for f in pdf_run_a4 pdf_run_letter_up; do
+      if qpdf --check "$DIR/$f.pdf" >/dev/null 2>&1; then ok "qpdf --check $f.pdf"; else bad "qpdf --check $f.pdf"; fi
+    done
+  fi
+  if need pdfinfo; then
+    out=$(pdfinfo -f 1 -l 2 "$DIR/pdf_run_a4.pdf" 2>&1)
+    echo "$out" | grep -q "^Pages: *2" && ok "pdfinfo: the A4 document has 2 pages" || bad "pdfinfo A4 pages: $out"
+    echo "$out" | grep -q "^Title: *Receipts (May)" && ok "pdfinfo: --title reached the Info dictionary" || bad "pdfinfo A4 title: $out"
+    echo "$out" | grep -qiE "^(Author|Creator|Keywords|Subject):" && bad "pdfinfo shows unexpected metadata" || ok "pdfinfo: no author, creator, keywords or subject"
+    [ "$(echo "$out" | grep -cE "^Page *[12] size: *(595.28 x 841.89|841.89 x 595.28) pts")" -eq 2 ] && ok "pdfinfo: both pages are A4 (595.28 x 841.89 pt)" || bad "pdfinfo A4 sizes: $out"
+    out=$(pdfinfo -f 1 -l 1 "$DIR/pdf_run_letter_up.pdf" 2>&1)
+    echo "$out" | grep -q "^Title: *Letter one" && ok "pdfinfo: the default title is the file name" || bad "pdfinfo Letter title: $out"
+    echo "$out" | grep -qE "^Page *1 size: *(612 x 792|792 x 612) pts" && ok "pdfinfo: the page is Letter (612 x 792 pt)" || bad "pdfinfo Letter size: $out"
+  fi
+  if need pdfimages; then
+    a4=$(pdfimages -list "$DIR/pdf_run_a4.pdf" 2>&1 | awk 'NR>2 {print $13}' | sort -u | tr '\n' ' ')
+    [ "$a4" = "300 " ] && ok "pdfimages: A4 pages are not enlarged (all 300 ppi)" || bad "pdfimages: A4 effective ppi is '$a4', not 300"
+    up=$(pdfimages -list "$DIR/pdf_run_letter_up.pdf" 2>&1 | awk 'NR>2 {print $13}' | head -1)
+    [ -n "$up" ] && [ "$up" -lt 290 ] && ok "pdfimages: --upscale enlarges the picture (down to $up ppi)" || bad "pdfimages: --upscale page is '$up' ppi, not below 300"
+  fi
+  if need pdftoppm; then
+    for f in pdf_run_a4 pdf_run_letter_up; do
+      centred "$DIR/$f.pdf"
+      case $? in
+        0) ok "Poppler renders $f page 1 with the picture centred" ;;
+        2) ok "Poppler renders $f (no ImageMagick to measure the centring)" ;;
+        *) bad "Poppler renders $f page 1 with the picture off centre" ;;
+      esac
+    done
+  fi
+fi
+
 echo "---"
 echo "$CHECKS checks, $FAILS failed"
 [ "$FAILS" -eq 0 ]

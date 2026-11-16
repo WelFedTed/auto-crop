@@ -263,9 +263,157 @@ fn what_does_not_fit_a_pdf_is_a_usage_error_and_touches_nothing() {
         vec!["process", "--dpi", "150", s(&a)],
         vec!["process", "--pdf", s(&out), "--order", "random", s(&a)],
         vec!["process", "--pdf", s(&out), "--dpi", "5", s(&a)],
+        // Page size, margin, upscale and title: values, and what they belong to.
+        vec!["process", "--pdf", s(&out), "--page-size", "a3", s(&a)],
+        vec![
+            "process",
+            "--pdf",
+            s(&out),
+            "--page-size",
+            "a4",
+            "--page-margin",
+            "51",
+            s(&a),
+        ],
+        vec![
+            "process",
+            "--pdf",
+            s(&out),
+            "--page-size",
+            "a4",
+            "--page-margin",
+            "-1",
+            s(&a),
+        ],
+        vec![
+            "process",
+            "--pdf",
+            s(&out),
+            "--page-size",
+            "a4",
+            "--page-margin",
+            "wide",
+            s(&a),
+        ],
+        vec![
+            "process",
+            "--pdf",
+            s(&out),
+            "--page-size",
+            "a4",
+            "--page-margin",
+            "NaN",
+            s(&a),
+        ],
+        vec!["process", "--pdf", s(&out), "--page-margin", "5", s(&a)],
+        vec![
+            "process",
+            "--pdf",
+            s(&out),
+            "--page-size",
+            "fit",
+            "--upscale",
+            s(&a),
+        ],
+        vec!["process", "--page-size", "a4", s(&a)],
+        vec!["process", "--page-margin", "5", s(&a)],
+        vec!["process", "--upscale", s(&a)],
+        vec!["process", "--title", "x", s(&a)],
     ] {
         let r = sb.run(&bad);
         assert_eq!(r.code(), 2, "{bad:?}: {}", r.stderr());
     }
     assert_eq!(tree(sb.dir.path()), before);
+}
+
+#[test]
+fn a_page_size_a_margin_and_a_title_reach_the_document() {
+    let sb = Sandbox::new();
+    let a = photo_with(&sb.work().join("a.jpg"), 1, 0.0);
+    let b = photo_with(&sb.work().join("b.jpg"), 2, 0.08);
+    let out = sb.dir.path().join("a4.pdf");
+    let r = sb.run(&[
+        "process",
+        "--pdf",
+        s(&out),
+        "--page-size",
+        "a4",
+        "--page-margin",
+        "10",
+        "--title",
+        "Receipts (May)",
+        "--json",
+        s(&a),
+        s(&b),
+    ]);
+    assert_eq!(r.code(), 0, "{}", r.stderr());
+    let doc = r.json();
+    assert_valid_manifest(&doc);
+    assert_eq!(doc["pdf"]["page_size"], "a4");
+    assert_eq!(doc["pdf"]["page_margin_mm"], 10.0);
+    assert_eq!(doc["pdf"]["upscale"], false);
+    assert_eq!(doc["pdf"]["title"], "Receipts (May)");
+    let bytes = fs::read(&out).unwrap();
+    let pages = read_pages(&bytes).unwrap();
+    assert_eq!(pages.len(), 2);
+    let m = 10.0 * 72.0 / 25.4;
+    for p in &pages {
+        let want = if p.width_px > p.height_px {
+            (841.89, 595.28)
+        } else {
+            (595.28, 841.89)
+        };
+        assert_eq!(p.media_box, want);
+        let (x, y, w, h) = p.image_box;
+        assert!(x >= m - 0.011 && y >= m - 0.011);
+        assert!(x + w <= want.0 - m + 0.011 && y + h <= want.1 - m + 0.011);
+        // Photos carry no density: nominal 300 dpi, and these crops are not enlarged.
+        assert!(w <= f64::from(p.width_px) * 72.0 / 300.0 + 0.011, "{p:?}");
+    }
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(text.contains("/Title (Receipts \\(May\\))") && text.contains("/Producer (Auto Crop)"));
+    keep("pdf_run_a4.pdf", &out);
+
+    // Letter, upscaled, the default title (the file name) and equal input gives equal bytes.
+    let args = |name: &str| {
+        let f = sb.dir.path().join(name);
+        let r = sb.run(&[
+            "process",
+            "--pdf",
+            s(&f),
+            "--page-size",
+            "letter",
+            "--upscale",
+            s(&a),
+        ]);
+        assert_eq!(r.code(), 0, "{}", r.stderr());
+        fs::read(f).unwrap()
+    };
+    let one = args("Letter one.pdf");
+    let two = args("Letter two.pdf");
+    let p = &read_pages(&one).unwrap()[0];
+    assert_eq!(p.media_box.0.min(p.media_box.1), 612.0);
+    assert!(
+        p.image_box.2 > f64::from(p.width_px) * 72.0 / 300.0 + 1.0,
+        "{p:?}"
+    );
+    let at = one
+        .windows(b"/Title (Letter one)".len())
+        .position(|w| w == b"/Title (Letter one)")
+        .expect("the title is the file name");
+    // The titles differ (the file names, same length), nothing else does.
+    let mut renamed = one.clone();
+    renamed[at + 8..at + 18].copy_from_slice(b"Letter two");
+    assert_eq!(renamed, two);
+    keep(
+        "pdf_run_letter_up.pdf",
+        &sb.dir.path().join("Letter one.pdf"),
+    );
+
+    // An empty title writes none.
+    let none = sb.dir.path().join("notitle.pdf");
+    let r = sb.run(&["process", "--pdf", s(&none), "--title", "", s(&a)]);
+    assert_eq!(r.code(), 0, "{}", r.stderr());
+    let text = String::from_utf8_lossy(&fs::read(&none).unwrap()).into_owned();
+    assert!(!text.contains("/Title") && text.contains("/Producer (Auto Crop)"));
 }

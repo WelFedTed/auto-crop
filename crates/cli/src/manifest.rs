@@ -332,6 +332,16 @@ pub struct PdfRec {
     /// `name` or `given`.
     pub order: &'static str,
     pub dpi: Option<u32>,
+    /// `fit`, `a4` or `letter`.
+    pub page_size: &'static str,
+    /// `--page-margin` in millimetres, when given.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page_margin_mm: Option<f64>,
+    /// `--upscale` was given.
+    pub upscale: bool,
+    /// `--title` when given (an empty one means no title).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     /// Pages that are the original JPEG data (no new generation).
     pub pass_through_pages: usize,
     /// Notice codes (`pdf.dpi_assumed`, `pdf.renamed`, ...).

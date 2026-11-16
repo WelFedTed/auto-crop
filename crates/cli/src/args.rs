@@ -11,6 +11,7 @@
 
 use auto_crop_core::{SplitPolicy, SplitProfile};
 use auto_crop_engine::output::{AvifChromaSetting, TiffCompressionSetting};
+use auto_crop_engine::run_pdf::{MAX_MARGIN_MM, PdfPageSize};
 use auto_crop_engine::{EngineOptions, QualityPreset, QualitySetting};
 use std::path::PathBuf;
 
@@ -232,6 +233,29 @@ pub fn process_flags() -> Vec<Flag> {
             None,
             "N",
             "Pixel density that sizes the pages of --pdf (default: each picture's own, 300 when it has none)",
+        ),
+        val(
+            "page-size",
+            None,
+            "fit|a4|letter",
+            "Page size of --pdf: each page is its picture's size (default), or an A4 or Letter sheet turned to the picture's orientation, the picture centred, shrunk to fit and never enlarged past its own resolution (see --upscale)",
+        ),
+        val(
+            "page-margin",
+            None,
+            "MM",
+            "Blank border on every side of an A4 or Letter page of --pdf, in millimetres (0 to 50, default 0)",
+        ),
+        sw(
+            "upscale",
+            None,
+            "Let a picture grow past its own resolution to fill an A4 or Letter page of --pdf (default: never enlarged)",
+        ),
+        val(
+            "title",
+            None,
+            "TEXT",
+            "The Title of the --pdf document (default: the file name without .pdf; an empty TEXT writes no title)",
         ),
         val(
             "if-exists",
@@ -1156,12 +1180,19 @@ impl PdfOrder {
     }
 }
 
-/// `--pdf FILE` with its `--order` and `--dpi`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// `--pdf FILE` with its `--order`, `--dpi`, `--page-size`, `--page-margin`, `--upscale` and
+/// `--title`.
+#[derive(Debug, Clone, PartialEq)]
 pub struct PdfArgs {
     pub file: PathBuf,
     pub order: PdfOrder,
     pub dpi: Option<u32>,
+    pub page_size: PdfPageSize,
+    /// `--page-margin` in millimetres (only with an A4 or Letter page).
+    pub margin_mm: Option<f64>,
+    pub upscale: bool,
+    /// `--title`; `None` = the file name, `Some("")` = no title.
+    pub title: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1211,12 +1242,34 @@ fn pdf_args(p: &Parsed) -> Res<Option<PdfArgs>> {
         Some(o) => return usage(format!("unknown --order `{o}` (name or given)")),
     };
     let dpi = number(p, "dpi", 36u32, 1200)?;
+    let page_size = match p.value("page-size") {
+        None | Some("fit") => PdfPageSize::Fit,
+        Some("a4") => PdfPageSize::A4,
+        Some("letter") => PdfPageSize::Letter,
+        Some(o) => return usage(format!("unknown --page-size `{o}` (fit, a4 or letter)")),
+    };
+    let margin_mm = number(p, "page-margin", 0.0f64, MAX_MARGIN_MM)?;
     let Some(file) = p.value("pdf") else {
-        if p.has("order") || p.has("dpi") {
-            return usage("`--order` and `--dpi` belong to `--pdf FILE`");
+        const OWN: [&str; 6] = [
+            "order",
+            "dpi",
+            "page-size",
+            "page-margin",
+            "upscale",
+            "title",
+        ];
+        if OWN.iter().any(|f| p.has(f)) {
+            return usage(
+                "`--order`, `--dpi`, `--page-size`, `--page-margin`, `--upscale` and `--title`                  belong to `--pdf FILE`",
+            );
         }
         return Ok(None);
     };
+    if page_size == PdfPageSize::Fit && (margin_mm.is_some() || p.has("upscale")) {
+        return usage(
+            "`--page-margin` and `--upscale` need `--page-size a4` or `letter` (with fit-to-picture              pages the page is the picture)",
+        );
+    }
     if file.is_empty() {
         return usage("`--pdf` needs a file name");
     }
@@ -1227,7 +1280,15 @@ fn pdf_args(p: &Parsed) -> Res<Option<PdfArgs>> {
     {
         return usage("`--pdf` needs a file name ending in .pdf");
     }
-    Ok(Some(PdfArgs { file, order, dpi }))
+    Ok(Some(PdfArgs {
+        file,
+        order,
+        dpi,
+        page_size,
+        margin_mm,
+        upscale: p.has("upscale"),
+        title: p.value("title").map(str::to_owned),
+    }))
 }
 
 fn process(p: &Parsed) -> Res<ProcessArgs> {

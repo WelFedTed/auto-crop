@@ -28,7 +28,7 @@ use auto_crop_core::{EnhanceMode, ErrKind, QuadWarp, ScanTriage};
 use auto_crop_engine::enhance::quad_enhances;
 use auto_crop_engine::fsplan::ReservedKeys;
 use auto_crop_engine::memory::{MIB, MemoryBudget, system_cap};
-use auto_crop_engine::run_pdf::{PdfRun, PdfRunOptions, PdfRunSaved, PdfSelect};
+use auto_crop_engine::run_pdf::{PdfPageSize, PdfRun, PdfRunOptions, PdfRunSaved, PdfSelect};
 use auto_crop_engine::store::{BackupState, Store};
 use auto_crop_engine::util::{new_id, now_secs, rfc3339};
 use auto_crop_engine::{CancelToken, Engine, Housekeeping, RunOptions, SaveOutcome, SaveTarget};
@@ -215,6 +215,14 @@ fn pdf_record(args: &ProcessArgs, saved: Option<&PdfRunSaved>) -> PdfRec {
         }),
         order: pdf.map_or("name", |p| p.order.name()),
         dpi: pdf.and_then(|p| p.dpi),
+        page_size: pdf.map_or("fit", |p| match p.page_size {
+            PdfPageSize::Fit => "fit",
+            PdfPageSize::A4 => "a4",
+            PdfPageSize::Letter => "letter",
+        }),
+        page_margin_mm: pdf.and_then(|p| p.margin_mm),
+        upscale: pdf.is_some_and(|p| p.upscale),
+        title: pdf.and_then(|p| p.title.clone()),
         pass_through_pages: saved.map_or(0, |s| s.pass_through_pages as usize),
         notices: saved.map(|s| s.notices.clone()).unwrap_or_default(),
     }
@@ -764,9 +772,12 @@ pub fn run(args: ProcessArgs, env: &Env) -> u8 {
             pdf,
             PdfRunOptions {
                 dpi: pdf.dpi,
+                title: pdf.title.clone(),
+                page_size: pdf.page_size,
+                margin_mm: pdf.margin_mm.unwrap_or(0.0),
+                upscale: pdf.upscale,
                 one_bit: args.knobs.one_bit,
                 quality: args.knobs.quality.unwrap_or_default(),
-                ..PdfRunOptions::default()
             },
             env.cancel.clone(),
             page_order(&candidates, pdf.order),

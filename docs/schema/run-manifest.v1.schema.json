@@ -67,6 +67,10 @@
         "renamed": { "type": "boolean", "description": "The named file existed, so the document got the next free name; an existing file is never replaced." },
         "order": { "enum": ["name", "given"] },
         "dpi": { "type": ["integer", "null"], "description": "`--dpi` when given." },
+        "page_size": { "enum": ["fit", "a4", "letter"], "description": "`--page-size`: `fit` = each page is its picture's size." },
+        "page_margin_mm": { "type": "number", "description": "`--page-margin` when given (A4 or Letter pages only)." },
+        "upscale": { "type": "boolean", "description": "`--upscale`: pictures may grow past their own resolution on an A4 or Letter page." },
+        "title": { "type": "string", "description": "`--title` when given; an empty string means the document has no Title." },
         "pass_through_pages": { "type": "integer", "description": "Pages that are the original JPEG data, cut without re-encoding." },
         "notices": { "type": "array", "items": { "type": "string" } }
       }
