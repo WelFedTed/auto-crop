@@ -188,6 +188,7 @@ export const ERRORS: Record<ErrorCode, string> = {
   READ_ONLY: 'This file or its folder is read-only. Try Save as copy.',
   CLOUD_NOT_LOCAL: "This file is stored in the cloud and isn't on this computer yet. Make it available offline, then try again.",
   HEVC_DECODER_MISSING: "This HEIC file needs the HEVC decoder, which isn't installed, so it can't be opened.",
+  UNSUPPORTED_HEIF_CODEC: "This HEIF file stores its picture in a format Auto Crop can't read (it reads HEVC and AV1), so it was left as it is.",
   DECODER_CRASHED: 'Reading this file crashed the safe reader, so it was skipped. The file is unchanged.',
   DECODE_TIMEOUT: 'Reading this file took too long, so it was skipped.',
   MEMORY_LIMIT: 'This picture needs more memory than Auto Crop is allowed to use, so it was skipped.',

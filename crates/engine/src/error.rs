@@ -19,6 +19,7 @@ pub fn codec_err(e: auto_crop_codecs::CodecError) -> ErrKind {
             ErrKind::UnsupportedFormat
         }
         C::HevcDecoderMissing => ErrKind::HevcDecoderMissing,
+        C::UnsupportedHeifCodec(_) => ErrKind::UnsupportedHeifCodec,
         C::Corrupt(_) => ErrKind::Corrupt,
         C::TooLarge(_) | C::LimitExceeded { .. } => ErrKind::TooLarge,
         // The UI has copy for these three (`ui/src/lib/strings.ts`): a sandboxed worker that died
@@ -33,3 +34,29 @@ pub fn codec_err(e: auto_crop_codecs::CodecError) -> ErrKind {
 }
 
 pub type Result<T> = std::result::Result<T, ErrKind>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use auto_crop_codecs::CodecError as C;
+
+    #[test]
+    fn decoder_failures_keep_their_own_codes() {
+        for (e, want) in [
+            (C::HevcDecoderMissing, ErrKind::HevcDecoderMissing),
+            (
+                C::UnsupportedHeifCodec("AVC (H.264)".into()),
+                ErrKind::UnsupportedHeifCodec,
+            ),
+            (C::WorkerCrashed("x".into()), ErrKind::DecoderCrashed),
+            (C::DecodeTimeout, ErrKind::DecodeTimeout),
+            (C::MemoryLimit, ErrKind::MemoryLimit),
+            (
+                C::UnsupportedFeature("x".into()),
+                ErrKind::UnsupportedFormat,
+            ),
+        ] {
+            assert_eq!(codec_err(e.clone()), want, "{e:?}");
+        }
+    }
+}

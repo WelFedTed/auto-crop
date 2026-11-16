@@ -36,6 +36,8 @@ pub enum ErrKind {
     CloudNotLocal,
     #[error("no HEVC decoder is installed")]
     HevcDecoderMissing,
+    #[error("the image uses a HEIF codec this build cannot decode")]
+    UnsupportedHeifCodec,
     // Decode
     #[error("the decoder process crashed")]
     DecoderCrashed,
@@ -100,7 +102,7 @@ pub enum ErrKind {
 impl ErrKind {
     /// Every variant, in declaration order (the exhaustive [`ErrKind::ordinal`] match and the test
     /// `all_lists_every_variant` keep this honest).
-    pub const ALL: [ErrKind; 34] = [
+    pub const ALL: [ErrKind; 35] = [
         ErrKind::Corrupt,
         ErrKind::UnsupportedFormat,
         ErrKind::UnsupportedFeature,
@@ -109,6 +111,7 @@ impl ErrKind {
         ErrKind::ReadOnly,
         ErrKind::CloudNotLocal,
         ErrKind::HevcDecoderMissing,
+        ErrKind::UnsupportedHeifCodec,
         ErrKind::DecoderCrashed,
         ErrKind::DecodeTimeout,
         ErrKind::MemoryLimit,
@@ -149,32 +152,33 @@ impl ErrKind {
             ErrKind::ReadOnly => 5,
             ErrKind::CloudNotLocal => 6,
             ErrKind::HevcDecoderMissing => 7,
-            ErrKind::DecoderCrashed => 8,
-            ErrKind::DecodeTimeout => 9,
-            ErrKind::MemoryLimit => 10,
-            ErrKind::ModelLoadFailed => 11,
-            ErrKind::OutOfMemory => 12,
-            ErrKind::InternalPanic => 13,
-            ErrKind::Degenerate => 14,
-            ErrKind::NoCrop => 15,
-            ErrKind::EncodeFailed => 16,
-            ErrKind::UnsupportedOutput => 17,
-            ErrKind::SourceChanged => 18,
-            ErrKind::FileInUse => 19,
-            ErrKind::DiskFull => 20,
-            ErrKind::VerifyFailed => 21,
-            ErrKind::BackupFailed => 22,
-            ErrKind::OriginalExpired => 23,
-            ErrKind::PlanStale => 24,
-            ErrKind::GroupCommitFailed => 25,
-            ErrKind::SavedSourceInUse => 26,
-            ErrKind::HeldForReview => 27,
-            ErrKind::ItemOp => 28,
-            ErrKind::NotReplaceable => 29,
-            ErrKind::SchemaTooNew => 30,
-            ErrKind::Cancelled => 31,
-            ErrKind::DeadlineExceeded => 32,
-            ErrKind::Internal => 33,
+            ErrKind::UnsupportedHeifCodec => 8,
+            ErrKind::DecoderCrashed => 9,
+            ErrKind::DecodeTimeout => 10,
+            ErrKind::MemoryLimit => 11,
+            ErrKind::ModelLoadFailed => 12,
+            ErrKind::OutOfMemory => 13,
+            ErrKind::InternalPanic => 14,
+            ErrKind::Degenerate => 15,
+            ErrKind::NoCrop => 16,
+            ErrKind::EncodeFailed => 17,
+            ErrKind::UnsupportedOutput => 18,
+            ErrKind::SourceChanged => 19,
+            ErrKind::FileInUse => 20,
+            ErrKind::DiskFull => 21,
+            ErrKind::VerifyFailed => 22,
+            ErrKind::BackupFailed => 23,
+            ErrKind::OriginalExpired => 24,
+            ErrKind::PlanStale => 25,
+            ErrKind::GroupCommitFailed => 26,
+            ErrKind::SavedSourceInUse => 27,
+            ErrKind::HeldForReview => 28,
+            ErrKind::ItemOp => 29,
+            ErrKind::NotReplaceable => 30,
+            ErrKind::SchemaTooNew => 31,
+            ErrKind::Cancelled => 32,
+            ErrKind::DeadlineExceeded => 33,
+            ErrKind::Internal => 34,
         }
     }
 
@@ -190,6 +194,7 @@ impl ErrKind {
             ErrKind::ReadOnly => "err.read_only",
             ErrKind::CloudNotLocal => "err.cloud_not_local",
             ErrKind::HevcDecoderMissing => "err.hevc_decoder_missing",
+            ErrKind::UnsupportedHeifCodec => "err.unsupported_heif_codec",
             ErrKind::DecoderCrashed => "err.decoder_crashed",
             ErrKind::DecodeTimeout => "err.decode_timeout",
             ErrKind::MemoryLimit => "err.memory_limit",
@@ -275,6 +280,66 @@ mod tests {
             serde_json::from_str::<ErrKind>("\"SCHEMA_TOO_NEW\"").unwrap(),
             ErrKind::SchemaTooNew
         );
+        assert_eq!(
+            serde_json::to_string(&ErrKind::UnsupportedHeifCodec).unwrap(),
+            "\"UNSUPPORTED_HEIF_CODEC\""
+        );
+    }
+
+    /// The UI mirrors every code in `ui/src/lib/types.ts` (`ErrorCode`) and words it in
+    /// `ui/src/lib/strings.ts` (`ERRORS`). A variant added here without both fails this test.
+    #[test]
+    fn the_ui_lists_exactly_these_codes_in_this_order_with_copy() {
+        let ui = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ui/src/lib");
+        let read =
+            |f: &str| std::fs::read_to_string(ui.join(f)).unwrap_or_else(|e| panic!("{f}: {e}"));
+        let want: Vec<String> = ErrKind::ALL
+            .iter()
+            .map(|k| {
+                serde_json::to_value(k)
+                    .unwrap()
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            })
+            .collect();
+
+        let types = read("types.ts");
+        let block = types
+            .split("export type ErrorCode =")
+            .nth(1)
+            .expect("ErrorCode in types.ts");
+        let mut in_types: Vec<String> = Vec::new();
+        for line in block.lines() {
+            // comments hold quotes and semicolons; the union ends at the line with the `;`
+            let code = line.split("//").next().unwrap_or("");
+            if let Some(name) = code.split('\'').nth(1) {
+                in_types.push(name.to_owned());
+            }
+            if code.contains(';') {
+                break;
+            }
+        }
+        assert_eq!(in_types, want, "ui/src/lib/types.ts ErrorCode");
+
+        let strings = read("strings.ts").replace("\r\n", "\n");
+        let block = strings
+            .split("export const ERRORS: Record<ErrorCode, string> = {")
+            .nth(1)
+            .and_then(|r| r.split("\n};").next())
+            .expect("ERRORS in strings.ts");
+        let mut in_strings: Vec<String> = block
+            .lines()
+            .filter(|l| {
+                l.starts_with("  ") && !l.starts_with("   ") && !l.trim_start().starts_with("//")
+            })
+            .filter_map(|l| l.trim_start().split(':').next())
+            .map(str::to_owned)
+            .collect();
+        in_strings.sort();
+        let mut sorted = want.clone();
+        sorted.sort();
+        assert_eq!(in_strings, sorted, "ui/src/lib/strings.ts ERRORS");
     }
 
     #[test]

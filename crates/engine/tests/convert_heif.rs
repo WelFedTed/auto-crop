@@ -20,7 +20,7 @@ use auto_crop_engine::convert::{
 };
 use auto_crop_engine::convert_batch::ConvertStatus;
 use auto_crop_engine::store::Store;
-use auto_crop_engine::{AppPaths, DerivedAction, Engine, ItemView, RestoreMode};
+use auto_crop_engine::{AppPaths, DerivedAction, Engine, ErrKind, ItemView, RestoreMode};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -277,4 +277,38 @@ fn a_batch_of_heic_and_avif_files_is_previewed_and_converted_with_the_decoder_pr
         assert!(e.dir.join(n).exists(), "{n}");
     }
     assert!(s.results.iter().all(|r| r.status != ConvertStatus::Failed));
+}
+
+#[test]
+fn a_heif_coded_for_a_decoder_the_build_lacks_fails_alone_with_its_own_code_and_stays_byte_identical()
+ {
+    // M6.44: AVC, JPEG, JPEG 2000 and VVC items have no decoder in this libheif. The header walk
+    // names the codec in the parent, so the file fails with `UNSUPPORTED_HEIF_CODEC` (not a
+    // generic corrupt-file error), the file next to it converts, and the source is untouched.
+    use auto_crop_codecs::fixtures::HeifSpec;
+    let e = env();
+    let mut spec = HeifSpec::heic(64, 48);
+    spec.codec = *b"avc1";
+    let avc = spec.build();
+    let bad = put(&e.dir, "from_phone.heic", &avc);
+    put(&e.dir, "tile.avif", &fixture("gradient-444-48x32.avif"));
+    let one = convert(&e, &bad, ConvertTarget::Jpg, Placement::Replace);
+    match one {
+        Err(ConvertError::Failed(ErrKind::UnsupportedHeifCodec, _)) => {}
+        other => panic!("{other:?}"),
+    }
+    let added = e.engine.convert_add(std::slice::from_ref(&e.dir), false);
+    assert_eq!(added.added, 2);
+    let s = e
+        .engine
+        .convert_run(&ConvertOptions::default(), "AVC HEIF", 2, &|_| {});
+    assert_eq!((s.converted, s.failed), (1, 1), "{s:#?}");
+    let failed = s
+        .results
+        .iter()
+        .find(|r| r.status == ConvertStatus::Failed)
+        .unwrap();
+    assert_eq!(failed.name, "from_phone.heic");
+    assert_eq!(failed.code.as_deref(), Some("UNSUPPORTED_HEIF_CODEC"));
+    assert_eq!(fs::read(&bad).unwrap(), avc);
 }

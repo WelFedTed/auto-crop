@@ -147,6 +147,17 @@ fn check_size(width: u32, height: u32, limits: &DecodeLimits) -> Result<(), Code
     Ok(())
 }
 
+/// A HEIF image coded with a codec this build has no decoder for is refused from its header, in
+/// the parent, before any C library or worker sees the file (ROADMAP M6.44).
+pub(crate) fn heif_refusal(h: &Header) -> Option<CodecError> {
+    match h.heif.as_ref()?.codec {
+        parse::HeifCodec::NoDecoder(name) => {
+            Some(CodecError::UnsupportedHeifCodec(name.to_owned()))
+        }
+        _ => None,
+    }
+}
+
 /// Every check that precedes the pixel decoder: file size, header probe, pixel cap, memory
 /// estimate, unsupported features and the plausibility rules that stop a tiny file from reserving
 /// a huge buffer. Shared by the `image`/zune path and the libjpeg-turbo path.
@@ -159,6 +170,9 @@ pub(crate) fn precheck(
     if let Some(info) = &h.heif {
         // The decoder works at the `ispe` size, before the clean aperture crops it.
         check_size(info.ispe.0, info.ispe.1, limits)?;
+    }
+    if let Some(e) = heif_refusal(&h) {
+        return Err(e);
     }
     if let Some(reason) = &h.unsupported {
         return Err(CodecError::UnsupportedFeature(reason.clone()));

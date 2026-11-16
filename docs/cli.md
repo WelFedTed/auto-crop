@@ -531,6 +531,7 @@ rest of its registry. From this tool:
 | `ALREADY_PROCESSED` | skipped | The file is an output of an earlier run (`--reprocess` overrides). |
 | `NOT_REPLACEABLE` | skipped | The source is never replaced in place (format with no writer, multi-page). |
 | `UNSUPPORTED_FORMAT` | skipped | Not an image this build reads. |
+| `HEVC_DECODER_MISSING`, `UNSUPPORTED_HEIF_CODEC` | skipped | A HEIC without the HEVC decoder; a HEIF coded as AVC, JPEG, JPEG 2000 or VVC, which this build cannot decode. The file is left as it is. |
 | `CANCELLED` | skipped | The run was interrupted before this file. |
 | `EXISTS` | skipped | `--if-exists skip` and the name was taken. |
 | `LINK` | skipped | A link or junction named directly. |

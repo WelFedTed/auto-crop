@@ -126,7 +126,7 @@ fn map_err(e: ffi::HeifError, codec: HeifCodec, limits: &DecodeLimits, pixels: u
         }
         // AVC, JPEG, JPEG 2000 and VVC items: libheif is built without those decoders.
         (ffi::ERR_UNSUPPORTED_FEATURE, ffi::SUBERR_UNSUPPORTED_CODEC) => {
-            CodecError::UnsupportedFeature(format!("HEIF image codec: {}", e.message))
+            CodecError::UnsupportedHeifCodec(e.message)
         }
         (ffi::ERR_UNSUPPORTED_FEATURE, _) | (ffi::ERR_PLUGIN_LOADING, _) => {
             CodecError::UnsupportedFeature(e.message)

@@ -615,3 +615,48 @@ fn lossy_webp_made_by_libwebp_decodes_within_the_provisional_psnr() {
     eprintln!("image-webp vs libwebp decode of a lossy file: {p:.1} dB");
     assert!(p >= 40.0, "PSNR {p} dB");
 }
+
+#[test]
+fn a_heif_image_coded_for_a_decoder_this_build_lacks_is_refused_from_its_header() {
+    // M6.44: AVC, JPEG, JPEG 2000 and VVC items have no decoder in the libheif this project
+    // builds, so the answer is the typed `UnsupportedHeifCodec` (named), in the parent, before any
+    // C library or worker sees the file. The header walk runs in every build, so the refusal
+    // itself is checked in every build; with the `heif` feature the public decode agrees.
+    let limits = crate::DecodeLimits::default();
+    for (typ, name) in [
+        (*b"avc1", "AVC (H.264)"),
+        (*b"jpeg", "JPEG"),
+        (*b"j2k1", "JPEG 2000"),
+        (*b"vvc1", "VVC (H.266)"),
+    ] {
+        for tiles in [None, Some(4)] {
+            let mut spec = HeifSpec::heic(64, 48);
+            spec.codec = typ;
+            spec.grid_tiles = tiles;
+            let bytes = spec.build();
+            let label = format!("{name} grid={tiles:?}");
+            crate::probe(&bytes).unwrap_or_else(|e| panic!("{label}: probe {e}"));
+            let h = crate::parse::parse(&bytes, Format::Heic, &limits).unwrap();
+            let want = CodecError::UnsupportedHeifCodec(name.to_owned());
+            assert_eq!(
+                crate::decode::heif_refusal(&h),
+                Some(want.clone()),
+                "{label}"
+            );
+            #[cfg(feature = "heif")]
+            assert_eq!(decode(&bytes).unwrap_err(), want, "{label}");
+        }
+    }
+    // HEVC and AV1 are never refused by this rule (the decoders are there, or HEVC is missing
+    // for its own reason), and neither is a codec the walk does not know.
+    for (mut spec, label) in [
+        (HeifSpec::heic(64, 48), "hevc"),
+        (HeifSpec::avif(64, 48), "av1"),
+    ] {
+        let h = crate::parse::parse(&spec.build(), Format::Avif, &limits).unwrap();
+        assert_eq!(crate::decode::heif_refusal(&h), None, "{label}");
+        spec.codec = *b"unci";
+        let h = crate::parse::parse(&spec.build(), Format::Avif, &limits).unwrap();
+        assert_eq!(crate::decode::heif_refusal(&h), None, "unci after {label}");
+    }
+}

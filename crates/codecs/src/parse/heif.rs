@@ -122,6 +122,19 @@ const IMAGE_TYPES: [&Fourcc; 11] = [
     b"tmap",
 ];
 
+/// The codec an image item type stands for.
+fn codec_of(typ: &Fourcc) -> HeifCodec {
+    match typ {
+        b"av01" => HeifCodec::Av1,
+        b"hvc1" | b"hev1" => HeifCodec::Hevc,
+        b"avc1" => HeifCodec::NoDecoder("AVC (H.264)"),
+        b"jpeg" => HeifCodec::NoDecoder("JPEG"),
+        b"j2k1" => HeifCodec::NoDecoder("JPEG 2000"),
+        b"vvc1" => HeifCodec::NoDecoder("VVC (H.266)"),
+        _ => HeifCodec::Other,
+    }
+}
+
 /// A transformative property of the primary item, in the order the file lists them.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Xform {
@@ -345,17 +358,10 @@ fn parse_meta(
     let (width, height) = if d.r % 2 == 1 { (disp.1, disp.0) } else { disp };
 
     let codec = match primary_item.typ {
-        t if &t == b"av01" => HeifCodec::Av1,
-        t if &t == b"hvc1" || &t == b"hev1" => HeifCodec::Hevc,
-        t if &t == b"grid" || &t == b"iovl" => match tile0
+        t if &t == b"grid" || &t == b"iovl" => tile0
             .and_then(|id| items.iter().find(|i| i.id == id))
-            .map(|i| i.typ)
-        {
-            Some(t) if &t == b"av01" => HeifCodec::Av1,
-            Some(t) if &t == b"hvc1" || &t == b"hev1" => HeifCodec::Hevc,
-            _ => HeifCodec::Other,
-        },
-        _ => HeifCodec::Other,
+            .map_or(HeifCodec::Other, |i| codec_of(&i.typ)),
+        t => codec_of(&t),
     };
 
     // Exif and XMP items are not decoded, but a huge one is refused like any metadata blob.

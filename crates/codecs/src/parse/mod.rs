@@ -34,7 +34,11 @@ pub(crate) enum IccLoc {
 pub(crate) enum HeifCodec {
     Av1,
     Hevc,
-    /// AVC, JPEG, JPEG 2000, VVC, uncompressed, unknown: whatever libheif was built with decides.
+    /// AVC, JPEG, JPEG 2000 or VVC (the name is the codec's): libheif is built without a decoder
+    /// for these (`xtask build-native` is decode-only, dav1d and libde265), so a decode is refused
+    /// from the header alone ([`CodecError::UnsupportedHeifCodec`]).
+    NoDecoder(&'static str),
+    /// Uncompressed, unknown: whatever libheif was built with decides.
     Other,
 }
 

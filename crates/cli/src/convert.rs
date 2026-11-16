@@ -154,6 +154,7 @@ fn record_of(
                 ErrKind::UnsupportedFormat
                     | ErrKind::UnsupportedFeature
                     | ErrKind::HevcDecoderMissing
+                    | ErrKind::UnsupportedHeifCodec
             ) {
                 Status::Skipped
             } else {

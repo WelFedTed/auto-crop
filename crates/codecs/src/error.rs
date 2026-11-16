@@ -19,6 +19,11 @@ pub enum CodecError {
     /// build, ADR-0005). AVIF still decodes; the UI points to the operating system's decoder.
     #[error("no HEVC decoder is installed (the libde265 plugin of libheif was not found)")]
     HevcDecoderMissing,
+    /// A HEIF file whose image is coded with a codec this build has no decoder for (AVC, JPEG,
+    /// JPEG 2000, VVC: libheif is built decode-only with dav1d and libde265). The text names the
+    /// codec; HEVC without its plugin is [`CodecError::HevcDecoderMissing`].
+    #[error("unsupported HEIF image codec: {0}")]
+    UnsupportedHeifCodec(String),
     /// A recognised format that uses a feature this build cannot decode (12-bit JPEG, ...).
     #[error("unsupported feature: {0}")]
     UnsupportedFeature(String),
@@ -61,6 +66,7 @@ impl CodecError {
             CodecError::Unsupported => "unsupported",
             CodecError::NotDecodable(_) => "not_decodable",
             CodecError::HevcDecoderMissing => "hevc_decoder_missing",
+            CodecError::UnsupportedHeifCodec(_) => "unsupported_heif_codec",
             CodecError::UnsupportedFeature(_) => "unsupported_feature",
             CodecError::Corrupt(_) => "corrupt",
             CodecError::TooLarge(_) => "too_large",

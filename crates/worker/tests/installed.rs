@@ -62,6 +62,21 @@ fn the_parent_checks_run_before_the_worker_is_asked_and_after_it_answers() {
     assert_eq!(d.pool().unwrap().status().jobs, before);
 }
 
+#[cfg(feature = "heif")]
+#[test]
+fn a_heif_codec_the_build_lacks_is_named_by_the_parent_and_the_worker_is_not_asked() {
+    let d = install();
+    let before = d.pool().unwrap().status().jobs;
+    let mut spec = fixtures::HeifSpec::heic(64, 48);
+    spec.codec = *b"avc1";
+    let r = auto_crop_codecs::decode_with(&spec.build(), &DecodeLimits::default());
+    assert_eq!(
+        r.unwrap_err(),
+        CodecError::UnsupportedHeifCodec("AVC (H.264)".into())
+    );
+    assert_eq!(d.pool().unwrap().status().jobs, before);
+}
+
 #[test]
 fn the_hostile_corpus_through_the_worker_never_hurts_the_parent() {
     let d = install();

@@ -87,6 +87,11 @@ test('every error code the engine can send has its own message (read from crates
   }
 });
 
+test('a HEIF codec this build cannot decode says so, and that the file was left as it is', () => {
+  assert.match(errorMessage('UNSUPPORTED_HEIF_CODEC'), /HEIF/);
+  assert.match(errorMessage('UNSUPPORTED_HEIF_CODEC'), /left as it is/);
+});
+
 test('the multi-item error codes read as plain language that says what to do', () => {
   assert.match(errorMessage('HELD_FOR_REVIEW'), /held for review/i);
   assert.match(errorMessage('HELD_FOR_REVIEW'), /Accept split/);

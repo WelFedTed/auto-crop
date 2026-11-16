@@ -71,7 +71,10 @@ pub fn err_code(e: ErrKind) -> String {
 fn is_unsupported(k: ErrKind) -> bool {
     matches!(
         k,
-        ErrKind::UnsupportedFormat | ErrKind::UnsupportedFeature | ErrKind::HevcDecoderMissing
+        ErrKind::UnsupportedFormat
+            | ErrKind::UnsupportedFeature
+            | ErrKind::HevcDecoderMissing
+            | ErrKind::UnsupportedHeifCodec
     )
 }
 
@@ -333,6 +336,13 @@ mod tests {
         assert_eq!(err_code(ErrKind::HeldForReview), "HELD_FOR_REVIEW");
         assert_eq!(err_code(ErrKind::Corrupt), "CORRUPT");
         assert!(is_unsupported(ErrKind::UnsupportedFormat) && !is_unsupported(ErrKind::Corrupt));
+        for k in [ErrKind::HevcDecoderMissing, ErrKind::UnsupportedHeifCodec] {
+            assert!(is_unsupported(k), "{k:?} is a skip, not a failure");
+        }
+        assert_eq!(
+            err_code(ErrKind::UnsupportedHeifCodec),
+            "UNSUPPORTED_HEIF_CODEC"
+        );
     }
 
     #[test]

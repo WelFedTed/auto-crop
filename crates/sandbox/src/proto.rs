@@ -399,6 +399,7 @@ const ERR_PANIC: u8 = 9;
 const ERR_TIMEOUT: u8 = 10;
 const ERR_MEMORY: u8 = 11;
 const ERR_CRASHED: u8 = 12;
+const ERR_UNSUPPORTED_HEIF_CODEC: u8 = 13;
 
 fn limit_code(l: Limit) -> u64 {
     match l {
@@ -441,6 +442,7 @@ pub fn err_to_wire(job_id: u64, e: &CodecError) -> ErrReply {
         CodecError::NotDecodable(f) => (ERR_NOT_DECODABLE, 0, 0, f.extension().to_owned()),
         CodecError::HevcDecoderMissing => (ERR_HEVC_MISSING, 0, 0, String::new()),
         CodecError::UnsupportedFeature(m) => (ERR_UNSUPPORTED_FEATURE, 0, 0, m.clone()),
+        CodecError::UnsupportedHeifCodec(m) => (ERR_UNSUPPORTED_HEIF_CODEC, 0, 0, m.clone()),
         CodecError::Corrupt(m) => (ERR_CORRUPT, 0, 0, m.clone()),
         CodecError::TooLarge(px) => (ERR_TOO_LARGE, *px, 0, String::new()),
         CodecError::LimitExceeded { limit, actual, cap } => {
@@ -473,6 +475,7 @@ pub fn err_from_wire(r: &ErrReply) -> CodecError {
             .map_or(CodecError::Unsupported, |f| CodecError::NotDecodable(*f)),
         ERR_HEVC_MISSING => CodecError::HevcDecoderMissing,
         ERR_UNSUPPORTED_FEATURE => CodecError::UnsupportedFeature(r.text.clone()),
+        ERR_UNSUPPORTED_HEIF_CODEC => CodecError::UnsupportedHeifCodec(r.text.clone()),
         ERR_CORRUPT => CodecError::Corrupt(r.text.clone()),
         ERR_TOO_LARGE => CodecError::TooLarge(r.a),
         ERR_LIMIT => CodecError::LimitExceeded {
@@ -733,6 +736,7 @@ mod tests {
             CodecError::NotDecodable(Format::Heic),
             CodecError::HevcDecoderMissing,
             CodecError::UnsupportedFeature("x".into()),
+            CodecError::UnsupportedHeifCodec("AVC (H.264)".into()),
             CodecError::Corrupt("c".into()),
             CodecError::TooLarge(123),
             CodecError::LimitExceeded {

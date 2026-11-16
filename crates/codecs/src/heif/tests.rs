@@ -274,6 +274,16 @@ fn libheif_errors_map_to_typed_codec_errors() {
     ));
     assert!(matches!(
         map_err(err(4, 3000, "unsupported codec"), HeifCodec::Other, &l, 1),
+        CodecError::UnsupportedHeifCodec(m) if m == "unsupported codec"
+    ));
+    // any other unsupported feature of libheif stays one
+    assert!(matches!(
+        map_err(
+            err(4, 3001, "unsupported bit depth"),
+            HeifCodec::Other,
+            &l,
+            1
+        ),
         CodecError::UnsupportedFeature(_)
     ));
     assert!(matches!(
@@ -443,7 +453,9 @@ fn files_in_the_compact_mini_layout_are_a_typed_unsupported_feature() {
 #[test]
 fn unsupported_codecs_in_the_libheif_fuzz_corpus_are_typed_errors() {
     // HEIF files whose image is AVC, JPEG, JPEG 2000 or VVC: libheif is built without those
-    // decoders, so each is `UnsupportedFeature` (never a panic, never a silent success).
+    // decoders, so each is a typed refusal (never a panic, never a silent success); the parent's
+    // header walk names the codec (`UnsupportedHeifCodec`, M6.44) for the files it understands.
+    let mut named = 0;
     for rel in [
         "fuzzing/data/corpus/avc32.heif",
         "fuzzing/data/corpus/jpeg32.heif",
@@ -454,8 +466,10 @@ fn unsupported_codecs_in_the_libheif_fuzz_corpus_are_typed_errors() {
             return;
         };
         match decode(&bytes) {
+            Err(CodecError::UnsupportedHeifCodec(_)) => named += 1,
             Err(CodecError::UnsupportedFeature(_)) | Err(CodecError::Corrupt(_)) => {}
             other => panic!("{rel}: {other:?}"),
         }
     }
+    assert!(named >= 1, "no sample was refused by codec name");
 }
