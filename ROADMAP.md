@@ -22,24 +22,24 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | Milestone | Title | Release | Platforms | Size | Progress |
 |---|---|---|---|---|---|
 | P | Planning | none | documents | - | 4 / 5 (80%) |
-| M0 | Foundations and week-1 spikes | none | CI only (Windows, macOS, Linux) | XL | 49 / 94 (52%) |
+| M0 | Foundations and week-1 spikes | none | CI only (Windows, macOS, Linux) | XL | 50 / 94 (53%) |
 | M1 | Measurement harness and core engine skeleton | none | CI only (Windows, macOS, Linux) | XL | 54 / 94 (57%) |
 | M2 | Classical pipeline, safe writes and CLI | v0.1.0 | Windows 10/11 x64 | L | 16 / 93 (17%) |
 | M3 | GUI alpha: single-image editor | v0.2.0 | Windows 10/11 x64 | XL | 0 / 94 (0%) |
 | M4 | ML detection, orientation and calibrated confidence | v0.3.0 | Windows 10/11 x64 | XL | 1 / 91 (1%) |
 | M5 | Batch review workflow, backups panel and trust features | v0.4.0 | Windows 10/11 x64 | L | 0 / 94 (0%) |
-| M6 | HEIC/HEIF, sandboxed decoding and format read breadth | v0.5.0 | Windows 10/11 x64 | XL | 0 / 96 (0%) |
+| M6 | HEIC/HEIF, sandboxed decoding and format read breadth | v0.5.0 | Windows 10/11 x64 | XL | 2 / 98 (2%) |
 | M7 | Enhancement and bilevel output | v0.6.0 | Windows 10/11 x64 | XL | 3 / 90 (3%) |
-| M8 | macOS preview | v0.7.0 | macOS 12+ arm64 (Apple silicon) | L | 0 / 91 (0%) |
-| M9 | Linux preview | v0.8.0 | Linux x86_64 (Ubuntu 22.04+, Fedora; arm64 best-effort) | XL | 0 / 92 (0%) |
+| M8 | macOS preview | v0.7.0 | macOS 12+ arm64 (Apple silicon) | L | 0 / 92 (0%) |
+| M9 | Linux preview | v0.8.0 | Linux x86_64 (Ubuntu 22.04+, Fedora; arm64 best-effort) | XL | 0 / 93 (0%) |
 | M10 | Multi-item splitting | v0.9.0 | Windows 10/11 x64, macOS arm64, Linux x64 | XL | 12 / 89 (13%) |
-| M11 | Output formats, PDF and metadata policy | v0.10.0 | Windows 10/11 x64, macOS 12+ arm64, Linux x86_64 | XL | 0 / 91 (0%) |
+| M11 | Output formats, PDF and metadata policy | v0.10.0 | Windows 10/11 x64, macOS 12+ arm64, Linux x86_64 | XL | 2 / 93 (2%) |
 | M12 | Curved-page dewarp | v0.11.0 | Windows 10/11 x64, macOS 12+ arm64, Linux x86_64 | XL | 1 / 88 (1%) |
 | M13 | Hardening, accessibility, i18n, docs, legal and 1.0 release | v1.0.0 | Windows 10/11 x64, macOS 12+ arm64, Linux x86_64 | XL | 0 / 93 (0%) |
 | X | Continuous and cross-cutting | - | - | - | 0 / 42 (0%) |
 | X | Post-1.0 backlog (1.x) | - | - | - | 0 / 43 (0%) |
-| X | Spikes and open decisions | - | - | - | 0 / 28 (0%) |
-| **Total** | | | | | **140 / 1408 (9%)** |
+| X | Spikes and open decisions | - | - | - | 1 / 28 (3%) |
+| **Total** | | | | | **146 / 1414 (10%)** |
 <!-- progress:end -->
 
 ## Why this order
@@ -176,7 +176,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [ ] **GATE:** The ort vs rten vs tract ADR records measured 256x256 MobileNetV3+FPN-class latency, cold-load, binary size, op coverage, the int8 check method with a smoke result, and the macOS x86_64 and Windows arm64 story; ONE backend is chosen behind a trait.
 - [x] **GATE:** Decode-only libheif >= 1.23.5 plus libde265 build as separate shared libraries on `windows-2025`, `macos-latest` and `ubuntu-22.04` via CMake, and `cargo xtask check-native` proves no x265 or x264 symbols and no GPL libraries are linked.
 - [ ] **GATE:** turbojpeg builds on three OSes with libjpeg-turbo >= 3.1.4 and a CI version assertion; the Lanczos ADR records speed and memory at 12 MP for kornia-imgproc f32 vs own strip-wise u8/u16 against the OpenCV oracle (PROVISIONAL: PSNR >= 45 dB, <= 90 ms at 8 threads).
-- [ ] **GATE:** The sandbox ADR records per-OS feasibility (job object + restricted token or AppContainer, Landlock + seccomp, `sandbox_init`) with escape-test results, the achieved level per OS and the M6, M8 and M9 work implied.
+- [x] **GATE:** The sandbox ADR records per-OS feasibility (job object + restricted token or AppContainer, Landlock + seccomp, `sandbox_init`) with escape-test results, the achieved level per OS and the M6, M8 and M9 work implied. Evidence: ADR-0006, `sandbox.yml` run 36850969381.
 - [x] **GATE:** The 8:1 long-strip failure rate per aspect bucket (4:1, 6:1, 8:1, 10:1) is recorded as an M4 input, the ML part marked dev-only or skipped per the MakeACopy licence outcome.
 - [ ] **GATE:** Writing plans are approved for the HEVC legal read, the private golden set (consent and redaction) and model provenance, and the MakeACopy DocQuadNet weights licence has an answer (a reply, or a documented no-reply after 14 days).
 - [ ] **GATE:** Tier-M is defined and the Apple-silicon access decision made; >= 3 real files per size class of the 12/48/100 MP corpus logged with licences (gaps recorded); the HEIC plan is merged; the golden-set dry run publishes aggregates only and the fork-PR test exposes no secret.
@@ -851,7 +851,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [ ] **M6.02 HEVC decision ADR** - ADR `hevc-bundling`: official builds always bundle libde265 (B12, A-5); records the read's outcome, who accepted it, when, and a review date. A `no-hevc`-only release or post-claim change needs the owner's recorded decision; no automatic fallback.
 - [ ] **M6.03 Legal gate in release tooling** - `xtask check-legal-gate` fails packaging and the release workflow unless the ADR records the read or the owner's decision to ship with it due before 1.0; it never switches to `no-hevc` (A-5). Test: flip the ADR on a fixture branch.
 - [ ] **M6.04 Patent-risk note** - Add the PLAN 8.7 paragraph (ADR-linked) to README and SECURITY: HEIC usually uses HEVC (pool patents); official builds include libde265; if you distribute it or are concerned, use `no-hevc` or your OS decoder; not legal advice. `xtask docs-check` greps a marker.
-- [ ] **M6.05 Windows job object** - `windows` 0.62: one job per worker with kill-on-close, active-process limit 1, UI restrictions and a per-item memory limit from the probed size. Test: a worker allocating past its limit is killed, the parent sees `MemoryLimit`, the app keeps running.
+- [x] **M6.05 Windows job object** - `windows` 0.62: one job per worker with kill-on-close, active-process limit 1, UI restrictions and a per-item memory limit from the probed size. Test: a worker allocating past its limit is killed, the parent sees `MemoryLimit`, the app keeps running. Result: limit follows the pixel cap, not the probe; `worker.yml` run 38801697317.
 - [ ] **M6.06 Restricted token and mitigations** - `CreateRestrictedToken` (privileges dropped, admin SIDs deny-only), low integrity, only pipe and shared-memory handles inherited, mitigations (no win32k, no remote image loads; PROVISIONAL), no WER dialog. Test installed and portable layouts.
 - [ ] **M6.07 AppContainer spike and decision** - Extends M0.23: act on the M0.21/M0.23 AppContainer result in a 2-day check of portable-layout ACLs, handle inheritance, shared memory and WIC codec loading; ADR: adopt it, or keep job+token and state what that level does not block.
 - [ ] **M6.08 Loader hardening** - `SetDefaultDllDirectories(APPLICATION_DIR | SYSTEM32)` in app and worker; plugin directory loaded by one absolute path before the sandbox applies; `LIBHEIF_PLUGIN_PATH` and extra `PATH` dropped. Test: a planted `heif.dll` or plugin in cwd or `PATH` never loads.
@@ -927,7 +927,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [ ] **M6.59 Reference decodes and dE harness** - `xtask heic-eval`: non-libheif references: ImageIO on the maintainer's Mac only (references stay private), colour charts, and WIC only with a free or OEM HEVC extension, else UNMEASURED (never buy, B15). CIEDE2000 and tag diff (colour GATE).
 - [ ] **M6.60 HEIF fixture generator** - macOS CI makes public HEICs via `sips`/ImageIO (no x265; <= 5 MB, CC0): 8 orientations, grid, P3, 10-bit, alpha, 64x64 self-test; a Rust mutator adds unsupported-codec, multi-image, sequence, bad-`ispe` variants. SHA-256s in `testdata/heif/MANIFEST`.
 - [ ] **M6.61 Hostile HEIF corpus** - 60000 x 60000 headers, tile, item-count, `iloc` and profile bombs, a solid ~90 MP HEIC, one above 100 MP. Header bombs rejected within 1 s and 64 MB; > 100 MP rejected pre-decode; the 90 MP file is killed under a low memory cap, app up. Every Windows PR.
-- [ ] **M6.62 Worker versus in-process differential test** - The `worker` lib exposes the same decode in-process; every fixture (and corpus file, on the maintainer's Mac) decodes both ways with identical pixels, metadata blobs and notices; a mismatch means IPC or shared memory corrupts data.
+- [x] **M6.62 Worker versus in-process differential test** - The `worker` lib exposes the same decode in-process; every fixture (and corpus file, on the maintainer's Mac) decodes both ways with identical pixels, metadata blobs and notices; a mismatch means IPC or shared memory corrupts data. Result: `crates/worker/tests/pool.rs`, run 38801697317; the Mac corpus is M6.75.
 - [ ] **M6.63 cargo-fuzz targets** - Adds to M1.70: `heif_probe`, `sniff`, `exif_patch`, `icc_validate`, `worker_protocol` (parent side) and `heic_glue` (libheif under ASan on Linux, fixture-seeded). Nightly 1 h per target, 60 s PR smoke on `codecs`/`worker`, crashers replayed on Windows CI.
 - [ ] **M6.64 Speed benchmarks** - Tier-M, M0.48 HEIC files (PROVISIONAL): draft <= 150 ms, 12 MP overlay (decode+proxy+analysis) <= 700 ms (48 MP: 400 ms, 3 s), batch HEIC to JPG >= 2.5 img/s on 6 cores (5 = non-gating stretch); tune workers x threads (3 x 2 start); gungraun on glue kernels.
 - [ ] **M6.65 Batch memory test** - 100 x 48 MP HEIC batch (real files duplicated under distinct names if needed) on an 8 GB Windows VM, or an outer job object capped at 8 GB in CI. Assert no OOM, no worker killed for memory, oversize jobs ran alone (budget log); record peak commit.
@@ -953,6 +953,8 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [ ] **M6.78 `docs/heic.md`** - Guide: engine, colour and wide gamut, HDR and gain maps, Live Photo, burst, multi-image, orientation, privacy. Says what "Strip location" removes (GPS IFD, XMP GPS, IPTC location) and what stays (Make, Model, serials, MakerNote, dates); full policy in M11.
 - [ ] **M6.79 `docs/replacing-libheif.md`** - Windows steps to swap `heif.dll`, the plugin and `libde265.dll`, rebuild from `native-sources` and verify with `doctor`; macOS, AppImage and Flatpak sections are added in M8 and M9.
 - [ ] **M6.80 SECURITY.md decoder section** - What the worker isolates and what the Windows level does not block (restricted token: network, user files); caps, reporting a bad file, patch SLA, stale-build banner; fixes for `HevcDecoderMissing`, "could not be decoded safely", antivirus quarantine.
+- [ ] **M6.86 Engine-level worker faults** - Extends M6.10: crash, hang and over-allocation through the engine fail only their items (`DecoderCrashed|DecodeTimeout|MemoryLimit`), sources byte-identical.
+- [ ] **M6.87 Worker boundary proofs** - Extends M6.41-M6.43: CI `cargo tree -i` shows who links libheif; a write-past-mapping test and `miri` for `Shm`; a real 1,000-crash soak (240 decodes today).
 
 ### Exit gate
 
@@ -1197,6 +1199,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [ ] **M8.75 macOS known limitations** - ad-hoc signing friction, file-access prompts that may return after updates, Intel status, macOS 12 coverage (M8.72), no WKWebView UI automation, ImageIO opt-in, resource forks, Live Photo video and gain maps dropped; linked from install page and notes.
 - [ ] **M8.76 Build from source on macOS** - `docs/BUILDING-macos.md` and the `xtask doctor` macOS checks (Xcode CLT, CMake, Ninja, Node; NASM only for Intel) with Homebrew hints; a fresh Apple silicon machine builds and launches the app from the document alone in < 45 min (PROVISIONAL).
 - [ ] **M8.77 Results page, README row, release notes** - results page (M8.70 deltas, baselines), README install row (DMG, tap, "ad-hoc signed, not notarised", Intel status), ROADMAP counts in the same PR; v0.7.0 notes state caveats and which hardware gates ran on real hardware; lychee passes.
+- [ ] **M8.79 macOS worker numbers** - Extends M8.30-M8.33: measure the 100-respawn RSS leak, the cap + 25% kill, 100 images with 5 faults, probes on macOS 14/15.
 
 ### Exit gate
 - [ ] **GATE (G6):** Accuracy - M2-M7 accuracy gates re-run on `macos-latest` and the maintainer's real Mac: mean IoU within 0.2 pt of Windows, per-slice failures within one image, kernel and enhancement gates at the same thresholds, every delta explained (M8.62, M8.63, M8.64, M8.70).
@@ -1323,6 +1326,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [ ] **M9.75 Touch known-issues page** - `docs/linux/touch-known-issues.md` from M9.35, M9.36, M9.27: devices, sessions, WebKitGTK versions, what works and fails, workarounds, and the B8 statement: touch best-effort, mouse, trackpad and keyboard supported; linked from README and install page.
 - [ ] **M9.76 README, CONTRIBUTING and release notes** - README Linux install table and preview status, CONTRIBUTING build steps (apt/dnf, devcontainer, `xtask build-native`) and `v0.8.0` notes with known issues (touch, Wayland, arm64, HEVC); a contributor builds on 22.04 from the README alone.
 - [ ] **M9.77 Maintainer packaging guide** - `docs/packaging/linux.md`: local builds, Flatpak runtime end-of-life and bump, GPG key custody and rotation, updater minisign key, WebKitGTK re-test, deferred (apt/dnf repositories, Flathub after 1.0, B17); a dry-run GNOME runtime bump passes M9.70.
+- [ ] **M9.81 HEIC and AVIF under seccomp on aarch64** - Extends M9.50-M9.51: run the `heif` job of `worker.yml` on `ubuntu-22.04-arm`. Accept: fixtures decode, no denied call but the probes.
 
 ### Exit gate
 - [ ] **GATE (G6):** Matrix launch and render - every required M9.62 row starts, renders and passes the `--smoke-test` probe with the `main()` shims; the software-rendering banner fires on the GPU-less VM and on no GPU row; a required row marked unsupported needs a recorded owner decision (A-4).
@@ -1516,8 +1520,8 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [ ] **M11.29 TIFF writer** - LZW (16-bit predictor), Deflate, PackBits, none; 8/16-bit gray, RGB, RGBA; ~256 KB strips streamed; ICC, Exif, XMP, IPTC, resolution tags; BigTIFF above ~3.5 GiB. Pass: pixel-exact in `tiff`, libtiff, Pillow, ImageMagick; 100 MP RGB <= raster + 64 MB RSS.
 - [ ] **M11.30 TIFF multi-page and G4** - IFD chain with `PageNumber`; per-page dpi, ICC, policy; G4 pages reuse the M7 wrapper; 1-bit and colour mix only if S5 picks the unified writer, else a typed error. Pass: 50-page fixture in 4 readers: order, dpi, no inversion, no GPS bytes.
 - [ ] **M11.31 `PageSink` and orchestrator** - `PageSink` (`begin`, `add_page`, `finish`) for PDF and TIFF; pages render in parallel (`MemoryBudget`), reorder in a window, stream in order; one failed page fails the file. Pass: deterministic order; page 7 of 20 failing leaves no output.
-- [ ] **M11.32 PDF writer core** - `codecs::pdf` on `pdf-writer` 0.15 or the S4 writer: one image per page, classic xref, deterministic objects, incremental output; `Info` has `Title`, `Producer`, `CreationDate` only. Pass: `qpdf --check` clean; `pdfinfo` agrees; 1000 pages in constant memory.
-- [ ] **M11.33 PDF JPEG pass-through** - Encoder JPEG bytes (8-bit baseline) embedded unchanged after our parser drops APPn and COM; `DeviceRGB`, `DeviceGray` or `ICCBased`. Pass: `pdfimages -list` shows `jpeg` at the expected ppi; bytes equal the stripped encoder output; no GPS bytes.
+- [x] **M11.32 PDF writer core** - `codecs::pdf` on `pdf-writer` 0.15 or the S4 writer: one image per page, classic xref, deterministic objects, incremental output; `Info` has `Title`, `Producer`, `CreationDate` only. Pass: `qpdf --check` clean; `pdfinfo` agrees; 1000 pages in constant memory. Result: own writer; `Output formats` run 43798119484.
+- [x] **M11.33 PDF JPEG pass-through** - Encoder JPEG bytes (8-bit baseline) embedded unchanged after our parser drops APPn and COM; `DeviceRGB`, `DeviceGray` or `ICCBased`. Pass: `pdfimages -list` shows `jpeg` at the expected ppi; bytes equal the stripped encoder output; no GPS bytes. Result: `Output formats` run 43798119484.
 - [ ] **M11.34 PDF PNG pass-through** - Lossless pages embed the PNG `IDAT` stream as `/FlateDecode` with `/Predictor 15`; non-interlaced 8-bit gray or RGB (alpha flattened, 16-bit reduced). Pass: `pdfimages -all` gives a pixel-exact raster; PDFium and pdf.js SSIM >= 0.98; size within 2% of PNG.
 - [ ] **M11.35 PDF CCITT G4 pages** - Bilevel pages reuse the M7 G4 bytes (`/CCITTFaxDecode`, `/K -1`); polarity is the classic bug, so render-and-compare. Pass: Poppler, PDFium, pdf.js agree (<= 0.1% pixels differ), no inversion; size = G4 payload + <= 2 KB per page; bilevel only.
 - [ ] **M11.36 PDF page size and dpi** - `PageSize::{MatchImage, A4, Letter, A5, Custom}`; MatchImage = pixels / dpi x 72 pt (nominal 300 dpi if unknown, info note); pages over 14400 pt scale with a notice. Pass: 12 cases match MediaBox to 0.01 pt; a 300 dpi A4 scan is within 0.5 pt.
@@ -1577,6 +1581,8 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [ ] **M11.78 CI: native builds, caches, arm64** - Build libjxl and libwebp on `windows-2025`, `macos-latest` arm64, `ubuntu-22.04` with pin-hash caches; best-effort `windows-11-arm` and `ubuntu-22.04-arm` jobs run conformance (C1). Pass: cold build on 3 OSes; warm PR adds <= 3 min.
 - [ ] **M11.79 Release v0.10.0** - release-plz tag; NSIS, zip, DMG, AppImage, deb, rpm and own Flatpak remote with `SHA256SUMS`, attestations, SBOM, `native-sources`, notices; notes list measured and PROVISIONAL numbers, limitations. Pass: `gh attestation verify` on every artifact.
 - [ ] **M11.80 Clean-machine smoke tests** - On clean Windows 10/11, macOS arm64, Ubuntu, Fedora: install, open a HEIC, export all 8 formats, open outputs in OS viewers, build a reordered PDF, strip location, Restore, uninstall; M11.59 manual checklist. Pass: every step passes.
+- [ ] **M11.83 AVIF writer open points** - Extends M11.22-M11.24: gaps in `docs/dev/output-formats.md` (PSNR at q75, speed defaults, P3 `nclx`, XMP, fuzz, cancel) and the owner's D3 call on replacing AVIF.
+- [ ] **M11.84 PDF open points** - Extends M11.34-M11.38: PDFium and pdf.js render Flate, JPEG and G4 pages (SSIM >= 0.98), Flate size within 2% of the PNG, 200 pages verify in <= 50 ms.
 
 ### Exit gate
 - [ ] **GATE (G11):** Formats and readers - every output format (incl. multi-page TIFF, 1-bit G4, PDF) decodes in >= 2 independent readers with correct pixels, ICC and dpi on all three OSes: 100% of the interop matrix (M11.56-M11.58); negative controls fail.
@@ -2018,7 +2024,7 @@ The tracking layer above the milestone items: each S item is a research follow-u
 - [ ] **S.12 HEIC colour handling check** - Read the ICC `prof` box first, then nclx or CICP; verify Display P3 to sRGB, PQ and HLG tone-mapping and the dropped gain-map, depth and Live Photo notices against real files. Owner: M6. _(gate: the M6 colour-difference gate, G10)_
 - [ ] **S.13 Windows HEVC Video Extensions availability and price** - The claim that it is paid or OEM-only is unverified; check current Store status, because it decides whether the WIC fast path works on stock Windows and what the README says; never buy it (B15). Owner: M6.
 - [ ] **S.14 HEIC batch memory budgeting** - A 48 MP HEIC is about 146 MB as RGB8 and libheif threads multiply with batch parallelism: design a byte-weighted admission budget that admits an oversize job alone, per-worker caps and a soak test. Owner: M6.
-- [ ] **S.15 Per-OS decode sandbox** - Proof of concept on all three OSes, then the real implementation with a recorded level: AppContainer or job object plus restricted token (Windows), Landlock plus seccomp (Linux), `sandbox_init` (macOS). Owner: M0 (M0.21-M0.23), M6, M8, M9.
+- [x] **S.15 Per-OS decode sandbox** - Proof of concept on all three OSes, then the real implementation with a recorded level: AppContainer or job object plus restricted token (Windows), Landlock plus seccomp (Linux), `sandbox_init` (macOS). Owner: M0 (M0.21-M0.23), M6, M8, M9. Result: ADR-0013; `worker.yml` run 38801697317.
 
 ### Accuracy, enhancement and models
 - [ ] **S.16 Receipt-specific stratified golden set** - Private (B21), built to the M0.50 and M0.51 policy: long narrow receipts > 4:1, thermal fade, partial frames, touching items, HEIC and other strata, with two-annotator noise-floor checks. Owner: M1 (v0), then X.06 and X.07.
