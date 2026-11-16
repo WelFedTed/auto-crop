@@ -36,8 +36,8 @@ opencv-python-headless==5.0.0.93 \
     --hash=sha256:829717b6a95554f273e49e357cee3b3a2a26b6f4842fbc1bed2b45bdd8f87e0e
 packaging==26.3 \
     --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
-pillow==12.3.0 \
-    --hash=sha256:fdafc9cce40277e0f7a0feabce0ee50dd2fa1800f3b38015e51296b5e814048d
+pillow==13.0.0 \
+    --hash=sha256:f7cbb7a64e7ec664775195e4f81923bc8a93d9451b963f844e59118f63147a7a
 protobuf==7.36.2 \
     --hash=sha256:a300819d441e078a5608c0d3c709796bb548136058fda017ae51d425b44fd353
 setuptools==78.1.0 \

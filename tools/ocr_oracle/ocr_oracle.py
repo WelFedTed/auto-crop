@@ -27,7 +27,7 @@ Settings are never defaulted silently: they are fixed here (OEM 1 = LSTM only, P
 block, 300 dpi, `eng`, a single OpenMP thread) and written into every report. `thresholding_method`
 (Tesseract >= 5.3: 0 Otsu, 1 adaptive Otsu, 2 Sauvola) is an explicit required choice per run.
 
-Python 3.10+; Pillow is needed for `synth` only (requirements.lock). Metrics and `run` use only the
+Python 3.10+ (3.11+ for the Pillow 13 of requirements.lock); Pillow is needed for `synth` only. Metrics and `run` use only the
 standard library plus the `tesseract` binary.
 """
 

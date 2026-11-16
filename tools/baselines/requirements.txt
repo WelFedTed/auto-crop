@@ -7,4 +7,4 @@
 opencv-python-headless==5.0.0.93
 numpy==2.5.3
 # Fallback image reader for files OpenCV's bundled TIFF reader refuses (HPND).
-pillow==12.3.0
+pillow==13.0.0
