@@ -88,6 +88,8 @@ pub enum PdfPageSize {
     Fit,
     /// A4 sheets (210 x 297 mm), turned to each picture's orientation.
     A4,
+    /// A5 sheets (148 x 210 mm), turned to each picture's orientation.
+    A5,
     /// US Letter sheets (8.5 x 11 in), turned to each picture's orientation.
     Letter,
 }
@@ -97,6 +99,7 @@ impl PdfPageSize {
         match self {
             PdfPageSize::Fit => PageSize::MatchImage,
             PdfPageSize::A4 => PageSize::A4,
+            PdfPageSize::A5 => PageSize::A5,
             PdfPageSize::Letter => PageSize::LETTER,
         }
     }
@@ -113,7 +116,7 @@ pub struct PdfRunOptions {
     pub dpi: Option<u32>,
     /// The document title; `None` = the file name without its extension, `Some("")` = no title.
     pub title: Option<String>,
-    /// The page size: the picture's own (default), A4 or Letter.
+    /// The page size: the picture's own (default), A4, A5 or Letter.
     pub page_size: PdfPageSize,
     /// Blank border of an A4 or Letter page, in millimetres (0 to [`MAX_MARGIN_MM`]; ignored by
     /// `Fit`, where the page is the picture).

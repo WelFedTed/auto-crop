@@ -285,6 +285,7 @@ fn a4_and_letter_pages_centre_each_picture_with_a_margin_and_never_enlarge_it() 
     let mm = 72.0 / 25.4;
     for (size, sheet) in [
         (PdfPageSize::A4, (595.28, 841.89)),
+        (PdfPageSize::A5, (419.53, 595.28)),
         (PdfPageSize::Letter, (612.0, 792.0)),
     ] {
         let o = PdfRunOptions {

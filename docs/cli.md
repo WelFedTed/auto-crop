@@ -298,7 +298,7 @@ preset never turns it on, and `analyze` only reports what it would suggest. The 
 #### One PDF of the crops: `process --pdf`
 
 ```text
-auto-crop process --pdf FILE.pdf [--order name|given] [--dpi N] [--page-size fit|a4|letter] [--page-margin MM] [--upscale] [--title TEXT] [--enhance ...] [--quality ...] [--one-bit] <file|folder|pattern>...
+auto-crop process --pdf FILE.pdf [--order name|given] [--dpi N] [--page-size fit|a4|a5|letter] [--page-margin MM] [--upscale] [--title TEXT] [--enhance ...] [--quality ...] [--one-bit] <file|folder|pattern>...
 ```
 
 Every crop that would be written becomes a **page of one PDF** instead of a file: the originals are only read (no backup is made or needed), an existing `FILE.pdf` is **never replaced** (the document is saved as `FILE (2).pdf` and the manifest says `renamed`), and the PDF is verified by reading it back before it gets its name (one page in memory at a time, so a large set does not need much memory). It cannot be combined with `--in-place`, `--output`, `--suffix`, `--copy`, `--format`, `--name-template` or `--if-exists` (usage error, exit 2).
@@ -308,7 +308,7 @@ Every crop that would be written becomes a **page of one PDF** instead of a file
 | `--pdf FILE` | The document to write (a name ending in `.pdf`; the folder must exist). Run `--dry-run` to see the planned name. |
 | `--order name\|given` | Page order: `name` (default) sorts by file name with numbers as numbers (`scan2` before `scan10`); `given` keeps the order of the inputs on the command line (a folder's files by name). A scan's own crops keep their reading order. |
 | `--dpi N` | Sizes every page from N dpi (36 to 1200). Default: each picture's own density, 300 dpi when it has none (`pdf.dpi_assumed`). |
-| `--page-size fit\|a4\|letter` | `fit` (default): every page is its picture's size (pixels over the density times 72 points). `a4` (595.28 x 841.89 pt) or `letter` (612 x 792 pt): every page is that sheet, turned to landscape for a picture that is wider than tall; the picture is centred, **shrunk to fit** and **never enlarged** past its own resolution (a small crop stays its natural size in the middle of the sheet), unless `--upscale`. |
+| `--page-size fit\|a4\|a5\|letter` | `fit` (default): every page is its picture's size (pixels over the density times 72 points). `a4` (595.28 x 841.89 pt), `a5` (419.53 x 595.28 pt) or `letter` (612 x 792 pt): every page is that sheet, turned to landscape for a picture that is wider than tall; the picture is centred, **shrunk to fit** and **never enlarged** past its own resolution (a small crop stays its natural size in the middle of the sheet), unless `--upscale`. |
 | `--page-margin MM` | Blank border on every side of an `a4` or `letter` page, in millimetres (0 to 50, default 0). A usage error with `fit`, where the page is the picture. |
 | `--upscale` | Let a picture grow past its own resolution to fill the box inside the margins of an `a4` or `letter` page. Needs `--page-size a4\|letter`. |
 | `--title TEXT` | The `Title` of the document. Default: the file name without `.pdf`; an empty `--title ""` writes no title. The information dictionary otherwise holds `Producer (Auto Crop)` only (no creation date, no author, no source path), so equal input gives equal bytes. |

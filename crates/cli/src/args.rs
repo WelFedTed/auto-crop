@@ -1245,8 +1245,9 @@ fn pdf_args(p: &Parsed) -> Res<Option<PdfArgs>> {
     let page_size = match p.value("page-size") {
         None | Some("fit") => PdfPageSize::Fit,
         Some("a4") => PdfPageSize::A4,
+        Some("a5") => PdfPageSize::A5,
         Some("letter") => PdfPageSize::Letter,
-        Some(o) => return usage(format!("unknown --page-size `{o}` (fit, a4 or letter)")),
+        Some(o) => return usage(format!("unknown --page-size `{o}` (fit, a4, a5 or letter)")),
     };
     let margin_mm = number(p, "page-margin", 0.0f64, MAX_MARGIN_MM)?;
     let Some(file) = p.value("pdf") else {
@@ -1267,7 +1268,7 @@ fn pdf_args(p: &Parsed) -> Res<Option<PdfArgs>> {
     };
     if page_size == PdfPageSize::Fit && (margin_mm.is_some() || p.has("upscale")) {
         return usage(
-            "`--page-margin` and `--upscale` need `--page-size a4` or `letter` (with fit-to-picture              pages the page is the picture)",
+            "`--page-margin` and `--upscale` need `--page-size a4`, `a5` or `letter` (with fit-to-picture              pages the page is the picture)",
         );
     }
     if file.is_empty() {

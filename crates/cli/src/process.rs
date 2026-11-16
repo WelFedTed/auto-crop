@@ -218,6 +218,7 @@ fn pdf_record(args: &ProcessArgs, saved: Option<&PdfRunSaved>) -> PdfRec {
         page_size: pdf.map_or("fit", |p| match p.page_size {
             PdfPageSize::Fit => "fit",
             PdfPageSize::A4 => "a4",
+            PdfPageSize::A5 => "a5",
             PdfPageSize::Letter => "letter",
         }),
         page_margin_mm: pdf.and_then(|p| p.margin_mm),

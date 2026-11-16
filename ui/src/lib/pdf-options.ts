@@ -7,7 +7,7 @@
 import type { PdfPageSize } from './types.ts';
 
 /** The page sizes, in the order the dialog lists them; `fit` = each page is its picture's size. */
-export const PDF_PAGE_SIZES: readonly PdfPageSize[] = ['fit', 'a4', 'letter'];
+export const PDF_PAGE_SIZES: readonly PdfPageSize[] = ['fit', 'a4', 'a5', 'letter'];
 
 /** The largest page margin, in millimetres. */
 export const MAX_MARGIN_MM = 50;

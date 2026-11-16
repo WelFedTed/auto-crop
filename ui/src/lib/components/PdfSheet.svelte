@@ -27,7 +27,7 @@
   let margin = $state('10');
   let title = $state('');
 
-  const SIZE_LABEL: Record<PdfPageSize, string> = { fit: S.pdf.sizeFit, a4: S.pdf.sizeA4, letter: S.pdf.sizeLetter };
+  const SIZE_LABEL: Record<PdfPageSize, string> = { fit: S.pdf.sizeFit, a4: S.pdf.sizeA4, a5: S.pdf.sizeA5, letter: S.pdf.sizeLetter };
   const fixed = $derived(pageSize !== 'fit');
 
   $effect(() => {

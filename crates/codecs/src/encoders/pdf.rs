@@ -57,6 +57,8 @@ pub const MAX_PAGES: usize = 10_000;
 pub const PRODUCER: &str = "Auto Crop";
 /// A4 (210 x 297 mm) in points, portrait, as written in a media box (two decimals).
 pub const A4_PT: (f64, f64) = (595.28, 841.89);
+/// A5 (148 x 210 mm) in points, portrait, as written in a media box (two decimals).
+pub const A5_PT: (f64, f64) = (419.53, 595.28);
 /// US Letter (8.5 x 11 in) in points, portrait.
 pub const LETTER_PT: (f64, f64) = (612.0, 792.0);
 /// Points per millimetre.
@@ -76,6 +78,10 @@ impl PageSize {
     pub const A4: PageSize = PageSize::Fixed {
         width_pt: A4_PT.0,
         height_pt: A4_PT.1,
+    };
+    pub const A5: PageSize = PageSize::Fixed {
+        width_pt: A5_PT.0,
+        height_pt: A5_PT.1,
     };
     pub const LETTER: PageSize = PageSize::Fixed {
         width_pt: LETTER_PT.0,

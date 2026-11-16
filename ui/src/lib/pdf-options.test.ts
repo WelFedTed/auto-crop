@@ -28,7 +28,7 @@ test("the PDF options of the webview are the fields of the shell struct, and the
   assert.match(run.slice(at - 120, at), /#\[serde\(rename_all = "lowercase"\)\]/);
   const variants = [...run.slice(at, run.indexOf('\n}', at)).matchAll(/^ {4}([A-Za-z0-9]+),/gm)].map((m) => m[1].toLowerCase());
   assert.deepEqual([...PDF_PAGE_SIZES], variants);
-  assert.match(types, /export type PdfPageSize = 'fit' \| 'a4' \| 'letter';/);
+  assert.match(types, /export type PdfPageSize = 'fit' \| 'a4' \| 'a5' \| 'letter';/);
   // The limits.
   assert.match(run, new RegExp(`pub const MAX_MARGIN_MM: f64 = ${MAX_MARGIN_MM}\\.0;`));
   assert.match(rust('crates/codecs/src/encoders/pdf.rs'), new RegExp(`\\.take\\(${MAX_TITLE_CHARS}\\)`), 'the writer keeps this many characters of a title');
@@ -77,7 +77,7 @@ test('the options sheet names every page size, labels its fields, and only a fix
   assert.match(sheet, /SIZE_LABEL: Record<PdfPageSize, string>/, 'a new page size is a type error until it has a label');
   assert.match(sheet, /<form class="sheet" onsubmit=\{go\}>/, 'Enter in a field chooses');
   assert.match(sheet, /maxlength=\{MAX_TITLE_CHARS\}/);
-  assert.equal(new Set([S.pdf.sizeFit, S.pdf.sizeA4, S.pdf.sizeLetter]).size, 3);
+  assert.equal(new Set([S.pdf.sizeFit, S.pdf.sizeA4, S.pdf.sizeA5, S.pdf.sizeLetter]).size, 4);
   for (const t of [S.pdf.sheetTitle, S.pdf.size, S.pdf.sizeNote, S.pdf.margin, S.pdf.marginUnit, S.pdf.marginNote, S.pdf.marginOff, S.pdf.title, S.pdf.titlePlaceholder, S.pdf.titleNote, S.pdf.choose, S.pdf.sheetCancel]) {
     assert.ok(t.length > 0);
   }

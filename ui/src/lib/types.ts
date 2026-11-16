@@ -597,8 +597,8 @@ export interface ConvertSummary {
   results: ConvertFileResult[];
 }
 
-/** The page size of a PDF: each picture's own, or an A4 or US Letter sheet (turned to the picture's orientation). */
-export type PdfPageSize = 'fit' | 'a4' | 'letter';
+/** The page size of a PDF: each picture's own, or an A4, A5 or US Letter sheet (turned to the picture's orientation). */
+export type PdfPageSize = 'fit' | 'a4' | 'a5' | 'letter';
 
 /** What a "Save as one PDF" run may be told. The defaults are each scan's own density (300 dpi when it has none), pages the size of their pictures and colour pages. */
 export interface PdfOptions {

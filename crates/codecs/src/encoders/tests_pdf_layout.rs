@@ -203,3 +203,21 @@ fn a_document_of_fixed_sheets_is_deterministic_and_the_picture_box_is_checked() 
     assert_ne!(bad, pdf);
     assert!(read_pages(&bad).is_none() && streaming(&bad).is_none());
 }
+
+#[test]
+fn a5_is_148_by_210_mm_and_a_300_dpi_a4_scan_fits_its_own_page_within_half_a_point() {
+    // A5 (M11.36): 148 x 210 mm to 0.01 pt, turned for a wide picture.
+    assert!(near(A5_PT.0, 148.0 * PT_PER_MM) && near(A5_PT.1, 210.0 * PT_PER_MM));
+    let (_, tall) = laid_out(600, 800, Some((300, 300)), sheet(PageSize::A5, 0.0, false));
+    assert_eq!((tall.width_pt, tall.height_pt), A5_PT);
+    let (pdf, wide) = laid_out(800, 600, Some((300, 300)), sheet(PageSize::A5, 0.0, false));
+    assert_eq!((wide.width_pt, wide.height_pt), (A5_PT.1, A5_PT.0));
+    let pages = streaming(&pdf).expect("the structure check reads it");
+    assert_eq!(pages[0].media_box, (A5_PT.1, A5_PT.0));
+    // A scan of an A4 sheet at 300 dpi (2480 x 3508 px) matched to the picture is A4 within 0.5 pt.
+    let (_, fit) = laid_out(2480, 3508, Some((300, 300)), PageLayout::default());
+    assert!(
+        (fit.width_pt - A4_PT.0).abs() <= 0.5 && (fit.height_pt - A4_PT.1).abs() <= 0.5,
+        "{fit:?}"
+    );
+}
