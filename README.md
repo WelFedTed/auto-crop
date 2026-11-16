@@ -59,13 +59,13 @@ With no output option `process` **overwrites your files**, after saving a verifi
 
 ## Install
 
-A **pre-release** (0.0.5) is on the [Releases page](https://github.com/WelFedTed/auto-crop/releases), with test builds for three platforms. Check every download against `SHA256SUMS`.
+A **pre-release** (0.0.6) is on the [Releases page](https://github.com/WelFedTed/auto-crop/releases), with test builds for three platforms. Check every download against `SHA256SUMS`.
 
-- **Windows 10/11 x64:** download `AutoCrop-0.0.5-windows-x64.zip`, unzip, run `AutoCrop.exe`. It needs the Microsoft Edge WebView2 runtime (part of Windows 11 and current Windows 10).
+- **Windows 10/11 x64:** download `AutoCrop-0.0.6-windows-x64.zip`, unzip, run `AutoCrop.exe`. It needs the Microsoft Edge WebView2 runtime (part of Windows 11 and current Windows 10).
 - **macOS (Apple silicon; Intel is best-effort):** download the `macos-arm64` (or `macos-x86_64`) zip or DMG and open `AutoCrop.app`. It is ad-hoc signed and not notarised: right-click, Open, or `xattr -dr com.apple.quarantine AutoCrop.app`.
 - **Linux x86_64:** the AppImage (`chmod +x`, then run) or the `.deb` or `.tar.gz`; they use WebKitGTK 4.1 and GTK 3 from your distribution (package names are in the package README).
 
-The macOS and Linux builds were smoke-tested on CI runners only and have not yet run on a real desktop. They parse HEIC and AVIF inside the app's own process. What is in each package, how to build them yourself and what is not verified: [docs/packaging.md](docs/packaging.md). These are early test builds: see [CHANGELOG.md](CHANGELOG.md) for what they do and do not do. Planned: a Windows installer, then rpm and Flatpak for Linux.
+The macOS and Linux builds were smoke-tested on CI runners only and have not yet run on a real desktop. HEIC, HEIF and AVIF files are decoded in a sandboxed helper process where the platform allows it (`auto-crop doctor` prints the level), and in the app's own process otherwise. What is in each package, how to build them yourself and what is not verified: [docs/packaging.md](docs/packaging.md). These are early test builds: see [CHANGELOG.md](CHANGELOG.md) for what they do and do not do. Planned: a Windows installer, then rpm and Flatpak for Linux.
 
 Early builds will not be code-signed (the project has a $0 budget), so Windows SmartScreen and macOS Gatekeeper will show warnings. Step-by-step instructions and checksums will accompany every release.
 

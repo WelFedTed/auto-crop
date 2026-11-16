@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.0.6 (2026-11-16), pre-release, Windows, macOS and Linux test builds
+
+A sixth early test build. It is still **not** the CLI-only v0.1.0 of [ROADMAP.md](ROADMAP.md) milestone M2, the
+accuracy gates have not been measured on a proper real-photo set, and the confidence score is an uncalibrated
+heuristic. Treat it as a preview, not as something to trust with irreplaceable files.
+
+### What changed
+
+- **Sandboxed decoding.** Pictures from outside (HEIC, HEIF, AVIF and the other formats) are now decoded by a
+  separate helper process, `auto-crop-worker`, that ships beside the app and the command-line tool. On Windows
+  it runs in an AppContainer with a job object, on Linux with resource limits, Landlock and seccomp, and on
+  macOS under the Seatbelt sandbox with a watchdog. A damaged or hostile file that crashes, hangs or eats memory
+  in the decoder takes down the helper, not the app; the helper is replaced and the file is reported as
+  damaged. `auto-crop doctor` prints which level was reached; `AUTOCROP_DECODE=inproc|worker|auto` chooses (the
+  default, `auto`, falls back to decoding inside the app when the helper cannot start). The escape tests and
+  the latency numbers (about 9 to 47 ms more per 12-megapixel AVIF) are in
+  [docs/testing/sandbox-worker.md](docs/testing/sandbox-worker.md) and
+  [docs/perf/sandbox-worker.md](docs/perf/sandbox-worker.md). The macOS and Linux levels were measured on CI
+  runners only.
+- **AVIF output.** Convert, "Save as" and `process` can write **AVIF** (`convert --to avif`,
+  `process --format avif`, `--avif-speed`, `--avif-chroma`). The encoder is pure Rust, so no
+  new native library is needed. The files were read back with Pillow, `avifdec`, ImageMagick and libheif in CI.
+  An AVIF source stays open-only for crops, like HEIC: use Save as copy.
+- **Scan to PDF.** "Save as one PDF" in the review grid writes the selected crops as one multi-page PDF (page
+  order is the grid order), with progress, cancel and "Show in folder". On the command line:
+  `auto-crop process --pdf FILE` (`--order name|given`, `--dpi`).
+- **Smaller things.** An AVIF quality label, PDF progress before the Save dialog is answered, and one calm line
+  when a name was already taken. Dependency updates: `rustix` 1.1.6 (RUSTSEC-2026-0486), vite 8.3.3.
+
+### Packages and checksums
+
+`AutoCrop-0.0.6-windows-x64.zip`, `AutoCrop-0.0.6-macos-arm64.zip` and `.dmg`, `AutoCrop-0.0.6-macos-x86_64.zip`
+and `.dmg`, `AutoCrop-0.0.6-linux-x86_64.tar.gz`, `.AppImage` and `.deb`, and `SHA256SUMS` for all of them.
+Check every download against `SHA256SUMS`.
+
+### Known limits
+
+- The sandbox levels on macOS and Linux were verified on CI runners, not on real machines. If the helper cannot
+  start, `auto` mode decodes inside the app; `AUTOCROP_DECODE=worker` refuses instead.
+- Real touch input, screen readers, the native file dialog and drag-and-drop were not tested for the new
+  screens; the window was driven through WebView2 remote debugging on synthetic images only.
+- The classical detector fails about 40% of the time on a second, independent set of synthetic scenes and gets
+  hand-held receipts wrong (held, not written). On the owner's 17 single-item real photos the mean IoU is 0.69.
+  A learned detector is **not** in this build.
+- No lossy WebP, no JPEG XL output, no `--preset`, English only.
+
+### Verification
+
+- Automated tests run on Windows, macOS and Ubuntu CI (core, kernels, detector, codecs, engine save and restore
+  invariants including fault injection and the kill loop, the worker escape tests, curved-page and enhancement
+  oracles, the writers checked with independent tools on Linux, 262 UI tests, fuzz regressions, a build of the
+  shell with the GUI on all three OSes).
+- Built in GitHub Actions, **unsigned**, with no build attestation or SBOM.
+
 ## 0.0.5 (2026-10-15), pre-release, Windows, macOS and Linux test builds
 
 A fifth early test build, and the first with **macOS and Linux downloads**. It is still **not** the CLI-only

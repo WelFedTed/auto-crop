@@ -54,6 +54,10 @@ jobs:
           sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng fonts-dejavu-core
           tesseract --version
           tesseract --list-langs
+      # Pillow 13 needs Python 3.11 or newer; the system Python of ubuntu-22.04 is 3.10.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
       - name: Python environment from the hashed lock
         run: |
           set -euo pipefail
@@ -139,6 +143,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng fonts-dejavu-core
           tesseract --version
+      # Pillow 13 needs Python 3.11 or newer; the system Python of ubuntu-22.04 is 3.10.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
       - name: Python environment from the hashed lock
         run: |
           set -euo pipefail
