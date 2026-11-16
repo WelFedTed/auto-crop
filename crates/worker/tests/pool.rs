@@ -261,6 +261,49 @@ mod faults {
         assert_eq!(pool.status().spawned, 1);
     }
 
+    /// M6.42 and M6.87: a worker that goes past the memory the parent gave it fails safely. The
+    /// pool sizes the memory from its own header probe, so whatever the worker claims or writes
+    /// beyond that never reaches the parent: the job is a typed error and the next one decodes
+    /// the right pixels.
+    fn the_next_decode_is_right(pool: &WorkerPool) {
+        let good = fixtures::png_rgb(40, 30);
+        let limits = DecodeLimits::default();
+        let got = pool.decode(&good, &limits, true, false).unwrap();
+        let want = auto_crop_codecs::decode_in_process(&good, &limits, true, false).unwrap();
+        same(&got, &want);
+    }
+
+    #[test]
+    fn a_worker_that_claims_more_pixels_than_its_memory_holds_is_replaced() {
+        let pool = WorkerPool::new(test_config());
+        let limits = DecodeLimits::default();
+        let e = crashed(pool.decode(&with_fault("shm-overclaim"), &limits, true, false));
+        match &e {
+            CodecError::WorkerCrashed(m) => assert!(m.contains("does not fit"), "{m}"),
+            other => panic!("{other:?}"),
+        }
+        the_next_decode_is_right(&pool);
+        assert!(pool.status().spawned >= 2, "the lying worker was replaced");
+    }
+
+    #[test]
+    fn a_worker_that_maps_and_writes_past_the_memory_it_was_given_fails_safely() {
+        let pool = WorkerPool::new(test_config());
+        let limits = DecodeLimits::default();
+        let e = crashed(pool.decode(&with_fault("shm-overrun"), &limits, true, false));
+        println!("SHM-OVERRUN {e:?}");
+        // Windows refuses a view larger than the section (reported by the worker); elsewhere the
+        // write past the end of the file faults and the worker dies. Either way: typed, contained.
+        assert!(
+            matches!(
+                e,
+                CodecError::WorkerCrashed(_) | CodecError::InternalPanic(_)
+            ),
+            "{e:?}"
+        );
+        the_next_decode_is_right(&pool);
+    }
+
     #[test]
     fn a_hang_is_killed_at_the_deadline() {
         let pool = WorkerPool::new(test_config());
@@ -369,5 +412,117 @@ mod faults {
         assert!(st.live <= 3);
         pool.shutdown_idle();
         assert_eq!(pool.status().live, 0);
+    }
+
+    /// How many `auto-crop-worker` processes exist on this machine (an orphan check that needs no
+    /// help from the pool: the soak runs alone, `--ignored`, so the baseline is the same before
+    /// and after).
+    fn worker_processes() -> usize {
+        let out = if cfg!(windows) {
+            std::process::Command::new("tasklist")
+                .args([
+                    "/FI",
+                    "IMAGENAME eq auto-crop-worker.exe",
+                    "/NH",
+                    "/FO",
+                    "CSV",
+                ])
+                .output()
+        } else {
+            std::process::Command::new("pgrep")
+                .args(["-c", "-x", "auto-crop-worker"])
+                .output()
+        };
+        let Ok(out) = out else { return 0 };
+        let text = String::from_utf8_lossy(&out.stdout);
+        if cfg!(windows) {
+            text.lines()
+                .filter(|l| l.contains("auto-crop-worker"))
+                .count()
+        } else {
+            text.trim().parse().unwrap_or(0)
+        }
+    }
+
+    /// M6.43 and M6.87: a real soak of injected crashes (`AUTOCROP_SOAK_CRASHES`, default 1,000)
+    /// from three threads, mixed with good files. Every crash is a typed `WorkerCrashed` for its
+    /// own file, every good file decodes, and afterwards no worker process is left and the pool
+    /// holds none. Minutes long, so it runs on request only:
+    /// `cargo test -p auto-crop-worker --features escape-tests --test pool -- --ignored soak`.
+    #[test]
+    #[ignore = "soak: minutes; run with --ignored"]
+    fn soak_a_thousand_injected_crashes_leave_no_orphans_and_no_leaks() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        let target: u64 = std::env::var("AUTOCROP_SOAK_CRASHES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1000);
+        let baseline = worker_processes();
+        let mut cfg = test_config();
+        cfg.workers = 3;
+        let pool = WorkerPool::new(cfg);
+        let limits = DecodeLimits::default();
+        let good = fixtures::png_rgb(24, 24);
+        let want = auto_crop_codecs::decode_in_process(&good, &limits, true, false).unwrap();
+        let faults = [
+            with_fault("abort"),
+            with_fault("exit"),
+            with_fault("garbage"),
+        ];
+        let (crashes, goods) = (AtomicU64::new(0), AtomicU64::new(0));
+        let t0 = Instant::now();
+        std::thread::scope(|s| {
+            for t in 0..3u64 {
+                let (pool, limits, good, faults, want) = (&pool, &limits, &good, &faults, &want);
+                let (crashes, goods) = (&crashes, &goods);
+                s.spawn(move || {
+                    let mut x = 0x9e37_79b9_7f4a_7c15u64 ^ (t + 1);
+                    while crashes.load(Ordering::SeqCst) < target {
+                        x ^= x << 13;
+                        x ^= x >> 7;
+                        x ^= x << 17;
+                        if x.is_multiple_of(3) {
+                            let r = pool.decode(good, limits, true, false);
+                            let d = r.unwrap_or_else(|e| panic!("a good file failed: {e:?}"));
+                            same(&d, want);
+                            goods.fetch_add(1, Ordering::SeqCst);
+                        } else {
+                            let f = &faults[(x / 3 % 3) as usize];
+                            match pool.decode(f, limits, true, false) {
+                                Err(PoolFailure::Codec(CodecError::WorkerCrashed(_))) => {
+                                    crashes.fetch_add(1, Ordering::SeqCst);
+                                }
+                                other => panic!("expected a crash, got {other:?}"),
+                            }
+                        }
+                    }
+                });
+            }
+        });
+        let st = pool.status();
+        println!(
+            "SOAK crashes={} good={} spawned={} took={:?} baseline-workers={baseline}",
+            crashes.load(Ordering::SeqCst),
+            goods.load(Ordering::SeqCst),
+            st.spawned,
+            t0.elapsed()
+        );
+        assert!(crashes.load(Ordering::SeqCst) >= target);
+        assert!(st.live <= 3, "{st:?}");
+        pool.shutdown_idle();
+        assert_eq!(pool.status().live, 0);
+        // Processes end a moment after the pool lets go of them.
+        let mut left = worker_processes();
+        for _ in 0..50 {
+            if left <= baseline {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+            left = worker_processes();
+        }
+        assert!(
+            left <= baseline,
+            "{left} worker process(es) left, baseline {baseline}"
+        );
     }
 }

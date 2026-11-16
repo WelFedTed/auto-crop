@@ -11,7 +11,13 @@
 
 use std::path::Path;
 
-const HOOK_STRINGS: &[&str] = &["AUTOCROP_ESCAPE", "AUTOCROP-FAULT:", "--no-landlock"];
+const HOOK_STRINGS: &[&str] = &[
+    "AUTOCROP_ESCAPE",
+    "AUTOCROP-FAULT:",
+    "--no-landlock",
+    "shm-overrun",
+    "shm-overclaim",
+];
 
 #[test]
 fn a_worker_built_without_the_feature_has_none_of_the_hooks() {

@@ -177,13 +177,19 @@ fn release_pixels_handle(h: &JobHeader) {
 /// misbehave the way a compromised or buggy decoder could, so the pool's crash isolation can be
 /// shown on every OS (ROADMAP M6.10).
 #[cfg(feature = "escape-tests")]
-fn inject_fault(input: &[u8]) {
+fn fault_kind(input: &[u8]) -> Option<String> {
     const MARK: &[u8] = b"AUTOCROP-FAULT:";
-    let Some(at) = input.windows(MARK.len()).rposition(|w| w == MARK) else {
+    let at = input.windows(MARK.len()).rposition(|w| w == MARK)?;
+    let kind = String::from_utf8_lossy(&input[at + MARK.len()..]).into_owned();
+    Some(kind.trim().to_owned())
+}
+
+#[cfg(feature = "escape-tests")]
+fn inject_fault(input: &[u8]) {
+    let Some(kind) = fault_kind(input) else {
         return;
     };
-    let kind = String::from_utf8_lossy(&input[at + MARK.len()..]).into_owned();
-    match kind.trim() {
+    match kind.as_str() {
         "abort" => std::process::abort(),
         "exit" => std::process::exit(0),
         "hang" => loop {
@@ -224,6 +230,10 @@ fn run_job(payload: &[u8], decode: &DecodeFn) -> Reply {
             return Reply::Err(proto::err_to_wire(id, &e));
         }
     };
+    // `shm-overrun` and `shm-overclaim` (test builds only) are the two ways a worker can go past the
+    // memory the parent gave it: map and write beyond it, or report more pixels than fit in it.
+    #[cfg(feature = "escape-tests")]
+    let fault = fault_kind(input);
     let data = &decoded.raster.data;
     if data.len() as u64 > header.shm_len {
         release_pixels_handle(&header);
@@ -232,8 +242,26 @@ fn run_job(payload: &[u8], decode: &DecodeFn) -> Reply {
             &CodecError::Corrupt("the decoded image does not fit the shared memory".into()),
         ));
     }
-    match map_pixels(&header, data.len()) {
-        Ok(mut m) => m.as_mut_slice().copy_from_slice(data),
+    #[cfg(feature = "escape-tests")]
+    let overrun = fault.as_deref() == Some("shm-overrun");
+    #[cfg(not(feature = "escape-tests"))]
+    let overrun = false;
+    let map_len = if overrun {
+        usize::try_from(header.shm_len).unwrap_or(0) + (16 << 20)
+    } else {
+        data.len()
+    };
+    match map_pixels(&header, map_len) {
+        Ok(mut m) => {
+            if overrun {
+                // The last byte of a view that is larger than the parent's memory.
+                let view = m.as_mut_slice();
+                if let Some(last) = view.last_mut() {
+                    *last = 0xAA;
+                }
+            }
+            m.as_mut_slice()[..data.len()].copy_from_slice(data);
+        }
         Err(e) => {
             return Reply::Err(proto::err_to_wire(
                 id,
@@ -241,9 +269,17 @@ fn run_job(payload: &[u8], decode: &DecodeFn) -> Reply {
             ));
         }
     }
+    #[cfg(feature = "escape-tests")]
+    let width = if fault.as_deref() == Some("shm-overclaim") {
+        decoded.raster.width.saturating_mul(4)
+    } else {
+        decoded.raster.width
+    };
+    #[cfg(not(feature = "escape-tests"))]
+    let width = decoded.raster.width;
     Reply::Ok(OkReply {
         job_id: id,
-        width: decoded.raster.width,
+        width,
         height: decoded.raster.height,
         exif_orientation: decoded.exif_orientation,
         source_bit_depth: decoded.source_bit_depth,
