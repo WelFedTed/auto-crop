@@ -117,7 +117,7 @@ impl BilevelImage {
                     Color::White
                 }
             });
-            enc.encode_line(pels, self.width as u16)
+            enc.encode_line(pels, self.width)
                 .map_err(|_| ErrKind::EncodeFailed)?;
         }
         let w = enc.finish().map_err(|_| ErrKind::EncodeFailed)?;
@@ -132,22 +132,17 @@ impl BilevelImage {
         }
         let mut out = Self::white(width, height);
         let mut y = 0usize;
-        fax::decoder::decode_g4(
-            data.iter().copied(),
-            width as u16,
-            Some(height as u16),
-            |line| {
-                if y < height as usize {
-                    let row = &mut out.bits[y * out.stride..(y + 1) * out.stride];
-                    for (x, c) in fax::decoder::pels(line, width as u16).enumerate() {
-                        if c == Color::Black {
-                            row[x / 8] |= 0x80 >> (x % 8);
-                        }
+        fax::decoder::decode_g4(data.iter().copied(), width, Some(height), |line| {
+            if y < height as usize {
+                let row = &mut out.bits[y * out.stride..(y + 1) * out.stride];
+                for (x, c) in fax::decoder::pels(line, width).enumerate() {
+                    if c == Color::Black {
+                        row[x / 8] |= 0x80 >> (x % 8);
                     }
                 }
-                y += 1;
-            },
-        )?;
+            }
+            y += 1;
+        })?;
         (y >= height as usize).then_some(out)
     }
 }

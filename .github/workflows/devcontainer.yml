@@ -44,6 +44,16 @@ jobs:
             echo "relevant=false" >> "$GITHUB_OUTPUT"
             echo "Nothing the devcontainer depends on changed: build skipped." >> "$GITHUB_STEP_SUMMARY"
           fi
+      # The image (about 2 GB) and the workspace build leave a standard runner with less than the
+      # engine's 500 MB free-space floor, which makes the save tests report DiskFull. Free what the
+      # build never uses first.
+      - name: Free disk space on the runner
+        if: steps.changes.outputs.relevant == 'true'
+        run: |
+          set -euo pipefail
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
       - name: Build the container, then doctor, build, smoke test and nextest inside it
         if: steps.changes.outputs.relevant == 'true'
         uses: devcontainers/ci@513af61f4de4f75d37e4438f184ba4358f0fc1ca # v0.3.1900000450

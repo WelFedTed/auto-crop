@@ -721,7 +721,7 @@ pub fn tiff_g4(w: u32, h: u32) -> Vec<u8> {
         enc.encode_line(
             row.iter()
                 .map(|&b| if b { Color::Black } else { Color::White }),
-            w as u16,
+            w,
         )
         .unwrap();
     }
