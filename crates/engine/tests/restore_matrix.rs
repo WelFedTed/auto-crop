@@ -101,7 +101,12 @@ fn other_volume() -> Option<PathBuf> {
     #[cfg(target_os = "linux")]
     {
         let p = PathBuf::from("/dev/shm");
-        if p.is_dir() && fs::create_dir_all(p.join(".ac-probe")).is_ok() {
+        // A container's /dev/shm is 64 MB by default: below the engine's free-space floor every save
+        // there is refused as DiskFull, which says nothing about the restore. Such a volume does
+        // not count as a second volume here (the report names the rows that did not run).
+        let roomy = auto_crop_engine::space::available_space(&p)
+            .is_ok_and(|b| b >= 4 * auto_crop_engine::space::MIN_FREE_BYTES);
+        if roomy && p.is_dir() && fs::create_dir_all(p.join(".ac-probe")).is_ok() {
             let _ = fs::remove_dir(p.join(".ac-probe"));
             return Some(p);
         }
