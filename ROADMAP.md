@@ -33,13 +33,13 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 | M8 | macOS preview | v0.7.0 | macOS 12+ arm64 (Apple silicon) | L | 0 / 92 (0%) |
 | M9 | Linux preview | v0.8.0 | Linux x86_64 (Ubuntu 22.04+, Fedora; arm64 best-effort) | XL | 0 / 93 (0%) |
 | M10 | Multi-item splitting | v0.9.0 | Windows 10/11 x64, macOS arm64, Linux x64 | XL | 12 / 89 (13%) |
-| M11 | Output formats, PDF and metadata policy | v0.10.0 | Windows 10/11 x64, macOS 12+ arm64, Linux x86_64 | XL | 2 / 93 (2%) |
+| M11 | Output formats, PDF and metadata policy | v0.10.0 | Windows 10/11 x64, macOS 12+ arm64, Linux x86_64 | XL | 3 / 93 (3%) |
 | M12 | Curved-page dewarp | v0.11.0 | Windows 10/11 x64, macOS 12+ arm64, Linux x86_64 | XL | 1 / 88 (1%) |
 | M13 | Hardening, accessibility, i18n, docs, legal and 1.0 release | v1.0.0 | Windows 10/11 x64, macOS 12+ arm64, Linux x86_64 | XL | 0 / 93 (0%) |
 | X | Continuous and cross-cutting | - | - | - | 0 / 42 (0%) |
 | X | Post-1.0 backlog (1.x) | - | - | - | 0 / 43 (0%) |
 | X | Spikes and open decisions | - | - | - | 1 / 28 (3%) |
-| **Total** | | | | | **147 / 1414 (10%)** |
+| **Total** | | | | | **148 / 1414 (10%)** |
 <!-- progress:end -->
 
 ## Why this order
@@ -1524,7 +1524,7 @@ Legend: `- [ ]` to do | `- [x]` done | **GATE** = exit criterion for a milestone
 - [x] **M11.33 PDF JPEG pass-through** - Encoder JPEG bytes (8-bit baseline) embedded unchanged after our parser drops APPn and COM; `DeviceRGB`, `DeviceGray` or `ICCBased`. Pass: `pdfimages -list` shows `jpeg` at the expected ppi; bytes equal the stripped encoder output; no GPS bytes. Result: `Output formats` run 43798119484.
 - [ ] **M11.34 PDF PNG pass-through** - Lossless pages embed the PNG `IDAT` stream as `/FlateDecode` with `/Predictor 15`; non-interlaced 8-bit gray or RGB (alpha flattened, 16-bit reduced). Pass: `pdfimages -all` gives a pixel-exact raster; PDFium and pdf.js SSIM >= 0.98; size within 2% of PNG.
 - [ ] **M11.35 PDF CCITT G4 pages** - Bilevel pages reuse the M7 G4 bytes (`/CCITTFaxDecode`, `/K -1`); polarity is the classic bug, so render-and-compare. Pass: Poppler, PDFium, pdf.js agree (<= 0.1% pixels differ), no inversion; size = G4 payload + <= 2 KB per page; bilevel only.
-- [ ] **M11.36 PDF page size and dpi** - `PageSize::{MatchImage, A4, Letter, A5, Custom}`; MatchImage = pixels / dpi x 72 pt (nominal 300 dpi if unknown, info note); pages over 14400 pt scale with a notice. Pass: 12 cases match MediaBox to 0.01 pt; a 300 dpi A4 scan is within 0.5 pt.
+- [x] **M11.36 PDF page size and dpi** - `PageSize::{MatchImage, A4, Letter, A5, Custom}`; MatchImage = pixels / dpi x 72 pt (nominal 300 dpi if unknown, info note); pages over 14400 pt scale with a notice. Pass: 12 cases match MediaBox to 0.01 pt; a 300 dpi A4 scan is within 0.5 pt.
 - [ ] **M11.37 PDF multi-page assembly** - Pages follow the orchestrator order (M11.49); `Title` from the sheet (default output stem); one image per page; no text layer or `/Font` (B19, tested); a `PageContent` trait leaves room later. Pass: stamp k renders on page k; 200 pages fit M11.65.
 - [ ] **M11.38 PDF verify-before-replace** - `codecs::pdf::verify` checks header, trailer, each xref offset, `/Count`, stream `/Length` and filters, in the commit protocol's Verified step. Pass: truncated and bad-offset fixtures fail; 200 pages verify in <= 50 ms; original untouched.
 - [ ] **M11.39 Verify for the new formats** - Extends M2.30 (D1): re-read the temp (blake3), decode via a path we own (AVIF via the M6 worker); pixel hash if lossless, else 64x64 luma error <= 3/255; `Fast` = structure only, not in Simple. Pass: truncation and corruption caught.

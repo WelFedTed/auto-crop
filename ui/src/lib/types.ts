@@ -597,8 +597,8 @@ export interface ConvertSummary {
   results: ConvertFileResult[];
 }
 
-/** The page size of a PDF: each picture's own, or an A4, A5 or US Letter sheet (turned to the picture's orientation). */
-export type PdfPageSize = 'fit' | 'a4' | 'a5' | 'letter';
+/** The page size of a PDF: each picture's own, or an A4, A5, US Letter or custom-size sheet (turned to the picture's orientation). */
+export type PdfPageSize = 'fit' | 'a4' | 'a5' | 'letter' | 'custom';
 
 /** What a "Save as one PDF" run may be told. The defaults are each scan's own density (300 dpi when it has none), pages the size of their pictures and colour pages. */
 export interface PdfOptions {
@@ -607,7 +607,10 @@ export interface PdfOptions {
   /** Enhanced black-and-white pages as 1-bit Group 4 (an unenhanced page then refuses). */
   oneBit: boolean;
   pageSize: PdfPageSize;
-  /** Blank border of an A4 or Letter page, in millimetres (0 to 50; ignored for `fit`). */
+  /** The sheet of `custom`, in millimetres (20 to 1200 each; ignored for the other sizes). */
+  customWidthMm: number;
+  customHeightMm: number;
+  /** Blank border of a fixed page, in millimetres (0 to 50; ignored for `fit`). */
   marginMm: number;
   /** The document's Title; `null` = the file's name. */
   title: string | null;

@@ -332,8 +332,11 @@ pub struct PdfRec {
     /// `name` or `given`.
     pub order: &'static str,
     pub dpi: Option<u32>,
-    /// `fit`, `a4` or `letter`.
+    /// `fit`, `a4`, `a5`, `letter` or `custom`.
     pub page_size: &'static str,
+    /// The sheet of a `custom` page size as width x height in millimetres, as given.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page_size_mm: Option<(f64, f64)>,
     /// `--page-margin` in millimetres, when given.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub page_margin_mm: Option<f64>,

@@ -283,13 +283,17 @@ fn a4_and_letter_pages_centre_each_picture_with_a_margin_and_never_enlarge_it() 
     let e = env();
     let (a, b, c) = three(&e);
     let mm = 72.0 / 25.4;
-    for (size, sheet) in [
-        (PdfPageSize::A4, (595.28, 841.89)),
-        (PdfPageSize::A5, (419.53, 595.28)),
-        (PdfPageSize::Letter, (612.0, 792.0)),
+    for (size, custom, sheet) in [
+        (PdfPageSize::A4, (0.0, 0.0), (595.28, 841.89)),
+        (PdfPageSize::A5, (0.0, 0.0), (419.53, 595.28)),
+        (PdfPageSize::Letter, (0.0, 0.0), (612.0, 792.0)),
+        // 100 x 150 mm, given landscape: the sheet is still read as its short and long side.
+        (PdfPageSize::Custom, (150.0, 100.0), (283.46, 425.2)),
     ] {
         let o = PdfRunOptions {
             page_size: size,
+            custom_width_mm: custom.0,
+            custom_height_mm: custom.1,
             margin_mm: 10.0,
             ..PdfRunOptions::default()
         };

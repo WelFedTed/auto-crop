@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { DEFAULT_PDF_PREFS, MAX_MARGIN_MM, MAX_TITLE_CHARS, PDF_PAGE_SIZES, clampMargin, cleanTitle, parsePdfPrefs } from './pdf-options.ts';
+import { DEFAULT_PDF_PREFS, MAX_CUSTOM_MM, MAX_MARGIN_MM, MAX_TITLE_CHARS, MIN_CUSTOM_MM, PDF_PAGE_SIZES, clampMargin, clampSide, cleanTitle, parsePdfPrefs } from './pdf-options.ts';
 import { S } from './strings.ts';
 
 const read = (rel: string) => readFileSync(new URL(rel, import.meta.url), 'utf8');
@@ -28,9 +28,11 @@ test("the PDF options of the webview are the fields of the shell struct, and the
   assert.match(run.slice(at - 120, at), /#\[serde\(rename_all = "lowercase"\)\]/);
   const variants = [...run.slice(at, run.indexOf('\n}', at)).matchAll(/^ {4}([A-Za-z0-9]+),/gm)].map((m) => m[1].toLowerCase());
   assert.deepEqual([...PDF_PAGE_SIZES], variants);
-  assert.match(types, /export type PdfPageSize = 'fit' \| 'a4' \| 'a5' \| 'letter';/);
+  assert.match(types, /export type PdfPageSize = 'fit' \| 'a4' \| 'a5' \| 'letter' \| 'custom';/);
   // The limits.
   assert.match(run, new RegExp(`pub const MAX_MARGIN_MM: f64 = ${MAX_MARGIN_MM}\\.0;`));
+  assert.match(run, new RegExp(`pub const MIN_CUSTOM_MM: f64 = ${MIN_CUSTOM_MM}\.0;`));
+  assert.match(run, new RegExp(`pub const MAX_CUSTOM_MM: f64 = ${MAX_CUSTOM_MM}\.0;`));
   assert.match(rust('crates/codecs/src/encoders/pdf.rs'), new RegExp(`\\.take\\(${MAX_TITLE_CHARS}\\)`), 'the writer keeps this many characters of a title');
   assert.match(app, /title: options\.title\.filter\(/, 'a blank title is the file name');
 });
@@ -40,8 +42,18 @@ test('the remembered page size and margin survive nonsense, and a margin is whol
   assert.deepEqual(parsePdfPrefs('{not json'), DEFAULT_PDF_PREFS);
   assert.deepEqual(parsePdfPrefs('[1]'), DEFAULT_PDF_PREFS);
   assert.deepEqual(parsePdfPrefs('{"pageSize":"a3","marginMm":"wide"}'), DEFAULT_PDF_PREFS);
-  assert.deepEqual(parsePdfPrefs('{"pageSize":"letter","marginMm":12.6}'), { pageSize: 'letter', marginMm: 13 });
-  assert.deepEqual(parsePdfPrefs('{"pageSize":"a4","marginMm":500}'), { pageSize: 'a4', marginMm: 50 });
+  assert.deepEqual(parsePdfPrefs('{"pageSize":"letter","marginMm":12.6}'), { ...DEFAULT_PDF_PREFS, pageSize: 'letter', marginMm: 13 });
+  assert.deepEqual(parsePdfPrefs('{"pageSize":"a4","marginMm":500}'), { ...DEFAULT_PDF_PREFS, pageSize: 'a4', marginMm: 50 });
+  assert.deepEqual(parsePdfPrefs('{"pageSize":"custom","marginMm":5,"customWidthMm":90.4,"customHeightMm":99999}'), {
+    pageSize: 'custom',
+    marginMm: 5,
+    customWidthMm: 90,
+    customHeightMm: MAX_CUSTOM_MM,
+  });
+  assert.equal(clampSide(3, 100), MIN_CUSTOM_MM);
+  assert.equal(clampSide('abc', 100), 100);
+  assert.equal(clampSide('', 100), 100);
+  assert.equal(clampSide(Infinity, 100), 100);
   assert.equal(clampMargin(-3), 0);
   assert.equal(clampMargin('7'), 7);
   assert.equal(clampMargin(''), DEFAULT_PDF_PREFS.marginMm);
@@ -77,7 +89,7 @@ test('the options sheet names every page size, labels its fields, and only a fix
   assert.match(sheet, /SIZE_LABEL: Record<PdfPageSize, string>/, 'a new page size is a type error until it has a label');
   assert.match(sheet, /<form class="sheet" onsubmit=\{go\}>/, 'Enter in a field chooses');
   assert.match(sheet, /maxlength=\{MAX_TITLE_CHARS\}/);
-  assert.equal(new Set([S.pdf.sizeFit, S.pdf.sizeA4, S.pdf.sizeA5, S.pdf.sizeLetter]).size, 4);
+  assert.equal(new Set([S.pdf.sizeFit, S.pdf.sizeA4, S.pdf.sizeA5, S.pdf.sizeLetter, S.pdf.sizeCustom]).size, 5);
   for (const t of [S.pdf.sheetTitle, S.pdf.size, S.pdf.sizeNote, S.pdf.margin, S.pdf.marginUnit, S.pdf.marginNote, S.pdf.marginOff, S.pdf.title, S.pdf.titlePlaceholder, S.pdf.titleNote, S.pdf.choose, S.pdf.sheetCancel]) {
     assert.ok(t.length > 0);
   }

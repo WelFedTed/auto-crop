@@ -221,3 +221,45 @@ fn a5_is_148_by_210_mm_and_a_300_dpi_a4_scan_fits_its_own_page_within_half_a_poi
         "{fit:?}"
     );
 }
+
+#[test]
+fn twelve_page_size_cases_match_their_media_box_to_a_hundredth_of_a_point() {
+    // (pixels, dpi, size, expected media box in points). The expected values are computed here from
+    // millimetres and inches, not from the writer's constants.
+    let mm = |v: f64| v * 72.0 / 25.4;
+    let custom = PageSize::Fixed {
+        width_pt: (mm(100.0) * 100.0).round() / 100.0,
+        height_pt: (mm(150.0) * 100.0).round() / 100.0,
+    };
+    let (c_short, c_long) = (mm(100.0), mm(150.0));
+    let cases: [((u32, u32), u32, PageSize, (f64, f64)); 12] = [
+        // Same as the picture: pixels over dpi times 72.
+        ((300, 300), 300, PageSize::MatchImage, (72.0, 72.0)),
+        ((1200, 600), 150, PageSize::MatchImage, (576.0, 288.0)),
+        ((2480, 3508), 300, PageSize::MatchImage, (595.2, 841.92)),
+        // A4, A5, Letter, portrait and landscape.
+        ((600, 800), 300, PageSize::A4, (mm(210.0), mm(297.0))),
+        ((800, 600), 300, PageSize::A4, (mm(297.0), mm(210.0))),
+        ((600, 800), 300, PageSize::A5, (mm(148.0), mm(210.0))),
+        ((800, 600), 300, PageSize::A5, (mm(210.0), mm(148.0))),
+        ((600, 800), 300, PageSize::LETTER, (8.5 * 72.0, 11.0 * 72.0)),
+        ((800, 600), 300, PageSize::LETTER, (11.0 * 72.0, 8.5 * 72.0)),
+        // A custom 100 x 150 mm sheet, portrait, landscape and square (square is portrait).
+        ((600, 800), 300, custom, (c_short, c_long)),
+        ((800, 600), 300, custom, (c_long, c_short)),
+        ((500, 500), 300, custom, (c_short, c_long)),
+    ];
+    for (n, ((w, h), dpi, size, want)) in cases.into_iter().enumerate() {
+        let (pdf, i) = laid_out(w, h, Some((dpi, dpi)), sheet(size, 0.0, false));
+        assert!(
+            (i.width_pt - want.0).abs() <= 0.01 && (i.height_pt - want.1).abs() <= 0.01,
+            "case {n}: {i:?} wanted {want:?}"
+        );
+        let p = &read_pages(&pdf).unwrap()[0];
+        assert!(
+            (p.media_box.0 - want.0).abs() <= 0.01 && (p.media_box.1 - want.1).abs() <= 0.01,
+            "case {n}: read back {:?} wanted {want:?}",
+            p.media_box
+        );
+    }
+}

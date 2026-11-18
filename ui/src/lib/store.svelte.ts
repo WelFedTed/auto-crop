@@ -17,7 +17,7 @@ import {
 import { batchLine, dismissKey } from './enhance.ts';
 import { afterRedo, afterUndo, emptyGridHistory, nextRedo, nextUndo, pushAction, reconcile, type GridHistory } from './grid-history.ts';
 import { collisionNotice, plannedNames } from './items.ts';
-import { clampMargin, cleanTitle, parsePdfPrefs, type PdfPrefs } from './pdf-options.ts';
+import { clampMargin, clampSide, cleanTitle, DEFAULT_PDF_PREFS, parsePdfPrefs, type PdfPrefs } from './pdf-options.ts';
 import {
   classify,
   countsOf,
@@ -545,7 +545,12 @@ class Store {
    */
   async savePdf(ids: number[], choice: PdfPrefs & { title: string }): Promise<void> {
     if (this.pdfRun || ids.length === 0) return;
-    const prefs = { pageSize: choice.pageSize, marginMm: clampMargin(choice.marginMm) };
+    const prefs = {
+      pageSize: choice.pageSize,
+      marginMm: clampMargin(choice.marginMm),
+      customWidthMm: clampSide(choice.customWidthMm, DEFAULT_PDF_PREFS.customWidthMm),
+      customHeightMm: clampSide(choice.customHeightMm, DEFAULT_PDF_PREFS.customHeightMm),
+    };
     this.pdfPrefs = prefs;
     lsSet(LS.pdfPrefs, JSON.stringify(prefs));
     this.pdfRun = { stage: 'rendering', done: 0, total: 0 };

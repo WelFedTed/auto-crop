@@ -327,6 +327,36 @@ fn what_does_not_fit_a_pdf_is_a_usage_error_and_touches_nothing() {
 }
 
 #[test]
+fn a_custom_sheet_reaches_the_document_and_a_bad_one_is_a_usage_error() {
+    let sb = Sandbox::new();
+    let a = photo_with(&sb.work().join("a.jpg"), 1, 0.0);
+    let out = sb.dir.path().join("c.pdf");
+    let r = sb.run(&[
+        "process",
+        "--pdf",
+        s(&out),
+        "--page-size",
+        "100x150mm",
+        "--json",
+        s(&a),
+    ]);
+    assert_eq!(r.code(), 0, "{}", r.stderr());
+    let doc = r.json();
+    assert_valid_manifest(&doc);
+    assert_eq!(doc["pdf"]["page_size"], "custom");
+    assert_eq!(doc["pdf"]["page_size_mm"][0], 100.0);
+    assert_eq!(doc["pdf"]["page_size_mm"][1], 150.0);
+    let pages = read_pages(&fs::read(&out).unwrap()).unwrap();
+    let (w, h) = pages[0].media_box;
+    assert_eq!((w.min(h), w.max(h)), (283.46, 425.2));
+    let x = sb.dir.path().join("x.pdf");
+    for bad in ["5x5mm", "100x2000mm", "axbmm", "100x150", "tabloid"] {
+        let r = sb.run(&["process", "--pdf", s(&x), "--page-size", bad, s(&a)]);
+        assert_eq!(r.code(), 2, "{bad}: {}", r.stderr());
+    }
+}
+
+#[test]
 fn a_page_size_a_margin_and_a_title_reach_the_document() {
     let sb = Sandbox::new();
     let a = photo_with(&sb.work().join("a.jpg"), 1, 0.0);

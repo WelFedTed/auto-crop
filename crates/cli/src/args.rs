@@ -11,7 +11,7 @@
 
 use auto_crop_core::{SplitPolicy, SplitProfile};
 use auto_crop_engine::output::{AvifChromaSetting, TiffCompressionSetting};
-use auto_crop_engine::run_pdf::{MAX_MARGIN_MM, PdfPageSize};
+use auto_crop_engine::run_pdf::{MAX_CUSTOM_MM, MAX_MARGIN_MM, MIN_CUSTOM_MM, PdfPageSize};
 use auto_crop_engine::{EngineOptions, QualityPreset, QualitySetting};
 use std::path::PathBuf;
 
@@ -1188,7 +1188,10 @@ pub struct PdfArgs {
     pub order: PdfOrder,
     pub dpi: Option<u32>,
     pub page_size: PdfPageSize,
-    /// `--page-margin` in millimetres (only with an A4 or Letter page).
+    /// The sheet of `--page-size WxHmm` (or `WxHin`), in millimetres; `Some` only with
+    /// `PdfPageSize::Custom`.
+    pub custom_mm: Option<(f64, f64)>,
+    /// `--page-margin` in millimetres (only with a fixed page).
     pub margin_mm: Option<f64>,
     pub upscale: bool,
     /// `--title`; `None` = the file name, `Some("")` = no title.
@@ -1235,6 +1238,31 @@ fn pool(p: &Parsed) -> Res<(Option<usize>, Option<u64>)> {
     ))
 }
 
+/// `100x150mm`, `4x6in` or `10.5x15cm`: a custom sheet in millimetres. `None` when the text is not
+/// shaped like a size at all (so the caller names the valid choices), `Some(Err)` when it is but
+/// the numbers are out of range.
+fn custom_sheet(s: &str) -> Option<Result<(f64, f64), String>> {
+    let lower = s.to_ascii_lowercase();
+    let (body, per_unit) = if let Some(b) = lower.strip_suffix("mm") {
+        (b, 1.0)
+    } else if let Some(b) = lower.strip_suffix("cm") {
+        (b, 10.0)
+    } else {
+        (lower.strip_suffix("in")?, 25.4)
+    };
+    let (w, h) = body.split_once('x')?;
+    let num = |t: &str| t.parse::<f64>().ok().filter(|v| v.is_finite());
+    let (w, h) = (num(w)?, num(h)?);
+    let (w, h) = (w * per_unit, h * per_unit);
+    let ok = |v: f64| (MIN_CUSTOM_MM..=MAX_CUSTOM_MM).contains(&v);
+    if !ok(w) || !ok(h) {
+        return Some(Err(format!(
+            "each side must be {MIN_CUSTOM_MM} to {MAX_CUSTOM_MM} mm"
+        )));
+    }
+    Some(Ok((w, h)))
+}
+
 fn pdf_args(p: &Parsed) -> Res<Option<PdfArgs>> {
     let order = match p.value("order") {
         None | Some("name") => PdfOrder::Name,
@@ -1242,12 +1270,24 @@ fn pdf_args(p: &Parsed) -> Res<Option<PdfArgs>> {
         Some(o) => return usage(format!("unknown --order `{o}` (name or given)")),
     };
     let dpi = number(p, "dpi", 36u32, 1200)?;
+    let mut custom_mm = None;
     let page_size = match p.value("page-size") {
         None | Some("fit") => PdfPageSize::Fit,
         Some("a4") => PdfPageSize::A4,
         Some("a5") => PdfPageSize::A5,
         Some("letter") => PdfPageSize::Letter,
-        Some(o) => return usage(format!("unknown --page-size `{o}` (fit, a4, a5 or letter)")),
+        Some(o) => match custom_sheet(o) {
+            Some(Ok(mm)) => {
+                custom_mm = Some(mm);
+                PdfPageSize::Custom
+            }
+            Some(Err(why)) => return usage(format!("--page-size `{o}`: {why}")),
+            None => {
+                return usage(format!(
+                    "unknown --page-size `{o}` (fit, a4, a5, letter or a size such as 100x150mm or 4x6in)"
+                ));
+            }
+        },
     };
     let margin_mm = number(p, "page-margin", 0.0f64, MAX_MARGIN_MM)?;
     let Some(file) = p.value("pdf") else {
@@ -1268,7 +1308,7 @@ fn pdf_args(p: &Parsed) -> Res<Option<PdfArgs>> {
     };
     if page_size == PdfPageSize::Fit && (margin_mm.is_some() || p.has("upscale")) {
         return usage(
-            "`--page-margin` and `--upscale` need `--page-size a4`, `a5` or `letter` (with fit-to-picture              pages the page is the picture)",
+            "`--page-margin` and `--upscale` need `--page-size a4`, `a5`, `letter` or a size (with fit-to-picture              pages the page is the picture)",
         );
     }
     if file.is_empty() {
@@ -1286,6 +1326,7 @@ fn pdf_args(p: &Parsed) -> Res<Option<PdfArgs>> {
         order,
         dpi,
         page_size,
+        custom_mm,
         margin_mm,
         upscale: p.has("upscale"),
         title: p.value("title").map(str::to_owned),

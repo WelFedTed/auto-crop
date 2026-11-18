@@ -92,18 +92,39 @@ pub enum PdfPageSize {
     A5,
     /// US Letter sheets (8.5 x 11 in), turned to each picture's orientation.
     Letter,
+    /// A sheet of the size in [`PdfRunOptions::custom_width_mm`] x `custom_height_mm` (each kept to
+    /// [`MIN_CUSTOM_MM`]..=[`MAX_CUSTOM_MM`]), turned to each picture's orientation.
+    Custom,
 }
 
 impl PdfPageSize {
-    fn size(self) -> PageSize {
+    fn size(self, custom_mm: (f64, f64)) -> PageSize {
         match self {
             PdfPageSize::Fit => PageSize::MatchImage,
             PdfPageSize::A4 => PageSize::A4,
             PdfPageSize::A5 => PageSize::A5,
             PdfPageSize::Letter => PageSize::LETTER,
+            PdfPageSize::Custom => {
+                let side = |v: f64, d: f64| {
+                    if v.is_finite() && v > 0.0 {
+                        v.clamp(MIN_CUSTOM_MM, MAX_CUSTOM_MM)
+                    } else {
+                        d
+                    }
+                };
+                PageSize::Fixed {
+                    width_pt: ((side(custom_mm.0, 210.0) * PT_PER_MM) * 100.0).round() / 100.0,
+                    height_pt: ((side(custom_mm.1, 297.0) * PT_PER_MM) * 100.0).round() / 100.0,
+                }
+            }
         }
     }
 }
+
+/// The smallest and largest side of a custom sheet, in millimetres (the largest is well inside the
+/// 14400 pt page limit of PDF viewers).
+pub const MIN_CUSTOM_MM: f64 = 20.0;
+pub const MAX_CUSTOM_MM: f64 = 1200.0;
 
 /// The largest margin of a fixed sheet, in millimetres.
 pub const MAX_MARGIN_MM: f64 = 50.0;
@@ -116,8 +137,12 @@ pub struct PdfRunOptions {
     pub dpi: Option<u32>,
     /// The document title; `None` = the file name without its extension, `Some("")` = no title.
     pub title: Option<String>,
-    /// The page size: the picture's own (default), A4, A5 or Letter.
+    /// The page size: the picture's own (default), A4, A5, Letter or a custom sheet.
     pub page_size: PdfPageSize,
+    /// The sheet of `PdfPageSize::Custom`, in millimetres, as width x height (read portrait or
+    /// landscape: each page is turned to its picture). Ignored by the other sizes.
+    pub custom_width_mm: f64,
+    pub custom_height_mm: f64,
     /// Blank border of an A4 or Letter page, in millimetres (0 to [`MAX_MARGIN_MM`]; ignored by
     /// `Fit`, where the page is the picture).
     pub margin_mm: f64,
@@ -139,7 +164,9 @@ impl PdfRunOptions {
             0.0
         };
         PageLayout {
-            size: self.page_size.size(),
+            size: self
+                .page_size
+                .size((self.custom_width_mm, self.custom_height_mm)),
             margin_pt: mm * PT_PER_MM,
             upscale: self.upscale,
         }
@@ -928,4 +955,30 @@ fn page_matches(page: &PdfPageRead, e: &PageExpect, mode: VerifyMode) -> bool {
         return true;
     }
     crate::commit::verify_pdf_page(page, &e.expect).is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The largest custom sheet is inside the page limit of the writer.
+    const _: () = assert!(MAX_CUSTOM_MM * PT_PER_MM < auto_crop_codecs::encoders::pdf::MAX_PAGE_PT);
+
+    fn fixed(w: f64, h: f64) -> PageSize {
+        PdfPageSize::Custom.size((w, h))
+    }
+
+    #[test]
+    fn a_custom_sheet_is_kept_inside_its_limits_and_never_non_finite() {
+        let pt = |mm: f64| ((mm * PT_PER_MM) * 100.0).round() / 100.0;
+        let want = |w, h| PageSize::Fixed {
+            width_pt: pt(w),
+            height_pt: pt(h),
+        };
+        assert_eq!(fixed(100.0, 150.0), want(100.0, 150.0));
+        assert_eq!(fixed(1.0, 99_999.0), want(MIN_CUSTOM_MM, MAX_CUSTOM_MM));
+        // Unset (0), negative or not a number: the A4 side.
+        assert_eq!(fixed(0.0, f64::NAN), want(210.0, 297.0));
+        assert_eq!(fixed(-5.0, f64::INFINITY), want(210.0, 297.0));
+    }
 }

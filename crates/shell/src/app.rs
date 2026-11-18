@@ -803,8 +803,11 @@ struct PdfOptionsIn {
     /// Pixel density of every page; `None` = each scan's own, 300 when it says none.
     dpi: Option<u32>,
     one_bit: bool,
-    /// `fit` (each page is its picture's size), `a4` or `letter`.
+    /// `fit` (each page is its picture's size), `a4`, `a5`, `letter` or `custom`.
     page_size: PdfPageSize,
+    /// The sheet of `custom`, in millimetres (the engine keeps each side to 20 to 1200).
+    custom_width_mm: f64,
+    custom_height_mm: f64,
     /// Blank border of an A4 or Letter page, in millimetres (the engine keeps it in 0 to 50).
     margin_mm: f64,
     /// The document title; `None` or blank = the file's name.
@@ -878,6 +881,8 @@ async fn save_pdf(
             dpi: options.dpi.filter(|d| (36..=1200).contains(d)),
             one_bit: options.one_bit,
             page_size: options.page_size,
+            custom_width_mm: options.custom_width_mm,
+            custom_height_mm: options.custom_height_mm,
             margin_mm: options.margin_mm,
             title: options.title.filter(|t| !t.trim().is_empty()),
             ..PdfRunOptions::default()

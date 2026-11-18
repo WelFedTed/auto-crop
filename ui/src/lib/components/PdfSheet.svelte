@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 Auto Crop contributors -->
 <script lang="ts">
-  import { clampMargin, MAX_MARGIN_MM, MAX_TITLE_CHARS, PDF_PAGE_SIZES, type PdfPrefs } from '../pdf-options.ts';
+  import { clampMargin, clampSide, MAX_CUSTOM_MM, MAX_MARGIN_MM, MAX_TITLE_CHARS, MIN_CUSTOM_MM, PDF_PAGE_SIZES, type PdfPrefs } from '../pdf-options.ts';
   import { S } from '../strings.ts';
   import type { PdfPageSize } from '../types.ts';
 
@@ -25,9 +25,11 @@
   let dialog = $state<HTMLDialogElement | null>(null);
   let pageSize = $state<PdfPageSize>('fit');
   let margin = $state('10');
+  let customW = $state('100');
+  let customH = $state('150');
   let title = $state('');
 
-  const SIZE_LABEL: Record<PdfPageSize, string> = { fit: S.pdf.sizeFit, a4: S.pdf.sizeA4, a5: S.pdf.sizeA5, letter: S.pdf.sizeLetter };
+  const SIZE_LABEL: Record<PdfPageSize, string> = { fit: S.pdf.sizeFit, a4: S.pdf.sizeA4, a5: S.pdf.sizeA5, letter: S.pdf.sizeLetter, custom: S.pdf.sizeCustom };
   const fixed = $derived(pageSize !== 'fit');
 
   $effect(() => {
@@ -35,6 +37,8 @@
     if (open && !dialog.open) {
       pageSize = prefs.pageSize;
       margin = String(prefs.marginMm);
+      customW = String(prefs.customWidthMm);
+      customH = String(prefs.customHeightMm);
       title = '';
       dialog.showModal();
     } else if (!open && dialog.open) {
@@ -44,7 +48,13 @@
 
   function go(e: Event): void {
     e.preventDefault();
-    onchoose({ pageSize, marginMm: clampMargin(margin), title });
+    onchoose({
+      pageSize,
+      marginMm: clampMargin(margin),
+      customWidthMm: clampSide(customW, prefs.customWidthMm),
+      customHeightMm: clampSide(customH, prefs.customHeightMm),
+      title,
+    });
   }
 </script>
 
@@ -62,6 +72,43 @@
       </select>
       <span class="note">{S.pdf.sizeNote}</span>
     </div>
+
+    {#if pageSize === 'custom'}
+      <div class="field">
+        <span class="row">
+          <label for="pdf-custom-w">{S.pdf.customWidth}</label>
+          <input
+            id="pdf-custom-w"
+            class="input num"
+            type="number"
+            min={MIN_CUSTOM_MM}
+            max={MAX_CUSTOM_MM}
+            step="1"
+            inputmode="numeric"
+            value={customW}
+            oninput={(e) => (customW = e.currentTarget.value)}
+            aria-describedby="pdf-custom-note"
+            data-pdf-custom-w
+          />
+          <label for="pdf-custom-h">{S.pdf.customHeight}</label>
+          <input
+            id="pdf-custom-h"
+            class="input num"
+            type="number"
+            min={MIN_CUSTOM_MM}
+            max={MAX_CUSTOM_MM}
+            step="1"
+            inputmode="numeric"
+            value={customH}
+            oninput={(e) => (customH = e.currentTarget.value)}
+            aria-describedby="pdf-custom-note"
+            data-pdf-custom-h
+          />
+          <span class="unit">{S.pdf.marginUnit}</span>
+        </span>
+        <span class="note" id="pdf-custom-note">{S.pdf.customNote}</span>
+      </div>
+    {/if}
 
     <div class="field">
       <label for="pdf-margin">{S.pdf.margin}</label>
