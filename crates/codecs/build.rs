@@ -77,6 +77,34 @@ fn turbojpeg(prefix: &Path) {
     }
 }
 
+/// The name to give `rustc-link-lib=static=` for the archive of `name` in `lib`. Unix archives are
+/// `lib<name>.a` and need nothing; MSVC wants `<name>.lib` (CMake writes that, or `lib<name>.lib`),
+/// and an archive that Meson named `lib<name>.a` is copied to `<name>.lib` in `OUT_DIR`.
+fn static_name(lib: &Path, name: &str) -> String {
+    if env::var("CARGO_CFG_TARGET_OS").unwrap_or_default() != "windows" {
+        return name.to_owned();
+    }
+    if lib.join(format!("{name}.lib")).is_file() {
+        return name.to_owned();
+    }
+    let prefixed = format!("lib{name}");
+    if lib.join(format!("{prefixed}.lib")).is_file() {
+        return prefixed;
+    }
+    let archive = lib.join(format!("lib{name}.a"));
+    if archive.is_file() {
+        let out = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
+        fs::copy(&archive, out.join(format!("{name}.lib")))
+            .unwrap_or_else(|e| fail(&format!("cannot copy {}: {e}", archive.display())));
+        println!("cargo:rustc-link-search=native={}", out.display());
+        return name.to_owned();
+    }
+    fail(&format!(
+        "no static archive for `{name}` in {} (run `cargo xtask build-native --static`)",
+        lib.display()
+    ))
+}
+
 fn heif(prefix: &Path) {
     let include = prefix.join("include");
     let heif_dir = include.join("libheif");
@@ -96,7 +124,7 @@ fn heif(prefix: &Path) {
         // archives with -fsanitize=address, so overruns inside the C code are caught too.
         println!("cargo:rustc-link-search=native={}", lib.display());
         for l in ["heif", "de265", "dav1d"] {
-            println!("cargo:rustc-link-lib=static={l}");
+            println!("cargo:rustc-link-lib=static={}", static_name(&lib, l));
         }
         match env::var("CARGO_CFG_TARGET_OS").unwrap_or_default().as_str() {
             "macos" => println!("cargo:rustc-link-lib=dylib=c++"),

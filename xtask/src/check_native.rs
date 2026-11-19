@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // SPDX-FileCopyrightText: 2026 Auto Crop contributors
 
-//! `cargo xtask check-native [--prefix <dir>]` (ROADMAP M0.42, M0.45).
+//! `cargo xtask check-native [--prefix <dir>]` (ROADMAP M0.42, M0.45), and
+//! `cargo xtask check-native --binary <exe>` for the single-file application (decision B22): the
+//! libraries are linked in, so the executable itself is checked for the forbidden encoder symbols
+//! and for any dynamic dependency on libheif, dav1d or libde265.
 //!
 //! Inspects the libraries built by `build-native` (default prefix
 //! `target/native/prefix`):
@@ -142,7 +145,55 @@ fn manifests_with_embedded_libheif(root: &Path, hits: &mut Vec<String>) {
     }
 }
 
+/// Dynamic dependencies the single-file application must NOT have: the decoders are linked in.
+pub fn unexpected_native_imports(needed: &[String]) -> Vec<String> {
+    needed
+        .iter()
+        .filter(|n| {
+            ["heif", "libheif", "dav1d", "libdav1d", "de265", "libde265"]
+                .iter()
+                .any(|p| n.starts_with(p))
+        })
+        .cloned()
+        .collect()
+}
+
+/// `--binary <exe>`: the executable has no GPL or AV1/HEVC-encoder symbols and imports no decoder
+/// library (they are inside it).
+fn run_binary(path: &str) -> Result<(), String> {
+    let bytes = fs::read(path).map_err(|e| format!("{path}: {e}"))?;
+    let mut problems = Vec::new();
+    for m in forbidden_symbols(&bytes) {
+        problems.push(format!("{path}: contains forbidden symbols `{m}*`"));
+    }
+    match libs_needed(&bytes) {
+        Ok(needed) => {
+            println!("{path}: needs {}", needed.join(", "));
+            for n in unexpected_native_imports(&needed) {
+                problems.push(format!("{path}: imports `{n}`; it must be linked in"));
+            }
+        }
+        Err(e) => problems.push(format!("{path}: not inspected ({e})")),
+    }
+    if problems.is_empty() {
+        println!("check-native --binary: ok");
+        Ok(())
+    } else {
+        Err(problems.join(
+            "
+",
+        ))
+    }
+}
+
 pub fn run(args: &[String]) -> Result<(), String> {
+    if let Some(p) = args
+        .iter()
+        .position(|a| a == "--binary")
+        .and_then(|i| args.get(i + 1))
+    {
+        return run_binary(p);
+    }
     let prefix = args
         .iter()
         .position(|a| a == "--prefix")

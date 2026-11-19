@@ -4,7 +4,9 @@
 # Native library pins (ROADMAP M0.39). Every download is verified against its SHA-256 before use;
 # a wrong hash is refused. `cargo xtask build-native` builds the `build = "cmake"` entries.
 # Minimum versions are security floors (libheif >= 1.23.5, libde265 >= 1.1.3, libjpeg-turbo >= 3.1.4).
-# Licences: LGPL libraries are shipped as separate, dynamically linked, replaceable libraries (B12).
+# Licences: the LGPL libraries (libheif, libde265) were first shipped as separate, dynamically linked,
+# replaceable libraries (B12); since B22 the single-file release links them statically (`cargo xtask
+# build-native --static`), and this manifest is the relinking recipe.
 # Never add x265, x264 or any GPL encoder (B12, B2).
 # dav1d (meson) is built before libheif, which links it (AVIF); `build = "meson"` entries need
 # `meson` and `ninja` on PATH (and NASM on x86), see docs/testing/heif-native.md.

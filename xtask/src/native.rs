@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // SPDX-FileCopyrightText: 2026 Auto Crop contributors
 
-//! `cargo xtask build-native [--only a,b] [--target <triple>]` (ROADMAP M0.39).
+//! `cargo xtask build-native [--only a,b] [--static] [--target <triple>]` (ROADMAP M0.39).
+//!
+//! `--static` builds libde265 (linked into libheif, no plugin), dav1d and libheif as static
+//! archives into `target/native/prefix-static`, for the single-file application (decision B22:
+//! the libraries are linked into the executable). Without it the shared libraries of
+//! `target/native/prefix` are built, as before (development, the sanitizer jobs, the tests).
 //!
 //! Reads `native-deps.toml`, fetches every archive with `curl`, **refuses any
 //! download whose SHA-256 differs from the pin**, extracts it with `tar` and builds
@@ -226,7 +231,21 @@ pub fn split_args(text: &str) -> Vec<String> {
     text.split_whitespace().map(str::to_owned).collect()
 }
 
-fn build_cmake(lib: &Lib, src: &Path, build: &Path, prefix: &Path) -> Result<(), String> {
+/// What a static build adds to the CMake arguments: archives, libde265 inside libheif (no plugin),
+/// position-independent code (a PIE executable or a shared object can link them).
+const STATIC_CMAKE_ARGS: &[&str] = &[
+    "-DBUILD_SHARED_LIBS=OFF",
+    "-DWITH_LIBDE265_PLUGIN=OFF",
+    "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
+];
+
+fn build_cmake(
+    lib: &Lib,
+    src: &Path,
+    build: &Path,
+    prefix: &Path,
+    static_build: bool,
+) -> Result<(), String> {
     let mut cfg = Command::new("cmake");
     cfg.arg("-S").arg(src).arg("-B").arg(build);
     cfg.arg("-DCMAKE_BUILD_TYPE=Release");
@@ -236,6 +255,9 @@ fn build_cmake(lib: &Lib, src: &Path, build: &Path, prefix: &Path) -> Result<(),
     // Extra CMake arguments for one-off builds (the sanitizer job builds a static, instrumented
     // libjpeg-turbo with `AUTOCROP_CMAKE_ARGS="-DENABLE_SHARED=OFF -DENABLE_STATIC=ON"`). They come
     // after the manifest flags, so they win; the pin and the hash check are unchanged.
+    if static_build {
+        cfg.args(STATIC_CMAKE_ARGS);
+    }
     cfg.args(extra_cmake_args());
     run_cmd(&mut cfg, &format!("cmake configure {}", lib.name))?;
     let mut b = Command::new("cmake");
@@ -266,7 +288,13 @@ fn extra_meson_args() -> Vec<String> {
 /// Builds a `build = "meson"` entry (dav1d). `meson` and `ninja` must be on `PATH`; on Windows
 /// meson activates the Visual Studio environment itself when `cl` is not already on `PATH`; on x86
 /// dav1d's assembly needs NASM (`nasm` on `PATH`).
-fn build_meson(lib: &Lib, src: &Path, build: &Path, prefix: &Path) -> Result<(), String> {
+fn build_meson(
+    lib: &Lib,
+    src: &Path,
+    build: &Path,
+    prefix: &Path,
+    static_build: bool,
+) -> Result<(), String> {
     let mut cfg = Command::new("meson");
     cfg.arg("setup").arg(build).arg(src);
     cfg.arg(format!("--prefix={}", prefix.display()));
@@ -281,6 +309,9 @@ fn build_meson(lib: &Lib, src: &Path, build: &Path, prefix: &Path) -> Result<(),
         cfg.arg("--vsenv");
     }
     cfg.args(&lib.flags);
+    if static_build {
+        cfg.arg("-Ddefault_library=static");
+    }
     // One-off builds (a sanitizer job: `AUTOCROP_MESON_ARGS="-Db_sanitize=address"`); they come
     // after the manifest flags, so they win; the pin and the hash check are unchanged.
     cfg.args(extra_meson_args());
@@ -298,7 +329,23 @@ fn build_meson(lib: &Lib, src: &Path, build: &Path, prefix: &Path) -> Result<(),
     run_cmd(
         Command::new("meson").arg("install").arg("-C").arg(build),
         &format!("meson install {}", lib.name),
-    )
+    )?;
+    if static_build {
+        msvc_static_name(prefix);
+    }
+    Ok(())
+}
+
+/// Meson names a static archive `libdav1d.a` even with MSVC; MSVC link lines and libheif's CMake
+/// look for `dav1d.lib`, so the archive gets that name too.
+fn msvc_static_name(prefix: &Path) {
+    if !cfg!(windows) {
+        return;
+    }
+    let (a, lib) = (prefix.join("lib/libdav1d.a"), prefix.join("lib/dav1d.lib"));
+    if a.is_file() && !lib.is_file() {
+        let _ = fs::copy(&a, &lib);
+    }
 }
 
 /// True when a libheif `CMakeCache.txt` holds a real `DAV1D_LIBRARY` (not empty, not `-NOTFOUND`).
@@ -331,16 +378,26 @@ pub fn run(args: &[String]) -> Result<(), String> {
     if !problems.is_empty() {
         return Err(problems.join("\n"));
     }
+    let static_build = args.iter().any(|a| a == "--static");
+    let prefix_name = if static_build {
+        "prefix-static"
+    } else {
+        "prefix"
+    };
     let root = PathBuf::from("target/native");
     let prefix = plain_path(
         fs::canonicalize({
-            fs::create_dir_all(root.join("prefix")).map_err(|e| e.to_string())?;
-            root.join("prefix")
+            fs::create_dir_all(root.join(prefix_name)).map_err(|e| e.to_string())?;
+            root.join(prefix_name)
         })
         .map_err(|e| e.to_string())?,
     );
     for name in ORDER {
         if only.as_ref().is_some_and(|o| !o.iter().any(|n| n == name)) {
+            continue;
+        }
+        // The single-file application has no use for libjpeg-turbo (the pure-Rust JPEG path).
+        if static_build && *name == "libjpeg-turbo" && only.is_none() {
             continue;
         }
         let lib = libs
@@ -359,13 +416,18 @@ pub fn run(args: &[String]) -> Result<(), String> {
         let _ = fs::remove_dir_all(&src_parent);
         let src = extract(&archive, &src_parent)?;
         println!("== {}: building ({})", lib.name, lib.build);
+        let build_dir = work.join(if static_build {
+            "build-static"
+        } else {
+            "build"
+        });
         match lib.build.as_str() {
             "cmake" => {
-                build_cmake(lib, &src, &work.join("build"), &prefix)?;
+                build_cmake(lib, &src, &build_dir, &prefix, static_build)?;
                 if lib.flags.iter().any(|f| f == "-DWITH_DAV1D=ON") {
                     // libheif's CMake carries on without dav1d when it finds none; a libheif that
                     // cannot read AVIF must fail the build here, not at the first AVIF.
-                    let cache = fs::read_to_string(work.join("build/CMakeCache.txt"))
+                    let cache = fs::read_to_string(build_dir.join("CMakeCache.txt"))
                         .map_err(|e| format!("{}: CMakeCache.txt: {e}", lib.name))?;
                     if !dav1d_found(&cache) {
                         return Err(format!(
@@ -376,7 +438,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
                     }
                 }
             }
-            "meson" => build_meson(lib, &src, &work.join("build"), &prefix)?,
+            "meson" => build_meson(lib, &src, &build_dir, &prefix, static_build)?,
             other => {
                 return Err(format!(
                     "{}: build system `{other}` cannot be built here",
