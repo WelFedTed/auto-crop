@@ -38,6 +38,8 @@ pub struct LaunchSpec {
     pub memory_limit: u64,
     /// Folder of the libheif plugins (the HEVC decoder), when there is one.
     pub plugin_dir: Option<PathBuf>,
+    /// The executable is the whole application (no DLLs or plugin folder beside it to stage).
+    pub standalone: bool,
     /// Index into [`attempt_names`]: 0 is the strongest confinement, higher ones are the
     /// reported fallbacks.
     pub attempt: usize,

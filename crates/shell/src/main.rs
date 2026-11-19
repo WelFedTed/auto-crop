@@ -5,6 +5,6 @@
 
 #![cfg_attr(all(not(debug_assertions), windows), windows_subsystem = "windows")]
 
-fn main() {
-    auto_crop_shell::run();
+fn main() -> std::process::ExitCode {
+    auto_crop_shell::entry()
 }

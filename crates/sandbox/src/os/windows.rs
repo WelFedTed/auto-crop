@@ -167,8 +167,15 @@ fn stage(spec: &LaunchSpec) -> io::Result<(PathBuf, Option<PathBuf>)> {
         .exe
         .parent()
         .ok_or_else(|| io::Error::other("worker path has no folder"))?;
-    let mut dlls = dlls_in(exe_dir);
-    if !exe_dir.join("heif.dll").is_file()
+    // A standalone executable has nothing beside it that belongs to it (a Downloads folder is full
+    // of other people's DLLs): only the executable itself is staged.
+    let mut dlls = if spec.standalone {
+        Vec::new()
+    } else {
+        dlls_in(exe_dir)
+    };
+    if !spec.standalone
+        && !exe_dir.join("heif.dll").is_file()
         && let Some(d) = dll_dir_on_path()
     {
         dlls.extend(dlls_in(&d));
@@ -177,7 +184,7 @@ fn stage(spec: &LaunchSpec) -> io::Result<(PathBuf, Option<PathBuf>)> {
         .plugin_dir
         .clone()
         .or_else(|| std::env::var_os("LIBHEIF_PLUGIN_PATH").map(PathBuf::from))
-        .filter(|p| p.is_dir());
+        .filter(|p| p.is_dir() && !spec.standalone);
 
     let mut h = 0xcbf2_9ce4_8422_2325u64;
     stat_into(&mut h, &spec.exe);

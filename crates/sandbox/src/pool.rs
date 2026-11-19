@@ -116,6 +116,9 @@ pub struct PoolConfig {
     pub env: Vec<(OsString, OsString)>,
     /// Extra worker arguments (tests).
     pub args: Vec<String>,
+    /// The worker is the application's own executable, started with [`WORKER_FLAG`] (the single-file
+    /// build): nothing else sits beside it, so nothing else is staged with it.
+    pub standalone: bool,
     /// Wait for the test-only `Escape` frame after `Hello`.
     pub await_escape: bool,
     /// Try only this confinement attempt (an index into `os::attempt_names()`): tests of the
@@ -141,6 +144,7 @@ impl PoolConfig {
             recycle_after: 64,
             env: Vec::new(),
             args: Vec::new(),
+            standalone: false,
             await_escape: false,
             force_attempt: None,
         }
@@ -378,12 +382,16 @@ impl WorkerPool {
         };
         let mut failures: Vec<String> = Vec::new();
         for (attempt, name) in names.iter().enumerate().take(last).skip(first) {
-            let mut args = vec![
+            let mut args = Vec::new();
+            if cfg.standalone {
+                args.push(crate::WORKER_FLAG.to_owned());
+            }
+            args.extend([
                 "--mem-limit".to_owned(),
                 memory_limit.to_string(),
                 "--cpu-secs".to_owned(),
                 "3600".to_owned(),
-            ];
+            ]);
             args.extend(cfg.args.iter().cloned());
             let spec = LaunchSpec {
                 exe: cfg.worker_exe.clone(),
@@ -391,6 +399,7 @@ impl WorkerPool {
                 env: cfg.env.clone(),
                 memory_limit,
                 plugin_dir: cfg.plugin_dir.clone(),
+                standalone: cfg.standalone,
                 attempt,
             };
             match self.start_attempt(&spec, capacity_pixels) {

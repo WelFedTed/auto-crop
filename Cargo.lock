@@ -314,7 +314,10 @@ dependencies = [
 name = "auto-crop-shell"
 version = "0.0.6"
 dependencies = [
+ "auto-crop-cli",
  "auto-crop-engine",
+ "auto-crop-sandbox",
+ "auto-crop-worker",
  "getrandom 0.4.3",
  "serde",
  "serde_json",

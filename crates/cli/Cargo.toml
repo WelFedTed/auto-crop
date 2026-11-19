@@ -45,6 +45,10 @@ tempfile = "3"
 # The generated WebP and TIFF files of the "never replaced" tests; the feature is on for tests only.
 auto-crop-codecs = { path = "../codecs", features = ["fixtures"] }
 
+[lib]
+name = "auto_crop_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "auto-crop"
 path = "src/main.rs"

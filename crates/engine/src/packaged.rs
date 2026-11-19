@@ -72,6 +72,19 @@ pub fn configure_decode_from_exe() -> std::sync::Arc<auto_crop_sandbox::PoolDeco
     auto_crop_sandbox::install(auto_crop_sandbox::InstallOptions {
         exe,
         plugin_dir,
+        standalone: false,
+        inflight_cap: Some(crate::memory::system_cap()),
+        mode: None,
+    })
+}
+
+/// The same for the single-file application: the worker is this executable itself, started with
+/// `--decode-worker` (the libraries are linked in, so there is no plugin folder).
+pub fn configure_decode_standalone() -> std::sync::Arc<auto_crop_sandbox::PoolDecoder> {
+    auto_crop_sandbox::install(auto_crop_sandbox::InstallOptions {
+        exe: std::env::current_exe().unwrap_or_default(),
+        plugin_dir: None,
+        standalone: true,
         inflight_cap: Some(crate::memory::system_cap()),
         mode: None,
     })

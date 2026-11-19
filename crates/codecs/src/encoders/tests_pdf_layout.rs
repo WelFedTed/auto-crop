@@ -232,7 +232,9 @@ fn twelve_page_size_cases_match_their_media_box_to_a_hundredth_of_a_point() {
         height_pt: (mm(150.0) * 100.0).round() / 100.0,
     };
     let (c_short, c_long) = (mm(100.0), mm(150.0));
-    let cases: [((u32, u32), u32, PageSize, (f64, f64)); 12] = [
+    // (pixels, dpi, size, expected media box)
+    type Case = ((u32, u32), u32, PageSize, (f64, f64));
+    let cases: [Case; 12] = [
         // Same as the picture: pixels over dpi times 72.
         ((300, 300), 300, PageSize::MatchImage, (72.0, 72.0)),
         ((1200, 600), 150, PageSize::MatchImage, (576.0, 288.0)),

@@ -35,6 +35,16 @@ pub const WORKER_NAME: &str = if cfg!(windows) {
     "auto-crop-worker"
 };
 
+/// Windows: lets a GUI-subsystem executable started from a console print there (a no-op
+/// elsewhere, and when there is no parent console).
+pub fn attach_parent_console() {
+    #[cfg(windows)]
+    os::ffi::windows::attach_parent_console();
+}
+
+/// The first argument that makes the single-file application run as the decode worker.
+pub const WORKER_FLAG: &str = "--decode-worker";
+
 /// `AUTOCROP_DECODE`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -194,6 +204,9 @@ pub struct InstallOptions {
     pub exe: PathBuf,
     /// The libheif plugin folder of the package, if any.
     pub plugin_dir: Option<PathBuf>,
+    /// The worker is this very executable, run with [`WORKER_FLAG`] (the single-file build); no
+    /// worker file is looked for beside it.
+    pub standalone: bool,
     /// Cap on the bytes in flight (the engine's memory budget cap).
     pub inflight_cap: Option<u64>,
     /// Overrides `AUTOCROP_DECODE` (tests).
@@ -207,11 +220,16 @@ pub fn install(opts: InstallOptions) -> Arc<PoolDecoder> {
     INSTALLED
         .get_or_init(|| {
             let mode = opts.mode.unwrap_or_else(Mode::from_env);
-            let worker = worker_beside(&opts.exe);
+            let worker = if opts.standalone {
+                Some(opts.exe.clone())
+            } else {
+                worker_beside(&opts.exe)
+            };
             let pool = match (&worker, mode) {
                 (Some(w), Mode::Auto | Mode::Worker) => {
                     let mut cfg = PoolConfig::new(w.clone());
                     cfg.plugin_dir = opts.plugin_dir.clone();
+                    cfg.standalone = opts.standalone;
                     if let Some(c) = opts.inflight_cap {
                         cfg.inflight_cap = c.max(1 << 28);
                     }

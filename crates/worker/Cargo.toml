@@ -31,6 +31,10 @@ auto-crop-core = { path = "../core" }
 auto-crop-engine = { path = "../engine" }
 tempfile = "3"
 
+[lib]
+name = "auto_crop_worker"
+path = "src/lib.rs"
+
 [[bin]]
 name = "auto-crop-worker"
 path = "src/main.rs"

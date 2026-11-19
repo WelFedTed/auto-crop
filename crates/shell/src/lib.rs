@@ -199,6 +199,34 @@ pub fn run() {
     app::run();
 }
 
+/// The entry point of the single-file application, one executable with three faces:
+///
+/// * no arguments: the desktop app;
+/// * `--decode-worker ...`: the sandboxed decode worker (the pool starts the executable with it);
+/// * anything else: the command-line tool (`auto-crop process ...`, `auto-crop --help`).
+///   `auto-crop gui` also opens the app.
+#[cfg(feature = "gui")]
+pub fn entry() -> std::process::ExitCode {
+    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    match args.first().and_then(|a| a.to_str()) {
+        None if args.is_empty() => {}
+        Some("gui") if args.len() == 1 => {}
+        Some(auto_crop_sandbox::WORKER_FLAG) => {
+            let rest: Vec<String> = args[1..]
+                .iter()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect();
+            std::process::exit(auto_crop_worker::run(&rest));
+        }
+        _ => {
+            auto_crop_sandbox::attach_parent_console();
+            return auto_crop_cli::run(true);
+        }
+    }
+    run();
+    std::process::ExitCode::SUCCESS
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -21,6 +21,7 @@ fn install() -> &'static auto_crop_sandbox::PoolDecoder {
         auto_crop_sandbox::install(InstallOptions {
             exe: PathBuf::from(env!("CARGO_BIN_EXE_auto-crop-worker")),
             plugin_dir: None,
+            standalone: false,
             inflight_cap: None,
             mode: Some(Mode::Worker),
         })

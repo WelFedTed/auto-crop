@@ -820,3 +820,56 @@ pub fn confinement_report() -> (String, bool) {
         (format!("{token}+{job_text}"), appcontainer)
     }
 }
+
+/// A GUI-subsystem executable that was started from a console has no standard handles unless
+/// they were redirected. Attaches to the parent's console and opens it for each handle that is
+/// missing, so the command-line mode of the single-file application prints (and reads) where the
+/// command was typed. Redirected handles are left alone. Does nothing without a parent console
+/// (started from Explorer).
+pub fn attach_parent_console() {
+    use windows_sys::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE};
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+    };
+    use windows_sys::Win32::System::Console::{
+        ATTACH_PARENT_PROCESS, AttachConsole, STD_ERROR_HANDLE, SetStdHandle,
+    };
+    // SAFETY: GetStdHandle, AttachConsole, CreateFileW and SetStdHandle are called with valid
+    // arguments (a NUL-terminated wide device name, no security attributes, no template); the
+    // handle from CreateFileW is owned by the process from then on (it is the standard handle,
+    // deliberately never closed).
+    unsafe {
+        let missing = |id| {
+            let h = GetStdHandle(id);
+            h.is_null() || h == INVALID_HANDLE_VALUE
+        };
+        let wanted = [
+            (STD_INPUT_HANDLE, "CONIN$", GENERIC_READ),
+            (STD_OUTPUT_HANDLE, "CONOUT$", GENERIC_WRITE),
+            (STD_ERROR_HANDLE, "CONOUT$", GENERIC_WRITE),
+        ];
+        if !wanted.iter().any(|(id, ..)| missing(*id)) {
+            return;
+        }
+        if AttachConsole(ATTACH_PARENT_PROCESS) == 0 {
+            return;
+        }
+        for (id, name, access) in wanted {
+            if !missing(id) {
+                continue;
+            }
+            let h = CreateFileW(
+                wide(OsStr::new(name)).as_ptr(),
+                access,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                null(),
+                OPEN_EXISTING,
+                0,
+                null_mut(),
+            );
+            if h != INVALID_HANDLE_VALUE {
+                SetStdHandle(id, h);
+            }
+        }
+    }
+}

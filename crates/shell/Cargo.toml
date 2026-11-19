@@ -18,16 +18,20 @@ default = ["avif"]
 # The Tauri GUI. Off by default so the workspace-wide jobs (fmt, clippy, nextest, deny) and Linux CI
 # without the WebKitGTK system libraries keep building until the M3.70 shell jobs exist.
 # Build the app with: cargo build -p auto-crop-shell --release --features gui,custom-protocol
-gui = ["dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-build", "dep:getrandom"]
+gui = ["dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-build", "dep:getrandom", "dep:auto-crop-cli", "dep:auto-crop-worker", "dep:auto-crop-sandbox"]
 # HEIC, HEIF and AVIF input (libheif, dav1d and the libde265 plugin next to the executable).
-heif = ["auto-crop-engine/heif"]
+heif = ["auto-crop-engine/heif", "auto-crop-cli?/heif", "auto-crop-worker?/heif"]
 # AVIF output (Convert and Save as): rav1e, pure Rust, no nasm needed.
-avif = ["auto-crop-engine/avif"]
+avif = ["auto-crop-engine/avif", "auto-crop-cli?/avif"]
 # Serve the embedded UI (ui/dist) instead of the dev server URL.
 custom-protocol = ["tauri/custom-protocol"]
 
 [dependencies]
 auto-crop-engine = { path = "../engine" }
+# The single-file application is also the command-line tool and the decode worker (`entry`).
+auto-crop-cli = { path = "../cli", optional = true }
+auto-crop-worker = { path = "../worker", optional = true }
+auto-crop-sandbox = { path = "../sandbox", optional = true }
 serde.workspace = true
 serde_json.workspace = true
 tauri = { version = "=2.12.1", default-features = false, features = ["wry", "common-controls-v6", "compression"], optional = true }
