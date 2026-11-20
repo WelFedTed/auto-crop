@@ -257,6 +257,15 @@ fn build_cmake(
     // after the manifest flags, so they win; the pin and the hash check are unchanged.
     if static_build {
         cfg.args(STATIC_CMAKE_ARGS);
+        if cfg!(windows) && lib.name == "libheif" {
+            // libde265's header declares its functions `dllimport` unless told the library is
+            // static; libheif's built-in HEVC backend includes that header. The environment (not
+            // CMAKE_CXX_FLAGS) keeps CMake's own default flags such as /EHsc.
+            for var in ["CFLAGS", "CXXFLAGS"] {
+                let old = std::env::var(var).unwrap_or_default();
+                cfg.env(var, format!("{old} /DLIBDE265_STATIC_BUILD").trim());
+            }
+        }
     }
     cfg.args(extra_cmake_args());
     run_cmd(&mut cfg, &format!("cmake configure {}", lib.name))?;

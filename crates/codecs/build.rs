@@ -105,6 +105,31 @@ fn static_name(lib: &Path, name: &str) -> String {
     ))
 }
 
+/// libde265's x86 code asks the compiler runtime which CPU features exist (`__cpu_model`,
+/// `__cpu_indicator_init`); rustc links with `-nodefaultlibs`, so on Intel macOS the clang runtime
+/// archive is named explicitly.
+fn clang_runtime() {
+    let out = process::Command::new("clang")
+        .arg("--print-file-name=libclang_rt.osx.a")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| PathBuf::from(s.trim()));
+    match out {
+        Some(p) if p.is_file() => {
+            println!(
+                "cargo:rustc-link-search=native={}",
+                p.parent().unwrap().display()
+            );
+            println!("cargo:rustc-link-lib=static=clang_rt.osx");
+        }
+        _ => fail(
+            "libclang_rt.osx.a not found (`clang --print-file-name=libclang_rt.osx.a`); libde265 needs it on Intel macOS",
+        ),
+    }
+}
+
 fn heif(prefix: &Path) {
     let include = prefix.join("include");
     let heif_dir = include.join("libheif");
@@ -127,7 +152,12 @@ fn heif(prefix: &Path) {
             println!("cargo:rustc-link-lib=static={}", static_name(&lib, l));
         }
         match env::var("CARGO_CFG_TARGET_OS").unwrap_or_default().as_str() {
-            "macos" => println!("cargo:rustc-link-lib=dylib=c++"),
+            "macos" => {
+                println!("cargo:rustc-link-lib=dylib=c++");
+                if env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("x86_64") {
+                    clang_runtime();
+                }
+            }
             "windows" => {}
             _ => println!("cargo:rustc-link-lib=dylib=stdc++"),
         }
