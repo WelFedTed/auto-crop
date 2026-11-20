@@ -144,6 +144,8 @@ jobs:
           install -m 755 target/release/AutoCrop "$dist/$name"
           cp THIRD_PARTY_NOTICES.md "$dist/THIRD_PARTY_NOTICES.md"
           if grep -a -q -e AUTOCROP_ESCAPE -e AUTOCROP-FAULT: "$dist/$name"; then echo "the executable contains test hooks"; exit 1; fi
+          # Apple silicon links an ad-hoc signature itself; Intel does not: sign (free, ad hoc) either way.
+          codesign --force --sign - "$dist/$name"
           codesign --verify --verbose=2 "$dist/$name"
           (cd "$dist" && shasum -a 256 "$name" | tee "SHA256SUMS-macos-$ARCH-$ver.txt")
           size=$(stat -f %z "$dist/$name"); echo "size: $size bytes"
