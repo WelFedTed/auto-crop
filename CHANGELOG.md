@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.0.7 (2026-11-20), Windows, macOS and Linux builds
+
+A seventh early build. It is still **not** the CLI-only v0.1.0 of [ROADMAP.md](ROADMAP.md) milestone M2, the
+accuracy gates have not been measured on a proper real-photo set, and the confidence score is an uncalibrated
+heuristic. Do not use it on irreplaceable files without a copy.
+
+### What changed
+
+- **One stand-alone file per platform.** `auto-crop.exe` (Windows), `auto-crop-macos-arm64`,
+  `auto-crop-macos-x86_64` and `auto-crop-linux-x86_64` replace the zip, DMG, AppImage, deb and tar.gz of
+  earlier releases. The file is the desktop app (no arguments), the command-line tool (any arguments) and the
+  sandboxed decode worker (the app starts itself with `--decode-worker`). libheif, libde265 and dav1d are linked
+  into it, so HEIC, HEIF and AVIF need no extra DLLs or plugin folder. This amends decision B12 (recorded as B22
+  in [the decision log](docs/plan/00-decision-log.md)): the LGPL libraries are no longer separate shared
+  libraries; the rebuild recipe is `cargo xtask build-native --static` ([docs/packaging.md](docs/packaging.md)).
+  On Windows, run the command-line mode from `cmd` as `start /wait auto-crop.exe ...`.
+- **Scan to PDF.** A custom page size next to A4, A5 and Letter: `--page-size 100x150mm` (also `cm` and `in`) on
+  the command line, "Custom size" with width and height in the PDF sheet of the app.
+- **Releases are no longer marked pre-release** on GitHub (the versions are still 0.0.x).
+- Dependency updates: toml 1.1, sysinfo 0.39, sha2 0.11, getrandom 0.4, fax 0.3, svelte 5.57, vite 8.3.6.
+
+### Packages and checksums
+
+`auto-crop.exe`, `auto-crop-macos-arm64`, `auto-crop-macos-x86_64`, `auto-crop-linux-x86_64`, `THIRD_PARTY_NOTICES.md`
+and `SHA256SUMS`. Check every download against `SHA256SUMS`.
+
+### Known limits
+
+- Built in GitHub Actions, **unsigned**, with no build attestation or SBOM. The macOS and Linux files were
+  smoke-tested on CI runners only. The macOS file is a bare executable (no app bundle, no Dock icon of its own).
+- The sandboxed worker is the application's own executable; on Windows it runs from a staged copy under
+  `%LOCALAPPDATA%\AutoCrop\worker-stage`.
+- Real touch input, screen readers, the native file dialog and drag-and-drop were not tested.
+- The classical detector fails about 40% of the time on a second, independent set of synthetic scenes and gets
+  hand-held receipts wrong (held, not written). A learned detector is **not** in this build.
+- No lossy WebP, no JPEG XL output, no `--preset`, English only.
+
 ## 0.0.6 (2026-11-16), pre-release, Windows, macOS and Linux test builds
 
 A sixth early test build. It is still **not** the CLI-only v0.1.0 of [ROADMAP.md](ROADMAP.md) milestone M2, the
