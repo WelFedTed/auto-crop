@@ -25,7 +25,7 @@ thiserror.workspace = true
 # default-features off: no `download-binaries` (the downloaded runtime fails to link on Ubuntu 22.04
 # and is not covered by our hash policy), no `copy-dylibs`, no `tls-native` (no TLS stack in the
 # dependency graph, docs/policy/ci-guards.md section 2).
-ort = { version = "=2.0.0-rc.13", optional = true, default-features = false, features = ["std", "load-dynamic"] }
+ort = { version = "=2.0.0-rc.15", optional = true, default-features = false, features = ["std", "load-dynamic"] }
 rten = { version = "=0.26.0", optional = true, default-features = false, features = ["onnx_format"] }
 rten-tensor = { version = "=0.26.0", optional = true }
 
