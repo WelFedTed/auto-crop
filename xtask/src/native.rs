@@ -319,9 +319,26 @@ fn build_meson(
         // dav1d 1.5.4's `include/compat/msvc/stdatomic.h` tests `defined(__clang__) &&
         // __has_include_next(<stdatomic.h>)`; MSVC 19.52 (Visual Studio 2026 18.x, runner image of
         // 2026-11-16 and later) no longer short-circuits the unknown macro and stops with C7780.
-        // A function-like definition that is always 0 restores the old behaviour (the header's
-        // own atomics are used, as with every earlier MSVC).
-        cfg.arg("-Dc_args=/D__has_include_next(x)=0");
+        // (`/D` cannot define a function-like macro, so a header that does is force-included.) The
+        // macro is always 0, which restores the old behaviour: the header's own atomics are used,
+        // as with every earlier MSVC.
+        let compat = build
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join("msvc-compat.h");
+        fs::create_dir_all(build.parent().unwrap_or(Path::new("."))).map_err(|e| e.to_string())?;
+        fs::write(
+            &compat,
+            "#ifndef __has_include_next
+#define __has_include_next(x) 0
+#endif
+",
+        )
+        .map_err(|e| e.to_string())?;
+        cfg.arg(format!(
+            "-Dc_args=/FI{}",
+            plain_path(fs::canonicalize(&compat).map_err(|e| e.to_string())?).display()
+        ));
     }
     cfg.args(&lib.flags);
     if static_build {
