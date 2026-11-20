@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
 # SPDX-FileCopyrightText: 2026 Auto Crop contributors
 
+# FROZEN (decision B23): Linux is not released while the app is finished on Windows; this workflow is kept
+# working but is only run by hand.
+
 # The Linux x86_64 release: ONE executable file, `auto-crop-linux-x86_64` (decision B22), built on
 # `ubuntu-22.04` (glibc 2.35, the oldest supported). It is the desktop app (no arguments), the
 # command-line tool (any arguments) and the sandboxed decode worker (`--decode-worker`, started by

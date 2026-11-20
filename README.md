@@ -59,15 +59,13 @@ With no output option `process` **overwrites your files**, after saving a verifi
 
 ## Install
 
-Version 0.0.7 is on the [Releases page](https://github.com/WelFedTed/auto-crop/releases). Each platform is **one stand-alone file**: nothing to unzip or install. Check the download against `SHA256SUMS`.
+Version 0.0.7 is on the [Releases page](https://github.com/WelFedTed/auto-crop/releases). **Windows 10/11 x64 is the only supported platform for now** (macOS and Linux are frozen until the app is otherwise finished, decision B23). The release is **one stand-alone file**: nothing to unzip or install. Check the download against `SHA256SUMS`.
 
 - **Windows 10/11 x64:** download `auto-crop.exe` and run it. It needs the Microsoft Edge WebView2 runtime (part of Windows 11 and current Windows 10).
-- **macOS:** download `auto-crop-macos-arm64` (Apple silicon) or `auto-crop-macos-x86_64` (Intel, best-effort). It is ad-hoc signed and not notarised, so clear the quarantine flag once and make it executable: `xattr -d com.apple.quarantine auto-crop-macos-arm64 && chmod +x auto-crop-macos-arm64`, then run `./auto-crop-macos-arm64`.
-- **Linux x86_64:** download `auto-crop-linux-x86_64`, `chmod +x` it and run it. WebKitGTK 4.1 and GTK 3 come from your distribution (`libwebkit2gtk-4.1-0 libgtk-3-0` on Debian and Ubuntu).
 
-The same file is the app (run it with no arguments), the command-line tool (run it with arguments, for example `auto-crop process --help`; see [docs/cli.md](docs/cli.md)) and the sandboxed decoder helper (the app starts itself for it). HEIC, HEIF and AVIF decoding is built in. On Windows, run it from `cmd` as `start /wait auto-crop.exe process ...` so the prompt waits for it. The macOS and Linux builds were smoke-tested on CI runners only and have not yet run on a real desktop. `auto-crop doctor` prints the sandbox level. How the file is built, how to rebuild it yourself and what is not verified: [docs/packaging.md](docs/packaging.md). These are early builds: see [CHANGELOG.md](CHANGELOG.md) for what they do and do not do. Planned: a Windows installer, then rpm and Flatpak for Linux.
+The same file is the app (run it with no arguments), the command-line tool (run it with arguments, for example `auto-crop process --help`; see [docs/cli.md](docs/cli.md)) and the sandboxed decoder helper (the app starts itself for it). HEIC, HEIF and AVIF decoding is built in. Run it from `cmd` as `start /wait auto-crop.exe process ...` so the prompt waits for it. `auto-crop doctor` prints the sandbox level. How the file is built, how to rebuild it yourself and what is not verified: [docs/packaging.md](docs/packaging.md). These are early builds: see [CHANGELOG.md](CHANGELOG.md) for what they do and do not do. The macOS and Linux code still builds in CI, but no macOS or Linux files are released.
 
-Early builds will not be code-signed (the project has a $0 budget), so Windows SmartScreen and macOS Gatekeeper will show warnings. Step-by-step instructions and checksums will accompany every release.
+Early builds will not be code-signed (the project has a $0 budget), so Windows SmartScreen will show a warning. Step-by-step instructions and checksums will accompany every release.
 
 ## Privacy
 

@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.0.7 (2026-11-20), Windows, macOS and Linux builds
+## 0.0.7 (2026-11-20), Windows build
 
 A seventh early build. It is still **not** the CLI-only v0.1.0 of [ROADMAP.md](ROADMAP.md) milestone M2, the
 accuracy gates have not been measured on a proper real-photo set, and the confidence score is an uncalibrated
@@ -8,9 +8,8 @@ heuristic. Do not use it on irreplaceable files without a copy.
 
 ### What changed
 
-- **One stand-alone file per platform.** `auto-crop.exe` (Windows), `auto-crop-macos-arm64`,
-  `auto-crop-macos-x86_64` and `auto-crop-linux-x86_64` replace the zip, DMG, AppImage, deb and tar.gz of
-  earlier releases. The file is the desktop app (no arguments), the command-line tool (any arguments) and the
+- **One stand-alone file.** `auto-crop.exe` replaces the zip of earlier releases (the macOS and Linux
+  packages are frozen for now and have no files in this release: decision B23, Windows first). The file is the desktop app (no arguments), the command-line tool (any arguments) and the
   sandboxed decode worker (the app starts itself with `--decode-worker`). libheif, libde265 and dav1d are linked
   into it, so HEIC, HEIF and AVIF need no extra DLLs or plugin folder. This amends decision B12 (recorded as B22
   in [the decision log](docs/plan/00-decision-log.md)): the LGPL libraries are no longer separate shared
@@ -23,13 +22,11 @@ heuristic. Do not use it on irreplaceable files without a copy.
 
 ### Packages and checksums
 
-`auto-crop.exe`, `auto-crop-macos-arm64`, `auto-crop-macos-x86_64`, `auto-crop-linux-x86_64`, `THIRD_PARTY_NOTICES.md`
-and `SHA256SUMS`. Check every download against `SHA256SUMS`.
+`auto-crop.exe`, `THIRD_PARTY_NOTICES.md` and `SHA256SUMS`. Check the download against `SHA256SUMS`.
 
 ### Known limits
 
-- Built in GitHub Actions, **unsigned**, with no build attestation or SBOM. The macOS and Linux files were
-  smoke-tested on CI runners only. The macOS file is a bare executable (no app bundle, no Dock icon of its own).
+- Built in GitHub Actions, **unsigned**, with no build attestation or SBOM.
 - The sandboxed worker is the application's own executable; on Windows it runs from a staged copy under
   `%LOCALAPPDATA%\AutoCrop\worker-stage`.
 - Real touch input, screen readers, the native file dialog and drag-and-drop were not tested.

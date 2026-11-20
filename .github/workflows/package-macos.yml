@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
 # SPDX-FileCopyrightText: 2026 Auto Crop contributors
 
+# FROZEN (decision B23): macOS is not released while the app is finished on Windows; this workflow is kept
+# working but is only run by hand.
+
 # The macOS release: ONE executable file per architecture, `auto-crop-macos-arm64` (Apple silicon,
 # `macos-latest`) and, best-effort, `auto-crop-macos-x86_64` (Intel, `macos-26-intel`) (decision
 # B22). The file is the desktop app (no arguments), the command-line tool (any arguments) and the

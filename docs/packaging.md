@@ -2,6 +2,8 @@
 
 Status: since decision **B22** (2026-11-19) every release is **one file per platform**, not a zip, installer or app bundle. Nothing is signed or notarised (B15: no paid signing, no Apple account). Decisions: B9 (Windows first, CI on all three OSes), B12 as amended by B22 (the decoders are linked in), ADR-0004, ADR-0005, ADR-0009, ADR-0013. The HEIC details are in [testing/heif-native.md](testing/heif-native.md).
 
+> **macOS and Linux are frozen (decision B23, 2026-11-19).** Only the Windows file is released and looked after. `package-macos.yml` and `package-linux.yml` still work (both last built and passed their smoke tests on 2026-11-20, Apple silicon and Linux; Intel macOS was best-effort and its last run failed only on a missing ad-hoc signature, fixed since) and stay as manual workflows; nothing is released from them until the freeze ends. The sections about macOS and Linux below describe how those workflows work, not something that ships.
+
 ## What a release contains
 
 | OS | Workflow | Runner | File (release asset) |
