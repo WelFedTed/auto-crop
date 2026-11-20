@@ -316,6 +316,12 @@ fn build_meson(
     // `--vsenv` activates the Visual Studio environment regardless.
     if cfg!(windows) {
         cfg.arg("--vsenv");
+        // dav1d 1.5.4's `include/compat/msvc/stdatomic.h` tests `defined(__clang__) &&
+        // __has_include_next(<stdatomic.h>)`; MSVC 19.52 (Visual Studio 2026 18.x, runner image of
+        // 2026-11-16 and later) no longer short-circuits the unknown macro and stops with C7780.
+        // A function-like definition that is always 0 restores the old behaviour (the header's
+        // own atomics are used, as with every earlier MSVC).
+        cfg.arg("-Dc_args=/D__has_include_next(x)=0");
     }
     cfg.args(&lib.flags);
     if static_build {
