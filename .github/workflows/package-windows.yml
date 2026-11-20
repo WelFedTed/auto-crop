@@ -109,7 +109,8 @@ jobs:
           foreach ($s in 'AUTOCROP_ESCAPE', 'AUTOCROP-FAULT:') { if ($bytes.Contains($s)) { throw "the executable contains $s" } }
           Copy-Item THIRD_PARTY_NOTICES.md -Destination (Join-Path $dist 'THIRD_PARTY_NOTICES.md')
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
-          "$hash  auto-crop.exe" | Set-Content -Path (Join-Path $dist "SHA256SUMS-windows-x64-$ver.txt") -Encoding ascii
+          # LF line ends (sha256sum -c rejects a CRLF file): no Set-Content.
+          [System.IO.File]::WriteAllText((Join-Path $dist "SHA256SUMS-windows-x64-$ver.txt"), "$hash  auto-crop.exe`n")
           Get-ChildItem $dist | Select-Object Name, Length
           "ver=$ver" >> $env:GITHUB_OUTPUT
           "exe=$exe" >> $env:GITHUB_OUTPUT
